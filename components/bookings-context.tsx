@@ -1,11 +1,20 @@
 "use client";
 
-// Client-side bookings state. Mirrors saved-context.tsx exactly. Each
-// booking is recorded when /booking/[slug]/confirmed renders and shows
-// up on /saved under "Coming up".
+// Bookings state. Same dual-mode pattern as saved-context.tsx:
+//   • Anonymous — localStorage `fl.bookings.v1` (full StoredBooking
+//     objects so display labels survive a refresh).
+//   • Signed in — public.bookings via the browser Supabase client.
+//     The DB stores the canonical Booking shape (no display labels);
+//     we JOIN venues and recompute slot/date labels at read time.
 //
-// Persists to localStorage under "fl.bookings.v1". Idempotent on id so
-// navigating back to the confirmation URL never duplicates a booking.
+// On first mount as signed-in, any leftover local bookings get
+// migrated (slug→uuid resolved against the venues table), then
+// localStorage is cleared. Migration is FK-safe (rows with unknown
+// slugs are dropped) and idempotent (id is the booking ref, so
+// re-running is safe under upsert).
+//
+// State stays as `StoredBooking[]` in memory so /saved's "Coming up"
+// section doesn't care whether the data came from localStorage or DB.
 
 import {
   createContext,
@@ -13,16 +22,17 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { createClient } from "@/lib/supabase/client";
 import type { Booking } from "@/lib/types";
 
 const STORAGE_KEY = "fl.bookings.v1";
 
-// Local-storage payload extends the canonical Booking with two display
-// caches (dateLabel, slotLabel). When Supabase ships, these become
-// computed from `startsAt` + locale at render time; until then the
-// confirmation page captures them at booking time.
+// Local-storage payload extends the canonical Booking with display
+// caches (dateLabel, slotLabel, venueSlug). The DB row has no display
+// caches — slotLabel comes from the venue.next_slot_label join.
 export type StoredBooking = Booking & {
   dateLabel: string;
   slotLabel: string;
@@ -39,52 +49,226 @@ type BookingsContextValue = {
 
 const BookingsContext = createContext<BookingsContextValue | null>(null);
 
-export function BookingsProvider({ children }: { children: React.ReactNode }) {
+function deriveDateLabel(startsAt: string): string {
+  const d = new Date(startsAt);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dayDiff = Math.round(
+    (new Date(d.toDateString()).getTime() - today.getTime()) / 86_400_000,
+  );
+  if (dayDiff === 0) return "Today";
+  if (dayDiff === 1) return "Tomorrow";
+  if (dayDiff > 1 && dayDiff < 7)
+    return d.toLocaleDateString("en-GB", { weekday: "long" });
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+export function BookingsProvider({
+  children,
+  authUserId,
+}: {
+  children: React.ReactNode;
+  authUserId: string | null;
+}) {
   const [bookings, setBookings] = useState<StoredBooking[]>([]);
+  const slugToUuidRef = useRef<Map<string, string>>(new Map());
 
+  // ── Hydrate (and migrate if newly signed in) ────────────────────────
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const arr = JSON.parse(raw) as StoredBooking[];
-      if (!Array.isArray(arr)) return;
-      // Merge, don't replace. A child component (e.g. BookingRecorder on
-      // /booking/[slug]/confirmed) can call addBooking from its own mount
-      // effect, which runs BEFORE this hydrate effect (React fires child
-      // effects before parent effects). A naive setBookings(arr) here
-      // would discard that just-added booking. We dedupe by id (current
-      // session wins on conflict) and resort newest-first by createdAt.
-      setBookings((prev) => {
-        const map = new Map<string, StoredBooking>();
-        for (const b of arr) map.set(b.id, b);
-        for (const b of prev) map.set(b.id, b);
-        return [...map.values()].sort((a, b) =>
-          b.createdAt.localeCompare(a.createdAt),
-        );
-      });
-    } catch {
-      // localStorage unavailable or corrupted, keep empty seed.
+    let cancelled = false;
+
+    if (!authUserId) {
+      // Anonymous: hydrate from localStorage, merge with current state
+      // (matches the safe-merge pattern from Phase 1 — a child-mount
+      // addBooking would otherwise be overwritten).
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const arr = JSON.parse(raw) as StoredBooking[];
+        if (!Array.isArray(arr)) return;
+        setBookings((prev) => {
+          const map = new Map<string, StoredBooking>();
+          for (const b of arr) map.set(b.id, b);
+          for (const b of prev) map.set(b.id, b);
+          return [...map.values()].sort((a, b) =>
+            b.createdAt.localeCompare(a.createdAt),
+          );
+        });
+      } catch {
+        // localStorage unavailable
+      }
+      return;
     }
-  }, []);
 
+    (async () => {
+      const supabase = createClient();
+
+      // 1. slug → uuid map (used for migration + future writes)
+      const { data: venues, error: venuesErr } = await supabase
+        .from("venues")
+        .select("id,slug,next_slot_label");
+      if (cancelled) return;
+      if (venuesErr) {
+        console.error("[bookings] venues map failed:", venuesErr);
+        return;
+      }
+      const slugMap = new Map<string, string>();
+      const slotLabelMap = new Map<string, string>();
+      for (const v of venues ?? []) {
+        const venue = v as {
+          id: string;
+          slug: string;
+          next_slot_label: string;
+        };
+        slugMap.set(venue.slug, venue.id);
+        slotLabelMap.set(venue.id, venue.next_slot_label);
+      }
+      slugToUuidRef.current = slugMap;
+
+      // 2. Migrate localStorage → DB
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const localBookings = JSON.parse(raw) as StoredBooking[];
+          if (Array.isArray(localBookings) && localBookings.length > 0) {
+            const rows = localBookings
+              .filter((b) => slugMap.has(b.venueSlug))
+              .map((b) => ({
+                id: b.id,
+                user_id: authUserId,
+                venue_id: slugMap.get(b.venueSlug)!,
+                party_size: b.partySize,
+                starts_at: b.startsAt,
+                status: b.status,
+                notes: b.notes,
+              }));
+            if (rows.length > 0) {
+              const { error: migrateErr } = await supabase
+                .from("bookings")
+                .upsert(rows, { onConflict: "id" });
+              if (migrateErr) {
+                console.error("[bookings] migration failed:", migrateErr);
+                return;
+              }
+            }
+            window.localStorage.removeItem(STORAGE_KEY);
+          }
+        }
+      } catch (e) {
+        console.error("[bookings] migration step error:", e);
+      }
+      if (cancelled) return;
+
+      // 3. Authoritative read with venue join
+      const { data: rows, error: readErr } = await supabase
+        .from("bookings")
+        .select(
+          "id,user_id,venue_id,party_size,starts_at,status,notes,created_at,venues(slug,next_slot_label)",
+        )
+        .eq("user_id", authUserId)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      if (readErr) {
+        console.error("[bookings] read failed:", readErr);
+        return;
+      }
+      // Supabase types the FK join as `venues: { ... }[]` because
+      // it doesn't know it's a single FK; runtime gives a single
+      // object. Cast through unknown to align.
+      const mapped: StoredBooking[] = (rows ?? []).map((r) => {
+        const row = r as unknown as {
+          id: string;
+          user_id: string;
+          venue_id: string;
+          party_size: number;
+          starts_at: string;
+          status: string;
+          notes: string | null;
+          created_at: string;
+          venues: { slug: string; next_slot_label: string } | null;
+        };
+        return {
+          id: row.id,
+          userId: row.user_id,
+          venueId: row.venue_id,
+          partySize: row.party_size,
+          startsAt: row.starts_at,
+          status: row.status as Booking["status"],
+          notes: row.notes,
+          createdAt: row.created_at,
+          venueSlug: row.venues?.slug ?? "",
+          dateLabel: deriveDateLabel(row.starts_at),
+          slotLabel:
+            row.venues?.next_slot_label ?? slotLabelMap.get(row.venue_id) ?? "",
+        };
+      });
+      setBookings(mapped);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUserId]);
+
+  // ── Persist (anon only) ─────────────────────────────────────────────
   useEffect(() => {
+    if (authUserId) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(bookings));
     } catch {
       // ignore quota / privacy mode
     }
-  }, [bookings]);
+  }, [bookings, authUserId]);
 
-  const addBooking = useCallback((b: StoredBooking) => {
-    setBookings((prev) => {
-      if (prev.some((x) => x.id === b.id)) return prev;
-      return [b, ...prev];
-    });
-  }, []);
+  const addBooking = useCallback(
+    (b: StoredBooking) => {
+      setBookings((prev) => {
+        if (prev.some((x) => x.id === b.id)) return prev;
+        return [b, ...prev];
+      });
 
-  const removeBooking = useCallback((id: string) => {
-    setBookings((prev) => prev.filter((b) => b.id !== id));
-  }, []);
+      if (authUserId) {
+        const venueId = slugToUuidRef.current.get(b.venueSlug) ?? b.venueId;
+        const supabase = createClient();
+        void supabase
+          .from("bookings")
+          .upsert(
+            {
+              id: b.id,
+              user_id: authUserId,
+              venue_id: venueId,
+              party_size: b.partySize,
+              starts_at: b.startsAt,
+              status: b.status,
+              notes: b.notes,
+            },
+            { onConflict: "id" },
+          )
+          .then(({ error }) => {
+            if (error) console.error("[bookings] insert failed:", error);
+          });
+      }
+    },
+    [authUserId],
+  );
+
+  const removeBooking = useCallback(
+    (id: string) => {
+      setBookings((prev) => prev.filter((b) => b.id !== id));
+      if (authUserId) {
+        const supabase = createClient();
+        void supabase
+          .from("bookings")
+          .delete()
+          .eq("user_id", authUserId)
+          .eq("id", id)
+          .then(({ error }) => {
+            if (error) console.error("[bookings] delete failed:", error);
+          });
+      }
+    },
+    [authUserId],
+  );
 
   const value = useMemo<BookingsContextValue>(
     () => ({
