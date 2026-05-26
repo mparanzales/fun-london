@@ -109,13 +109,25 @@ If a page should hide the bottom nav, **put it outside `(main)`**.
 
 ## Adding a new venue
 
-1. Open `lib/mock-data.ts`, find `MOCK_VENUES`.
-2. Copy an existing entry and update every field. **All Venue fields
-   are required** — see `lib/types.ts:Venue` for the shape.
-3. Use a fresh Unsplash photo at `images.unsplash.com` (configured in
-   `next.config.js`).
-4. `slug` must be URL-safe and unique.
-5. Run `pnpm check` — TypeScript will flag missing fields.
+Venues live in Supabase (`public.venues`), not in code. Two paths:
+
+**One-off, via Dashboard:**
+1. Open the Supabase Dashboard → Table Editor → `venues`.
+2. Click **Insert row**, fill every field. All non-nullable columns
+   are required — see `supabase/schema.sql` for the full list.
+3. `slug` must be URL-safe and unique; `img_url` should point at
+   `images.unsplash.com` (configured in `next.config.js`).
+4. The app picks it up on the next page load — no deploy needed.
+
+**Batch / version-controlled, via seed:**
+1. Edit `supabase/seed.sql` — add a `(...)` row to the `insert into
+   public.venues ...` block.
+2. Paste the file into the Supabase SQL Editor → Run.
+3. Commit the updated `seed.sql` so the seed stays the canonical
+   source of truth for the demo dataset.
+
+Avoid putting venues back into `lib/mock-data.ts` — the catalog is
+DB-only since Phase 1.
 
 ---
 
