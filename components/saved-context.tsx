@@ -1,13 +1,21 @@
 "use client";
 
-// Client-side saved-set state. The set holds venue *slugs* (e.g.
-// "padella"), not venue ids — slugs are stable across mock-data,
-// Supabase reseeds, and the future Phase 3 DB migration. The schema's
-// saved_venues.venue_id FK is uuid, but the Phase 3 sign-in migration
-// will resolve slug → uuid at the data layer.
+// Saved-set state. The set holds venue *slugs* — slugs are stable
+// across mock-data, Supabase reseeds, and the Phase 3 sign-in
+// migration. The schema's saved_venues.venue_id FK is uuid; we resolve
+// slug → uuid via a tiny client-side cache populated on mount.
 //
-// Seeds from MOCK_SAVED_IDS on first mount, then persists to
-// localStorage so a refresh keeps the user's saves.
+// Two modes, picked from `authUserId` prop:
+//   • Anonymous (authUserId === null) — hydrate from / persist to
+//     localStorage `fl.saved.v1`. Same behaviour as Phase 1/2.
+//   • Signed in (authUserId is a uuid) — hydrate from / persist to
+//     public.saved_venues via the browser Supabase client. On first
+//     mount as signed-in, any leftover localStorage entries get
+//     migrated into the DB (slug→uuid resolved, FK-safe), then the
+//     local store is cleared.
+//
+// State is always Set<slug> in memory, so consumers (venue-card,
+// venue-detail, saved-list) don't care about the backing store.
 
 import {
   createContext,
@@ -15,8 +23,10 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { MOCK_SAVED_IDS } from "@/lib/mock-data";
 
 const STORAGE_KEY = "fl.saved.v1";
@@ -30,26 +40,116 @@ type SavedContextValue = {
 
 const SavedContext = createContext<SavedContextValue | null>(null);
 
-export function SavedProvider({ children }: { children: React.ReactNode }) {
+export function SavedProvider({
+  children,
+  authUserId,
+}: {
+  children: React.ReactNode;
+  authUserId: string | null;
+}) {
   const [savedSet, setSavedSet] = useState<Set<string>>(
     () => new Set(MOCK_SAVED_IDS),
   );
+  // slug → venue.id (uuid). Populated when authed; empty when anon.
+  const slugToUuidRef = useRef<Map<string, string>>(new Map());
 
-  // Hydrate from localStorage on mount.
+  // ── Hydrate (and migrate if we're newly signed in) ──────────────────
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const arr = JSON.parse(raw) as string[];
-        if (Array.isArray(arr)) setSavedSet(new Set(arr));
+    let cancelled = false;
+
+    if (!authUserId) {
+      // Anonymous path
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const arr = JSON.parse(raw) as string[];
+          if (Array.isArray(arr)) setSavedSet(new Set(arr));
+        }
+      } catch {
+        // localStorage unavailable
       }
-    } catch {
-      // localStorage unavailable or corrupted — keep seed.
+      return;
     }
-  }, []);
 
-  // Persist on every change.
+    // Signed-in path: fetch venues map, migrate local→DB if needed,
+    // then hydrate from DB. All wrapped in try/catch so a transient
+    // network blip doesn't wipe state.
+    (async () => {
+      const supabase = createClient();
+
+      // 1. slug → uuid map
+      const { data: venues, error: venuesErr } = await supabase
+        .from("venues")
+        .select("id,slug");
+      if (cancelled) return;
+      if (venuesErr) {
+        console.error("[saved] venues map failed:", venuesErr);
+        return;
+      }
+      const map = new Map<string, string>();
+      for (const v of venues ?? []) map.set(v.slug as string, v.id as string);
+      slugToUuidRef.current = map;
+
+      // 2. Migrate localStorage → DB (one-time, FK-safe)
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const localSlugs = JSON.parse(raw) as string[];
+          if (Array.isArray(localSlugs) && localSlugs.length > 0) {
+            const toInsert = localSlugs
+              .filter((slug) => map.has(slug))
+              .map((slug) => ({
+                user_id: authUserId,
+                venue_id: map.get(slug)!,
+              }));
+            if (toInsert.length > 0) {
+              const { error: migrateErr } = await supabase
+                .from("saved_venues")
+                .upsert(toInsert, { onConflict: "user_id,venue_id" });
+              if (migrateErr) {
+                console.error("[saved] migration failed:", migrateErr);
+                // Leave local data in place; we'll retry on next mount.
+                return;
+              }
+            }
+            // Clear local only after successful migration (or no-op).
+            window.localStorage.removeItem(STORAGE_KEY);
+          }
+        }
+      } catch (e) {
+        console.error("[saved] migration step error:", e);
+      }
+      if (cancelled) return;
+
+      // 3. Authoritative read from DB
+      const { data: rows, error: readErr } = await supabase
+        .from("saved_venues")
+        .select("venues(slug)")
+        .eq("user_id", authUserId);
+      if (cancelled) return;
+      if (readErr) {
+        console.error("[saved] read failed:", readErr);
+        return;
+      }
+      // Supabase types FK joins as arrays even when it's a single FK;
+      // runtime returns a single object. Cast via unknown.
+      const slugs: string[] = [];
+      for (const row of rows ?? []) {
+        const v = (row as unknown as { venues: { slug: string } | null })
+          .venues;
+        if (v?.slug) slugs.push(v.slug);
+      }
+      setSavedSet(new Set(slugs));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUserId]);
+
+  // ── Persist (anon only — authed writes happen in toggleSaved) ───────
   useEffect(() => {
+    if (authUserId) return;
     try {
       window.localStorage.setItem(
         STORAGE_KEY,
@@ -58,16 +158,51 @@ export function SavedProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore quota / privacy mode
     }
-  }, [savedSet]);
+  }, [savedSet, authUserId]);
 
-  const toggleSaved = useCallback((venueSlug: string) => {
-    setSavedSet((prev) => {
-      const next = new Set(prev);
-      if (next.has(venueSlug)) next.delete(venueSlug);
-      else next.add(venueSlug);
-      return next;
-    });
-  }, []);
+  const toggleSaved = useCallback(
+    (venueSlug: string) => {
+      setSavedSet((prev) => {
+        const next = new Set(prev);
+        const wasSaved = next.has(venueSlug);
+        if (wasSaved) next.delete(venueSlug);
+        else next.add(venueSlug);
+
+        if (authUserId) {
+          // Fire-and-forget DB write. UI is optimistic; an error logs
+          // to console rather than reverting state, on the assumption
+          // that the read on next mount is the source of truth.
+          const venueId = slugToUuidRef.current.get(venueSlug);
+          if (venueId) {
+            const supabase = createClient();
+            if (wasSaved) {
+              void supabase
+                .from("saved_venues")
+                .delete()
+                .eq("user_id", authUserId)
+                .eq("venue_id", venueId)
+                .then(({ error }) => {
+                  if (error) console.error("[saved] delete failed:", error);
+                });
+            } else {
+              void supabase
+                .from("saved_venues")
+                .upsert(
+                  { user_id: authUserId, venue_id: venueId },
+                  { onConflict: "user_id,venue_id" },
+                )
+                .then(({ error }) => {
+                  if (error) console.error("[saved] insert failed:", error);
+                });
+            }
+          }
+        }
+
+        return next;
+      });
+    },
+    [authUserId],
+  );
 
   const value = useMemo<SavedContextValue>(
     () => ({
