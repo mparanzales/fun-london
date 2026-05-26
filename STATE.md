@@ -1,9 +1,10 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-26
 **Branch state:** post-audit cleanup. Codebase is team-ready: strict
 TypeScript, clean ESLint, Prettier-enforced, all inline styles migrated
 to Tailwind, dead code removed, schema aligned with current types.
+Now pushed to GitHub and deployed to Vercel (see Deployment).
 
 This is a point-in-time snapshot. For contribution conventions see
 [`CONTRIBUTING.md`](./CONTRIBUTING.md). For durable stack info see
@@ -25,6 +26,15 @@ Before pushing, run **`pnpm check`** — runs typecheck + lint +
 format:check in one shot.
 
 No `.env.local` required — Supabase middleware is in bypass mode.
+
+---
+
+## Deployment
+
+- **GitHub:** [`mparanzales/fun-london`](https://github.com/mparanzales/fun-london) — branch `main`, in sync with `origin/main`.
+- **Vercel (Production):** [`fun-london-dsizviszo-mparanzales-projects.vercel.app`](https://fun-london-dsizviszo-mparanzales-projects.vercel.app) — currently returns **HTTP 401** because **Vercel Deployment Protection** is enabled (the site is live, just gated behind Vercel SSO). To open it publicly, disable or scope-down protection in Vercel → Settings → Deployment Protection.
+- **CI:** `.github/workflows/` gates merges on `pnpm check` (typecheck + lint + format:check).
+- **`.env.local`:** not configured on Vercel yet — fine while Supabase is still bypassed; required when item 1 (Supabase wiring) ships.
 
 ---
 
@@ -130,9 +140,12 @@ In rough priority order:
 4. **Stripe Connect for partners** — partner-side payments / booking
    commissions. Partner Dashboard prototype lives in `project/Partner
    Dashboard.html` (static HTML, not part of this Next.js app yet).
-5. **Vercel deployment** — `vercel` CLI is installed at
-   `~/.local/bin/vercel`. Pre-deploy gates pass: `pnpm check` clean.
-   Requires interactive `vercel login` from the user.
+5. **Vercel deployment** — ✅ done. Live at
+   `fun-london-dsizviszo-mparanzales-projects.vercel.app`. Leftover:
+   toggle off **Deployment Protection** if/when the site should be
+   publicly browsable (currently returns 401 to anyone not signed into
+   Vercel SSO). Also: add `NEXT_PUBLIC_SUPABASE_*` env vars in Vercel
+   project settings when item 1 ships.
 6. **A Booking context (`useBookings()`)** mirroring `useSaved()` — so
    the confirmation page can write the booking and `/saved` can surface
    it alongside saved venues.
