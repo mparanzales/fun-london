@@ -29,7 +29,7 @@ export default function EventsPage() {
   return (
     <div className="pt-4 pb-6">
       <header className="px-5 pb-3">
-        <h1 className="text-[26px] font-extrabold tracking-tight text-primary">
+        <h1 className="text-[28px] font-extrabold tracking-tight text-primary">
           What&apos;s On
         </h1>
         <div className="text-xs text-muted-fg mt-0.5">Tuesday 12 May</div>
@@ -79,7 +79,7 @@ export default function EventsPage() {
         ))}
         {filtered.length === 0 && (
           <div className="p-5 text-center text-sm text-muted-fg">
-            Nothing matches that filter — try another.
+            Nothing matches that filter. Try another.
           </div>
         )}
       </div>

@@ -11,7 +11,7 @@ export default function SavedPage() {
   return (
     <div className="pt-4 pb-6">
       <header className="px-5 pb-3.5">
-        <h1 className="text-[26px] font-extrabold tracking-tight text-primary">
+        <h1 className="text-[28px] font-extrabold tracking-tight text-primary">
           Your spots
         </h1>
         <div className="text-xs text-muted-fg mt-0.5">

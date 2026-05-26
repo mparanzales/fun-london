@@ -115,7 +115,7 @@ export function Lobby({ onStart }: { onStart: () => void }) {
         type="button"
         onClick={onStart}
         disabled={joined.length < 2}
-        className="mt-6 mb-4 w-full h-12 rounded-2xl bg-primary text-primary-fg text-sm font-extrabold disabled:opacity-50 disabled:cursor-not-allowed"
+        className="mt-6 mb-4 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-sm font-extrabold disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Start swiping ({joined.length})
       </button>

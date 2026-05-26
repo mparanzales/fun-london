@@ -40,7 +40,7 @@ export function Result() {
         </div>
         <div className="text-[11.5px] text-fg mt-1 leading-snug">
           All of you wanted Drinks. Maya and Tom voted Lively, you and
-          Mysterious Chill — we landed on a Lively buzz with ££££ leaning
+          Mysterious went Chill. We landed on a Lively buzz with ££££ leaning
           Mid-vibey.
         </div>
       </div>

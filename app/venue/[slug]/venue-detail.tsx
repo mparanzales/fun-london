@@ -174,7 +174,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             role="status"
             className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium"
           >
-            No booking needed — walk in
+            No booking needed. Just walk in.
           </div>
         )}
       </div>
