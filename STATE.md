@@ -1,8 +1,8 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-26 (post Phase 1 + 2 + 3, post cleanup PR)
-**Branch state:** Supabase migration complete (Phases 1 + 2 + 3 merged
-to `main` and live in production).
+**Last updated:** 2026-05-26 (post Phase 3.5)
+**Branch state:** Supabase migration complete (Phases 1 + 2 + 3 + 3.5
+merged to `main` and live in production).
 
 • **Phase 1** — catalog (venues + events) reads from Supabase via
   Server Components in `lib/queries.ts`. `lib/mock-data.ts` no longer
@@ -14,13 +14,20 @@ to `main` and live in production).
   localStorage when anonymous, `public.saved_venues` /
   `public.bookings` when signed in. One-time slug→uuid migration
   on first sign-in.
+• **Phase 3.5** — profile `display_name` + `preferences` now come
+  from `public.profiles` via `fetchProfile(userId)`. `/profile` and
+  `/explore` greeting read from the DB row (email-prefix fallback
+  when `display_name` is null). `/onboarding` upserts preferences +
+  flips `onboarded = true` when signed in. One-time
+  localStorage→DB migration of onboarding prefs on first sign-in via
+  `<ProfilePrefsMigration>` in the root layout.
 
-What's still NOT in Supabase: profile `display_name` + `preferences`
-(reads from `MOCK_USER` as fallback), and the Plan Together
-participants (static demo data). Both deliberately deferred.
+What's still NOT in Supabase: the Plan Together participants (static
+demo data, no DB story yet).
 
-Codebase: strict TS, clean ESLint, Prettier-enforced. `lib/mock-data.ts`
-trimmed from 502 → 70 LOC (only the 5 still-imported exports remain).
+Codebase: strict TS, clean ESLint, Prettier-enforced. `MOCK_USER` and
+`getCurrentUser()` fully retired — `lib/mock-data.ts` is down to two
+exports (`MOCK_SAVED_IDS` + `MOCK_PARTICIPANTS`).
 
 This is a point-in-time snapshot. For contribution conventions see
 [`CONTRIBUTING.md`](./CONTRIBUTING.md). For durable stack info see
@@ -121,7 +128,7 @@ One font family across the entire consumer app.
 | Saved set | anon: localStorage `fl.saved.v1` · authed: `public.saved_venues` | `components/saved-context.tsx → useSaved()` |
 | Bookings | anon: localStorage `fl.bookings.v1` · authed: `public.bookings` | `components/bookings-context.tsx → useBookings()` |
 | Auth user | Supabase Auth cookies (HTTPOnly) | `lib/auth.ts → getAuthUser()` |
-| Profile display name + preferences | `MOCK_USER` fallback (Phase 3.5: read from `public.profiles`) | `lib/mock-data.ts → getCurrentUser()` |
+| Profile display name + preferences | Supabase `public.profiles` | `lib/queries.ts → fetchProfile()` (Server Component) |
 | Plan Together participants (4) | `MOCK_PARTICIPANTS` (static demo data, no DB story) | `lib/mock-data.ts → getParticipants()` |
 
 **Slug-based references:** `useSaved` keys by `venue.slug` (e.g.
@@ -183,25 +190,29 @@ prototype's overlap; not a bug.
 
 In rough priority order:
 
-1. **Phase 3.5 — profile to Supabase.** `/profile` reads `display_name`
-   and `preferences` from `public.profiles` instead of `MOCK_USER`.
-   `/onboarding` writes preferences to the profile row and flips
-   `onboarded = true` on completion. Small follow-up to fully retire
-   `MOCK_USER` (the last piece of mock-data still wired into the UI).
+1. **Custom SMTP for auth emails** — wire Resend (or similar) so the
+   ~3-4/hour rate limit on Supabase's built-in email service stops
+   being a launch blocker.
 2. **Real venue data** — replace the 11 hand-seeded venues with
    curated London venues + image rights cleared. Add directly via the
    Supabase Dashboard (Table Editor → `venues`) or update
    `supabase/seed.sql` and re-run.
-3. **Custom SMTP for auth emails** — wire Resend (or similar) so the
-   ~3-4/hour rate limit on Supabase's built-in email service stops
-   being a launch blocker.
-4. **Vercel Deployment Protection off** — when the site should be
+3. **Vercel Deployment Protection off** — when the site should be
    publicly browsable, toggle off in Vercel → Settings.
-5. **Stripe Connect for partners** — partner-side payments / booking
+4. **Edit display name + preferences UI** — `/profile` shows the email
+   prefix when `display_name` is null and "Not set" for empty prefs,
+   but there's no UI yet to edit either. Small follow-up: an Edit
+   screen that writes back to `public.profiles`.
+5. **Splash respects DB onboarded status** — currently `app/page.tsx`
+   routes based on localStorage only. Cross-device sign-in re-prompts
+   onboarding because the new device has no `fl.onboarding.v1`. Make
+   the splash a Server Component that prefers `profile.onboarded` for
+   signed-in users.
+6. **Stripe Connect for partners** — partner-side payments / booking
    commissions. Partner Dashboard prototype lives in
    `project/_design-handoff/Partner Dashboard.html` (static HTML, not
    part of this Next.js app yet).
-6. **PWA manifest** — `app/layout.tsx` references `manifest.json` but
+7. **PWA manifest** — `app/layout.tsx` references `manifest.json` but
    the file doesn't exist; harmless 404 in dev.
 
 ---

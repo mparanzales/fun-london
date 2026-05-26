@@ -103,6 +103,15 @@ export type SavedVenue = {
   createdAt: string;
 };
 
+// Subset of `User` that the consumer app actually reads from
+// `public.profiles`. Phase 3.5 reads these three fields per auth user.
+export type Profile = {
+  id: string;
+  displayName: string | null;
+  preferences: UserPreferences | null;
+  onboarded: boolean;
+};
+
 // ── Plan Together (mock multiplayer) ─────────────────────────────────────
 
 export type Participant = {
