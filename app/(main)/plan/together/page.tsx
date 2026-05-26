@@ -1,5 +1,7 @@
+import { fetchVenues } from "@/lib/queries";
 import { TogetherFlow } from "./together-flow";
 
-export default function PlanTogetherPage() {
-  return <TogetherFlow />;
+export default async function PlanTogetherPage() {
+  const venues = await fetchVenues();
+  return <TogetherFlow venues={venues} />;
 }

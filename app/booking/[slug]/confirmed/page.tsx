@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Check, Calendar, Share2 } from "lucide-react";
-import { getVenueBySlug } from "@/lib/mock-data";
+import { fetchVenueBySlug } from "@/lib/queries";
 import { BookingRecorder } from "./booking-recorder";
 
 // Booking confirmation (Figma frame 3c).
@@ -10,19 +10,21 @@ import { BookingRecorder } from "./booking-recorder";
 // immersive flow like /venue/[slug]. Reachable from the Reserve CTA on
 // the venue detail page.
 //
-// Booking ref format: first 3 chars of venue.id, uppercase, suffixed with
-// "-4912" (the demo number from the original brief). Dishoom → DSH-4912,
-// Padella → PAD-4912, Bao Soho → BAO-4912, etc.
+// Booking ref format: first 3 chars of venue.slug, uppercase, suffixed
+// with "-4912" (the demo number from the original brief).
+// dishoom-shoreditch → DIS-4912, padella → PAD-4912, bao-soho → BAO-4912.
+// We derive from slug (not id) so the ref stays human-readable after
+// the move to uuid PKs in Supabase.
 
-export default function BookingConfirmedPage({
+export default async function BookingConfirmedPage({
   params,
 }: {
   params: { slug: string };
 }) {
-  const venue = getVenueBySlug(params.slug);
+  const venue = await fetchVenueBySlug(params.slug);
   if (!venue) notFound();
 
-  const bookingRef = `${venue.id.slice(0, 3).toUpperCase()}-4912`;
+  const bookingRef = `${venue.slug.slice(0, 3).toUpperCase()}-4912`;
   const partySize = 2;
 
   return (

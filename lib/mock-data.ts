@@ -397,8 +397,13 @@ export const MOCK_USER: User = {
   createdAt: "2024-01-15T10:00:00Z",
 };
 
-// Saved venues for the demo user.
-export const MOCK_SAVED_IDS: string[] = ["dishoom", "borough"];
+// Slugs of venues seeded as "saved" for the demo user. We key by slug
+// (not id) so the reference is stable across mock-data and Supabase —
+// the schema uses uuid PKs that change on every reseed; slugs don't.
+export const MOCK_SAVED_IDS: string[] = [
+  "dishoom-shoreditch",
+  "borough-market",
+];
 
 /**
  * Forward-looking: matches the `saved_venues` Supabase table shape.
