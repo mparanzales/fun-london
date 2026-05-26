@@ -53,7 +53,11 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   ];
 
   return (
-    <div className="min-h-screen bg-bg pb-32">
+    // Mobile-shell constraint matches the (main) route group (max-w-md).
+    // Keeps the visual width consistent when navigating from /explore →
+    // /venue/[slug] → /booking/.../confirmed instead of jumping to full
+    // viewport on desktop.
+    <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
       {/* ── Hero ───────────────────────────────────────────────────── */}
       <div className="relative w-full" style={{ aspectRatio: "4/3" }}>
         <Image
@@ -133,7 +137,9 @@ export function VenueDetail({ venue }: { venue: Venue }) {
 
       {/* ── Sticky CTA bar ────────────────────────────────────────── */}
       <div
-        className="fixed bottom-0 left-0 right-0 bg-bg border-t border-fg/10 px-5 py-4 flex gap-3"
+        // Centered at viewport center, constrained to max-w-md so it
+        // matches the page's mobile shell on desktop.
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-bg border-t border-fg/10 px-5 py-4 flex gap-3"
         style={{
           paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
         }}

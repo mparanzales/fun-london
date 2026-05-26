@@ -25,7 +25,9 @@ export default function BookingConfirmedPage({
   const partySize = 2;
 
   return (
-    <div className="min-h-screen bg-bg pb-32">
+    // Mobile-shell constraint matches the (main) route group (max-w-md).
+    // Keeps visual width consistent across the reservation flow.
+    <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
       {/* Top bar — back returns to the venue detail page */}
       <div className="px-5 pt-4">
         <Link
@@ -102,7 +104,8 @@ export default function BookingConfirmedPage({
 
       {/* Sticky Done CTA — returns to /saved (where the booking would live) */}
       <div
-        className="fixed bottom-0 left-0 right-0 bg-bg border-t border-fg/10 px-5 py-4"
+        // Centered + constrained to match the page's mobile shell.
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-bg border-t border-fg/10 px-5 py-4"
         style={{
           paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
         }}
