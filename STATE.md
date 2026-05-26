@@ -1,10 +1,18 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-26
-**Branch state:** post-audit cleanup. Codebase is team-ready: strict
-TypeScript, clean ESLint, Prettier-enforced, all inline styles migrated
-to Tailwind, dead code removed, schema aligned with current types.
-Now pushed to GitHub and deployed to Vercel (see Deployment).
+**Last updated:** 2026-05-26 (end of day, post Phase 1 + Phase 2)
+**Branch state:** Supabase migration Phases 1 + 2 are merged to `main`
+and live in production.
+
+• **Phase 1** — the catalog (venues + events) reads from Supabase via
+  Server Components. `lib/mock-data.ts` is no longer the source of
+  truth for venues/events; user state (saved + bookings + profile
+  prefs) still lives in localStorage / mock until Phase 3.
+• **Phase 2** — magic-link sign-in is live. Anonymous browsing still
+  works (Auth Optional model); `/profile` branches between anon
+  (Sign in CTA) and authed (existing UI + Sign Out).
+
+Codebase remains team-ready: strict TS, clean ESLint, Prettier-enforced.
 
 This is a point-in-time snapshot. For contribution conventions see
 [`CONTRIBUTING.md`](./CONTRIBUTING.md). For durable stack info see
@@ -25,16 +33,28 @@ Opens at **http://localhost:3000**.
 Before pushing, run **`pnpm check`** — runs typecheck + lint +
 format:check in one shot.
 
-No `.env.local` required — Supabase middleware is in bypass mode.
+**`.env.local` is now required** for the app to load any catalog data.
+Two variables, copied from Supabase → Project Settings → API Keys:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://fxfuzabrivuianfwdopc.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_…
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
+
+The same two `NEXT_PUBLIC_SUPABASE_*` values are set on Vercel for
+Production + Preview environments. `.env.local` is gitignored.
 
 ---
 
 ## Deployment
 
 - **GitHub:** [`mparanzales/fun-london`](https://github.com/mparanzales/fun-london) — branch `main`, in sync with `origin/main`.
-- **Vercel (Production):** [`fun-london-dsizviszo-mparanzales-projects.vercel.app`](https://fun-london-dsizviszo-mparanzales-projects.vercel.app) — currently returns **HTTP 401** because **Vercel Deployment Protection** is enabled (the site is live, just gated behind Vercel SSO). To open it publicly, disable or scope-down protection in Vercel → Settings → Deployment Protection.
-- **CI:** `.github/workflows/` gates merges on `pnpm check` (typecheck + lint + format:check).
-- **`.env.local`:** not configured on Vercel yet — fine while Supabase is still bypassed; required when item 1 (Supabase wiring) ships.
+- **Vercel (Production):** [`fun-london.vercel.app`](https://fun-london.vercel.app) — running on Supabase. **Still gated by Vercel Deployment Protection** (HTTP 401 to anyone not signed into Vercel SSO). Toggle off in Vercel → Settings → Deployment Protection when ready to share publicly.
+- **CI:** `.github/workflows/` gates merges on `pnpm check`.
+- **Vercel env vars:** `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` set for Production + Preview.
+- **Supabase project:** `fun-london` (project id `fxfuzabrivuianfwdopc`), region eu-west-2 (London). Schema + 11-venue / 5-event seed loaded. Auth → Email provider enabled, magic-link redirect URLs configured for `localhost:3000` and `fun-london.vercel.app`.
+- **Email sender:** built-in Supabase SMTP, rate-limited to ~3-4 emails/hour on free tier. Replace with Resend (or similar) before any kind of launch.
 
 ---
 
@@ -84,34 +104,58 @@ One font family across the entire consumer app.
 
 ---
 
-## Mock data caveats
+## Data layer (Phase 1 + 2 shipped)
 
-All UI data is sourced from `lib/mock-data.ts` — the single source of
-truth until Supabase comes online.
+| Source | Lives in | Read via |
+|---|---|---|
+| Venues (11) | Supabase `public.venues` | `lib/queries.ts → fetchVenues / fetchVenueBySlug / fetchVenueById` |
+| Events (5) | Supabase `public.events` | `lib/queries.ts → fetchEvents` |
+| Saved set | localStorage `fl.saved.v1` (slugs) | `components/saved-context.tsx → useSaved()` |
+| Bookings | localStorage `fl.bookings.v1` | `components/bookings-context.tsx → useBookings()` |
+| Auth user | Supabase Auth cookies (HTTPOnly) | `lib/auth.ts → getAuthUser()` |
+| Profile display name + preferences | `MOCK_USER` (auth email fallback when signed in) | `lib/mock-data.ts → getCurrentUser()` — **Phase 3 moves to `public.profiles`** |
+| Plan Together participants (4) | `MOCK_PARTICIPANTS` (static demo data) | `lib/mock-data.ts → getParticipants()` |
 
-- **`MOCK_USER.displayName = "Maria"`** — drives `/explore` greeting and
-  `/profile` h1. Change the constant to re-target the demo persona.
-- **Venue overlap on Explore.** The "For You" filter concatenates every
-  venue + every event. Padella, Dishoom, and Bao all qualify as evening
-  Restaurants and appear in multiple ordered chip filters. Mirrors the
-  prototype's overlap; not a bug.
-- **`MOCK_BOOKINGS` is empty.** The `Booking` type and accessor exist
-  for forward use; partner side / `/booking/[slug]/confirmed` doesn't
-  read from the array yet.
-- **4 hardcoded participants** in Plan Together (You / Maya / Tom / Alex)
-  in `MOCK_PARTICIPANTS`. Mixing step's "X of N voted" and Result's
-  vote attribution are static.
+**Slug-based references:** `useSaved` keys by `venue.slug` (e.g.
+`"padella"`), not `venue.id` (Supabase uuid). Slugs are stable across
+reseeds; uuids are not. Phase 3's sign-in migration resolves slug→uuid
+when moving saved/bookings into `public.saved_venues` / `public.bookings`.
+
+**Mock data not removed yet.** `lib/mock-data.ts` still contains
+`MOCK_VENUES`, `MOCK_EVENTS`, and the old catalog accessors — they're
+no longer imported by anything but kept as a local fallback during
+testing. Will be removed in a cleanup PR after Phase 3.
+
+**Venue overlap on Explore.** The "For You" filter concatenates every
+venue + every event. Padella, Dishoom, and Bao all qualify as evening
+Restaurants and appear in multiple ordered chip filters. Mirrors the
+prototype's overlap; not a bug.
 
 ---
 
+## Auth model — Auth Optional
+
+- **Middleware on.** `middleware.ts` matcher runs on every non-static
+  request. `lib/supabase/middleware.ts` ONLY refreshes the session
+  cookie — it does NOT redirect anonymous users. Hard-gate logic was
+  deliberately removed in Phase 2.
+- **Routes that need a user check themselves.** `/profile` is the only
+  one today; it's a Server Component that calls `getAuthUser()` and
+  renders either an inline Sign In CTA or the existing profile UI.
+- **Sign-in flow:** `/sign-in` page → email input → `signInWithOtp` →
+  magic link in user's inbox → click → `/auth/callback?code=…` →
+  `exchangeCodeForSession` → cookies set → redirect to `?return=` or
+  `/explore`. PKCE flow under @supabase/ssr v0.5.
+- **Sign-out:** `/profile` includes a "Sign out" action row that calls
+  `supabase.auth.signOut()` and `router.refresh()` to drop back to the
+  anonymous view.
+- **First-time users:** the schema's `on_auth_user_created` trigger
+  auto-inserts a row into `public.profiles` with `onboarded=false`.
+  Phase 3 will wire `/onboarding` to flip `onboarded` true + write
+  `preferences`.
+
 ## Known config caveats
 
-- **Middleware is in bypass mode.** `middleware.ts` has `matcher: []` so
-  it never runs. To re-enable auth, restore the matcher pattern and
-  populate `.env.local` (template in `.env.example`).
-- **`lib/supabase/*` files exist but are unreachable at runtime** —
-  reachable only through the dormant middleware. Typecheck clean, never
-  called.
 - **No `public/manifest.json`** despite `app/layout.tsx` referencing
   `manifest: "/manifest.json"` — harmless 404 in dev. PWA manifest is a
   forward-looking item.
@@ -119,6 +163,9 @@ truth until Supabase comes online.
   square) and `app/apple-icon.png` instead. Modern browsers handle this.
 - **`themeColor: "#f0eee9"`** in `app/layout.tsx` is hardcoded to day
   cream. iOS chrome bar won't adapt to night theme. P3 follow-up.
+- **Tailwind spacing scale extended** with `4.5` / `5.5` / `6.5` in
+  `tailwind.config.ts` because the codebase already used those classes
+  (`bottom-4.5`, `pb-5.5`) and they were silently failing.
 
 ---
 
@@ -126,29 +173,29 @@ truth until Supabase comes online.
 
 In rough priority order:
 
-1. **Supabase backend integration** — replace `lib/mock-data.ts`
-   accessors with Supabase queries. Schema lives in `supabase/schema.sql`
-   (aligned with current types as of this audit). Existing accessor
-   signatures are synchronous; **switching to `Promise`-returning
-   accessors will require changes at the call sites** (move data
-   fetching into server components and pass as props).
-2. **Real venue data** — replace the 11 hand-seeded venues with curated
-   London venues + image rights cleared.
-3. **Auth re-enable** — restore `middleware.ts` matcher, populate
-   `.env.local`, and reinstate a sign-in flow (was at `app/(auth)/sign-in/`
-   in v1, removed; not in git history — rebuild from scratch).
-4. **Stripe Connect for partners** — partner-side payments / booking
+1. **Phase 3 — user-scoped data to Supabase.** `useSaved` and
+   `useBookings` become dual-mode: localStorage when anonymous, DB
+   when authed. One-time migration on first sign-in: read existing
+   localStorage entries (slugs), resolve slug→uuid, INSERT into
+   `public.saved_venues` / `public.bookings` for the new user, then
+   clear local storage. `/profile` reads `display_name` +
+   `preferences` from `public.profiles` instead of `MOCK_USER`.
+   `/onboarding` writes preferences to the profile row and flips
+   `onboarded`.
+2. **Cleanup PR after Phase 3.** Remove `MOCK_VENUES`, `MOCK_EVENTS`,
+   and the catalog accessors from `lib/mock-data.ts` (currently
+   dead code).
+3. **Real venue data** — replace the 11 hand-seeded venues with
+   curated London venues + image rights cleared. Maria adds them
+   directly via the Supabase Dashboard (or a small admin script).
+4. **Custom SMTP for auth emails** — wire Resend (or similar) so the
+   ~3-4/hour rate limit on Supabase's built-in email service stops
+   being a launch blocker.
+5. **Vercel Deployment Protection off** — when the site should be
+   publicly browsable, toggle off in Vercel → Settings.
+6. **Stripe Connect for partners** — partner-side payments / booking
    commissions. Partner Dashboard prototype lives in `project/Partner
    Dashboard.html` (static HTML, not part of this Next.js app yet).
-5. **Vercel deployment** — ✅ done. Live at
-   `fun-london-dsizviszo-mparanzales-projects.vercel.app`. Leftover:
-   toggle off **Deployment Protection** if/when the site should be
-   publicly browsable (currently returns 401 to anyone not signed into
-   Vercel SSO). Also: add `NEXT_PUBLIC_SUPABASE_*` env vars in Vercel
-   project settings when item 1 ships.
-6. **A Booking context (`useBookings()`)** mirroring `useSaved()` — so
-   the confirmation page can write the booking and `/saved` can surface
-   it alongside saved venues.
 
 ---
 
