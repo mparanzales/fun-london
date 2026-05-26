@@ -28,6 +28,17 @@ const config: Config = {
       borderRadius: {
         xl2: "1.25rem",
       },
+      // Extend Tailwind's default spacing scale with half-step values
+      // the codebase already uses (4.5, 5.5, 6.5). Without these,
+      // classes like `bottom-4.5` and `pb-5.5` silently fail —
+      // a real bug we caught when the Swipe step's question text
+      // landed on top of the mood pill instead of at the card's
+      // bottom edge.
+      spacing: {
+        "4.5": "1.125rem", // 18px
+        "5.5": "1.375rem", // 22px
+        "6.5": "1.625rem", // 26px
+      },
     },
   },
   plugins: [],
