@@ -1,13 +1,25 @@
 "use client";
 
 import { useSaved } from "@/components/saved-context";
+import { useBookings } from "@/components/bookings-context";
 import { getCurrentUser } from "@/lib/mock-data";
 
 export default function ProfilePage() {
   const user = getCurrentUser();
   const { count: savedCount } = useSaved();
+  const { count: bookingsCount } = useBookings();
   const initial =
     (user.displayName ?? user.email ?? "?").trim()[0]?.toUpperCase() ?? "?";
+
+  const summaryParts: string[] = [];
+  if (bookingsCount > 0)
+    summaryParts.push(
+      `${bookingsCount} booking${bookingsCount === 1 ? "" : "s"}`,
+    );
+  if (savedCount > 0) summaryParts.push(`${savedCount} saved`);
+  const summary = summaryParts.length
+    ? summaryParts.join(" · ")
+    : "No spots yet";
 
   const prefs = user.preferences;
   const moods = prefs?.moods ?? [];
@@ -31,9 +43,7 @@ export default function ProfilePage() {
         <h1 className="text-[28px] font-extrabold tracking-tight text-primary mt-3.5">
           {user.displayName ?? "Anonymous"}
         </h1>
-        <div className="text-xs text-muted-fg mt-1">
-          {savedCount} spot{savedCount === 1 ? "" : "s"} saved
-        </div>
+        <div className="text-xs text-muted-fg mt-1">{summary}</div>
       </header>
 
       {/* Preferences preview */}

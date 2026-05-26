@@ -43,12 +43,15 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   // First pill: prefix "Tonight " only for reservable venues whose
   // nextSlotLabel is a time. Non-reservable venues seed labels like
   // "Open till 6 PM" or "Open Sun · noon" which read better unprefixed.
-  // "Tables free" pill is hidden entirely for non-reservable venues —
-  // a museum showing "0 tables free" doesn't make sense.
+  // "Tables free" pill is hidden for non-reservable venues (a museum
+  // showing "0 tables free" doesn't make sense) AND hidden when the
+  // count is 0 (don't signal "fully booked" next to a working Reserve
+  // button — confuses the user).
+  const showTablesPill = isReservable && venue.tablesFree > 0;
   const pills = [
     isReservable ? `Tonight ${venue.nextSlotLabel}` : venue.nextSlotLabel,
     `${venue.walkingMins} min walk`,
-    ...(isReservable ? [`${venue.tablesFree} tables free`] : []),
+    ...(showTablesPill ? [`${venue.tablesFree} tables free`] : []),
     venue.vibeTags.join(" · "),
   ];
 
@@ -98,11 +101,11 @@ export function VenueDetail({ venue }: { venue: Venue }) {
 
       {/* ── Info block ────────────────────────────────────────────── */}
       <section className="px-5">
-        <div className="text-xs font-medium tracking-wider uppercase text-muted-fg pt-5">
+        <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5">
           {venue.neighbourhood.toUpperCase()} · {venue.price}
         </div>
 
-        <h1 className="text-3xl font-bold text-fg leading-tight mt-1">
+        <h1 className="text-3xl font-extrabold text-fg leading-tight mt-1">
           {venue.name}
         </h1>
 
