@@ -16,7 +16,16 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@/lib/supabase/server";
-import type { Venue, Event, VenueType, PriceTier, TimeOfDay, Mood, DateLabel, EventCategory } from "./types";
+import type {
+  Venue,
+  Event,
+  VenueType,
+  PriceTier,
+  TimeOfDay,
+  Mood,
+  DateLabel,
+  EventCategory,
+} from "./types";
 
 // ── Row shapes (raw DB) ─────────────────────────────────────────────────
 
