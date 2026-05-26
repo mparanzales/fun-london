@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 
 type Status = "idle" | "loading" | "sent" | "error";
 
+const DISPLAY_NAME_MAX = 40;
+
 export function SignInForm({
   returnTo,
   initialError,
@@ -12,6 +14,7 @@ export function SignInForm({
   returnTo?: string;
   initialError?: string | null;
 }) {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(initialError ?? null);
@@ -25,9 +28,15 @@ export function SignInForm({
     const callback = new URL("/auth/callback", window.location.origin);
     if (returnTo) callback.searchParams.set("return", returnTo);
 
+    const trimmedName = name.trim().slice(0, DISPLAY_NAME_MAX);
+    const otpData = trimmedName ? { display_name: trimmedName } : undefined;
+
     const { error: otpError } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: callback.toString() },
+      options: {
+        emailRedirectTo: callback.toString(),
+        ...(otpData ? { data: otpData } : {}),
+      },
     });
 
     if (otpError) {
@@ -64,6 +73,16 @@ export function SignInForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <input
+        type="text"
+        autoComplete="given-name"
+        placeholder="Your name (optional)"
+        value={name}
+        maxLength={DISPLAY_NAME_MAX}
+        onChange={(e) => setName(e.target.value)}
+        disabled={isLoading}
+        className="h-[52px] rounded-2xl bg-card border border-border px-4 text-fg text-[15px] placeholder:text-muted-fg/60 disabled:opacity-50"
+      />
       <input
         type="email"
         inputMode="email"
