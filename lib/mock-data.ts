@@ -35,7 +35,7 @@ export const MOCK_VENUES: Venue[] = [
     type: "Restaurant",
     vibe: "Hand-rolled pasta, no reservations",
     longDescription:
-      "Hand-rolled pasta at the window, no reservations, all evening. Queue moves fast — usually 30–40 min at peak.",
+      "Hand-rolled pasta at the window, no reservations, all evening. Queue moves fast, usually 30 to 40 min at peak.",
     neighbourhood: "London Bridge",
     address: "6 Southwark St, London SE1 1TQ",
     lat: 51.5054,
@@ -110,7 +110,7 @@ export const MOCK_VENUES: Venue[] = [
     type: "Market",
     vibe: "A thousand tiny tastings",
     longDescription:
-      "Wandering food market under the railway arches. Stalls for everything from oysters to brownies — bring an appetite.",
+      "Wandering food market under the railway arches. Stalls for everything from oysters to brownies. Bring an appetite.",
     neighbourhood: "London Bridge",
     address: "8 Southwark St, London SE1 1TL",
     lat: 51.5055,
@@ -160,7 +160,7 @@ export const MOCK_VENUES: Venue[] = [
     type: "Restaurant",
     vibe: "Pillowy buns, queue out the door",
     longDescription:
-      "Pillowy steamed buns and Taiwanese small plates. Tiny dining room — queue early or book on the dot.",
+      "Pillowy steamed buns and Taiwanese small plates. Tiny dining room, so queue early or book on the dot.",
     neighbourhood: "Soho",
     address: "53 Lexington St, London W1F 9AS",
     lat: 51.5132,

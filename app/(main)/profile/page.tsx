@@ -28,7 +28,7 @@ export default function ProfilePage() {
         <div className="w-20 h-20 rounded-full bg-accent text-accent-fg flex items-center justify-center text-[28px] font-extrabold">
           {initial}
         </div>
-        <h1 className="text-[26px] font-extrabold tracking-tight text-primary mt-3.5">
+        <h1 className="text-[28px] font-extrabold tracking-tight text-primary mt-3.5">
           {user.displayName ?? "Anonymous"}
         </h1>
         <div className="text-xs text-muted-fg mt-1">

@@ -140,7 +140,7 @@ export default function ExplorePage() {
 
       {items.length === 0 ? (
         <div className="px-5 pt-10 text-center text-sm text-muted-fg">
-          Nothing here yet — check back soon.
+          Nothing here yet. Check back soon.
         </div>
       ) : (
         <div className="px-5 pt-5 flex flex-col gap-4">
