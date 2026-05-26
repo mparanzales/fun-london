@@ -3,6 +3,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Check, Calendar, Share2 } from "lucide-react";
 import { fetchVenueBySlug } from "@/lib/queries";
+import { getAuthUser } from "@/lib/auth";
 import { BookingRecorder } from "./booking-recorder";
 
 // Booking confirmation (Figma frame 3c).
@@ -21,7 +22,10 @@ export default async function BookingConfirmedPage({
 }: {
   params: { slug: string };
 }) {
-  const venue = await fetchVenueBySlug(params.slug);
+  const [venue, authUser] = await Promise.all([
+    fetchVenueBySlug(params.slug),
+    getAuthUser(),
+  ]);
   if (!venue) notFound();
 
   const bookingRef = `${venue.slug.slice(0, 3).toUpperCase()}-4912`;
@@ -33,6 +37,7 @@ export default async function BookingConfirmedPage({
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
       <BookingRecorder
         id={bookingRef}
+        authUserId={authUser?.id ?? null}
         venueId={venue.id}
         venueSlug={venue.slug}
         partySize={partySize}

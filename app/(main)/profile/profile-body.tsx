@@ -6,28 +6,35 @@ import { useState } from "react";
 import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import { createClient } from "@/lib/supabase/client";
-import { getCurrentUser } from "@/lib/mock-data";
+import type { UserPreferences } from "@/lib/types";
 
 // Two states:
 //   • Anonymous (authUserId === null): hero avatar with "?" + "Sign in"
 //     CTA. No preferences shown, no action rows.
-//   • Signed in: existing profile UI. displayName falls back to the
-//     auth.user email until Phase 3 wires public.profiles.display_name.
-//     Preferences row remains mock for now (Phase 3 will read them
-//     from public.profiles.preferences).
+//   • Signed in: existing profile UI. displayName + preferences come
+//     from public.profiles (Phase 3.5). displayName falls back to the
+//     email prefix when null; preferences render "Not set" when null.
 
 export function ProfileBody({
   authUserId,
   authUserEmail,
+  displayName,
+  preferences,
 }: {
   authUserId: string | null;
   authUserEmail: string | null;
+  displayName: string | null;
+  preferences: UserPreferences | null;
 }) {
   if (!authUserId) {
     return <AnonProfile />;
   }
   return (
-    <SignedInProfile authUserId={authUserId} authUserEmail={authUserEmail} />
+    <SignedInProfile
+      authUserEmail={authUserEmail}
+      displayName={displayName}
+      preferences={preferences}
+    />
   );
 }
 
@@ -62,29 +69,26 @@ function AnonProfile() {
 }
 
 function SignedInProfile({
-  authUserId: _authUserId,
   authUserEmail,
+  displayName,
+  preferences,
 }: {
-  authUserId: string;
   authUserEmail: string | null;
+  displayName: string | null;
+  preferences: UserPreferences | null;
 }) {
   const router = useRouter();
   const { count: savedCount } = useSaved();
   const { count: bookingsCount } = useBookings();
   const [signingOut, setSigningOut] = useState(false);
 
-  // Phase 2: displayName + preferences still come from mock data.
-  // Phase 3 will load both from public.profiles for this auth user.
-  const mockUser = getCurrentUser();
-  const displayName =
-    mockUser.displayName ?? authUserEmail?.split("@")[0] ?? "You";
-  const initial = displayName.trim()[0]?.toUpperCase() ?? "?";
+  const effectiveName = displayName ?? authUserEmail?.split("@")[0] ?? "You";
+  const initial = effectiveName.trim()[0]?.toUpperCase() ?? "?";
 
-  const prefs = mockUser.preferences;
-  const moods = prefs?.moods ?? [];
-  const vibes = prefs?.vibes ?? [];
-  const budget = prefs?.budget ?? null;
-  const areas = prefs?.areas ?? [];
+  const moods = preferences?.moods ?? [];
+  const vibes = preferences?.vibes ?? [];
+  const budget = preferences?.budget ?? null;
+  const areas = preferences?.areas ?? [];
 
   const summaryParts: string[] = [];
   if (bookingsCount > 0)
@@ -119,7 +123,7 @@ function SignedInProfile({
           {initial}
         </div>
         <h1 className="text-[28px] font-extrabold tracking-tight text-primary mt-3.5">
-          {displayName}
+          {effectiveName}
         </h1>
         <div className="text-xs text-muted-fg mt-1">{summary}</div>
       </header>
