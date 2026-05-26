@@ -25,6 +25,8 @@ import type {
   Mood,
   DateLabel,
   EventCategory,
+  Profile,
+  UserPreferences,
 } from "./types";
 
 // ── Row shapes (raw DB) ─────────────────────────────────────────────────
@@ -164,4 +166,31 @@ export async function fetchEvents(): Promise<Event[]> {
 export async function fetchNeighbourhoods(): Promise<string[]> {
   const venues = await fetchVenues();
   return Array.from(new Set(venues.map((v) => v.neighbourhood))).sort();
+}
+
+// ── Profile ─────────────────────────────────────────────────────────────
+
+type ProfileRow = {
+  id: string;
+  display_name: string | null;
+  preferences: UserPreferences | null;
+  onboarded: boolean;
+};
+
+export async function fetchProfile(userId: string): Promise<Profile | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, display_name, preferences, onboarded")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw new Error(`fetchProfile(${userId}): ${error.message}`);
+  if (!data) return null;
+  const r = data as ProfileRow;
+  return {
+    id: r.id,
+    displayName: r.display_name,
+    preferences: r.preferences,
+    onboarded: r.onboarded,
+  };
 }

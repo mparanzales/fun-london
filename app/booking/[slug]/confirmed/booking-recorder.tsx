@@ -8,10 +8,10 @@
 
 import { useEffect } from "react";
 import { useBookings } from "@/components/bookings-context";
-import { MOCK_USER } from "@/lib/mock-data";
 
 type Props = {
   id: string;
+  authUserId: string | null;
   venueId: string;
   venueSlug: string;
   partySize: number;
@@ -20,6 +20,7 @@ type Props = {
 
 export function BookingRecorder({
   id,
+  authUserId,
   venueId,
   venueSlug,
   partySize,
@@ -28,9 +29,12 @@ export function BookingRecorder({
   const { addBooking } = useBookings();
 
   useEffect(() => {
+    // userId is purely a local stamp here — BookingsProvider routes the
+    // actual DB write via its own authUserId prop. Anonymous bookings
+    // get empty string; signed-in bookings get the real auth uuid.
     addBooking({
       id,
-      userId: MOCK_USER.id,
+      userId: authUserId ?? "",
       venueId,
       venueSlug,
       partySize,
@@ -41,7 +45,7 @@ export function BookingRecorder({
       dateLabel: "Today",
       slotLabel,
     });
-  }, [id, venueId, venueSlug, partySize, slotLabel, addBooking]);
+  }, [id, authUserId, venueId, venueSlug, partySize, slotLabel, addBooking]);
 
   return null;
 }

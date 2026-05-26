@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
-import { getCurrentUser } from "@/lib/mock-data";
 import { CITY } from "@/lib/config";
 import type { Venue, Event, VenueType, EventCategory } from "@/lib/types";
 
@@ -47,14 +46,14 @@ function getEyebrow(): "today in" | "tonight in" {
 export function ExploreFeed({
   venues: allVenues,
   events: allEvents,
+  greetingName,
 }: {
   venues: Venue[];
   events: Event[];
+  greetingName: string;
 }) {
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
   const eyebrow = getEyebrow();
-  const user = getCurrentUser();
-  const greetingName = user.displayName ?? "there";
 
   const items = useMemo<FeedItem[]>(() => {
     switch (selectedFilter) {

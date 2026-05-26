@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/logo";
+import { createClient } from "@/lib/supabase/client";
 import type { Mood, Vibe } from "@/lib/types";
 
 const ONBOARDING_STORAGE_KEY = "fl.onboarding.v1";
@@ -26,34 +27,65 @@ const VIBE_OPTIONS: VibeOption[] = [
 
 const TOTAL_STEPS = 4; // progress bar matches the prototype (1/4, 2/4, …)
 
-export function OnboardingFlow() {
+export function OnboardingFlow({ authUserId }: { authUserId: string | null }) {
   const router = useRouter();
   const [step, setStep] = useState<0 | 1>(0);
   const [mood, setMood] = useState<Mood | null>(null);
   const [vibe, setVibe] = useState<Vibe | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const stepLabel = `${step + 1}/${TOTAL_STEPS}`;
   const progress = ((step + 1) / TOTAL_STEPS) * 100;
 
-  const finish = () => {
+  const finish = async () => {
+    if (submitting) return;
+    const prefs = {
+      moods: mood ? [mood] : [],
+      vibes: vibe ? [vibe] : [],
+      budget: null as null,
+      areas: [] as string[],
+    };
+
+    // Local cache: the splash route gates on this key. Kept in place so
+    // anon users still see the right route after onboarding, and signed-in
+    // users on this device skip onboarding next visit.
     try {
       window.localStorage.setItem(
         ONBOARDING_STORAGE_KEY,
-        JSON.stringify({
-          moods: mood ? [mood] : [],
-          vibes: vibe ? [vibe] : [],
-          completedAt: new Date().toISOString(),
-        }),
+        JSON.stringify({ ...prefs, completedAt: new Date().toISOString() }),
       );
     } catch {
       // ignore storage errors
     }
+
+    // DB write when signed in. Upsert (not update) so a missing trigger
+    // row would still be repaired — RLS allows it because auth.uid() = id.
+    if (authUserId) {
+      setSubmitting(true);
+      try {
+        const supabase = createClient();
+        const { error } = await supabase
+          .from("profiles")
+          .upsert(
+            { id: authUserId, preferences: prefs, onboarded: true },
+            { onConflict: "id" },
+          );
+        if (error) {
+          console.error("[onboarding] profile upsert failed:", error);
+        }
+      } catch (e) {
+        console.error("[onboarding] profile upsert threw:", e);
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
     router.push("/explore");
   };
 
   const next = () => {
     if (step === 0) setStep(1);
-    else finish();
+    else void finish();
   };
 
   const canAdvance = step === 0 ? mood !== null : vibe !== null;
@@ -115,14 +147,15 @@ export function OnboardingFlow() {
       <div className="mt-auto px-5 pt-6">
         <button
           onClick={next}
-          disabled={!canAdvance}
+          disabled={!canAdvance || submitting}
           className="w-full h-13 py-3.5 rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold shadow-soft disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {step === 0 ? "Continue" : "Find my night ✨"}
         </button>
         <button
-          onClick={finish}
-          className="mt-3 w-full text-xs text-muted-fg underline underline-offset-2"
+          onClick={() => void finish()}
+          disabled={submitting}
+          className="mt-3 w-full text-xs text-muted-fg underline underline-offset-2 disabled:opacity-50"
         >
           Skip for now
         </button>

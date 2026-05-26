@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { SavedProvider } from "@/components/saved-context";
 import { BookingsProvider } from "@/components/bookings-context";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ProfilePrefsMigration } from "@/components/profile-prefs-migration";
 import { getAuthUser } from "@/lib/auth";
 import "./globals.css";
 
@@ -50,6 +51,7 @@ export default async function RootLayout({
             tree. Bookings sits inside Saved purely for read order; they
             don't depend on each other. */}
         <ThemeProvider />
+        <ProfilePrefsMigration authUserId={authUserId} />
         <SavedProvider authUserId={authUserId}>
           <BookingsProvider authUserId={authUserId}>
             {children}

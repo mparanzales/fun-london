@@ -4,14 +4,10 @@
 // The catalog (venues + events) now lives in Supabase; reads go through
 // lib/queries.ts. Saved venues and bookings now live in Supabase too,
 // with localStorage as the anon-mode fallback (see saved-context.tsx
-// and bookings-context.tsx).
+// and bookings-context.tsx). The auth user's profile (display_name +
+// preferences) now lives in public.profiles; reads via fetchProfile.
 //
 // What stays here:
-//   • MOCK_USER         — the "the maintainer" demo persona. Drives the
-//                          /explore greeting and /profile h1 fallback
-//                          when the auth user has no display_name yet
-//                          (Phase 3.5 / cleanup PR moves these to
-//                          public.profiles).
 //   • MOCK_SAVED_IDS    — slugs of venues seeded as "already saved"
 //                          on first mount for anon users. Slugs, not
 //                          ids, so the seed survives Supabase reseeds.
@@ -19,28 +15,7 @@
 //                          story yet; static demo data.
 // ─────────────────────────────────────────────────────────────────────────
 
-import type { User, Participant } from "./types";
-
-// ── User ─────────────────────────────────────────────────────────────────
-
-export const MOCK_USER: User = {
-  id: "user-demo",
-  email: "demo@funlondon.app",
-  displayName: "the maintainer",
-  avatarUrl: null,
-  preferences: {
-    moods: ["dinner", "drinks"],
-    vibes: ["chill"],
-    budget: "££",
-    areas: ["Shoreditch", "Soho"],
-  },
-  onboarded: true,
-  createdAt: "2024-01-15T10:00:00Z",
-};
-
-export function getCurrentUser(): User {
-  return MOCK_USER;
-}
+import type { Participant } from "./types";
 
 // ── Saved venues seed ────────────────────────────────────────────────────
 // Anon users start with two venues already hearted, so /saved isn't empty
