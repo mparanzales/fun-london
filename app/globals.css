@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --fl-bg: #f0eee9;
+  --fl-fg: #2a2419;
+  --fl-heading: #1a1409;
+  --fl-muted: #e6e2db;
+  --fl-muted-fg: #756c5d;
+  --fl-card: #ffffff;
+  --fl-border: #e3ddd2;
+  --fl-primary: hsl(233 70% 55%);
+  --fl-primary-fg: #ffffff;
+  --fl-accent: hsl(265 80% 60%);
+  --fl-accent-fg: #ffffff;
+  --fl-gradient: linear-gradient(135deg, hsl(20 90% 60%) 0%, hsl(340 80% 60%) 100%);
+}
+
+[data-theme="night"] {
+  --fl-bg: #14110d;
+  --fl-fg: #ece6d9;
+  --fl-heading: #ffffff;
+  --fl-muted: #2a2520;
+  --fl-muted-fg: #9c9385;
+  --fl-card: #1f1b15;
+  --fl-border: #2f2a22;
+  --fl-primary: hsl(233 80% 70%);
+  --fl-primary-fg: #14110d;
+  --fl-accent: hsl(265 80% 72%);
+  --fl-accent-fg: #14110d;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--fl-bg);
+  color: var(--fl-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollable rails — hide scrollbar */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
