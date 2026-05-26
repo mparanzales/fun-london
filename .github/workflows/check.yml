@@ -1,0 +1,36 @@
+name: check
+
+# Runs the combined gate (typecheck + lint + format:check) on every
+# push to main and on every pull request targeting main. This workflow's
+# job ID `check` is the required status check for branch protection.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: typecheck + lint + format
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # Version comes from package.json "packageManager" field (pnpm@9.0.0)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm check (typecheck + lint + format:check)
+        run: pnpm check
