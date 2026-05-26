@@ -45,18 +45,18 @@ export function Lobby({ onStart }: { onStart: () => void }) {
       <div className="text-[11px] font-extrabold text-primary uppercase tracking-[0.12em]">
         Plan together
       </div>
-      <h1 className="text-2xl font-extrabold text-heading mt-1 mb-3.5 tracking-tight">
+      <h1 className="text-2xl font-extrabold text-heading mt-1 mb-2 tracking-tight">
         Get the gang in
       </h1>
-      <div className="text-[11px] font-bold text-muted-fg uppercase tracking-[0.1em] mb-1.5">
+      <div className="text-[13px] text-muted-fg leading-relaxed mb-4">
         Send the link. They tap, swipe, done.
       </div>
 
-      <div className="bg-muted rounded-xl px-3 py-2.5 flex items-center justify-between text-xs text-muted-fg mb-3">
-        <span>{SHARE_LINK}</span>
+      <div className="bg-muted rounded-xl pl-3 pr-1.5 py-1.5 flex items-center justify-between text-xs text-muted-fg mb-3">
+        <span className="truncate">{SHARE_LINK}</span>
         <button
           type="button"
-          className="bg-primary text-primary-fg rounded-lg px-3.5 py-3 text-[11px] font-extrabold"
+          className="bg-primary text-primary-fg rounded-lg h-9 px-4 text-[11px] font-extrabold flex-shrink-0"
         >
           Copy
         </button>

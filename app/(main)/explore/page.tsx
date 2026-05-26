@@ -114,7 +114,7 @@ export default function ExplorePage() {
             >
               {eyebrow}
             </span>
-            <span className="inline-flex items-baseline gap-1">
+            <span className="inline-flex items-baseline gap-2">
               <span className="text-3xl font-bold text-primary lowercase">
                 fun
               </span>
@@ -131,7 +131,7 @@ export default function ExplorePage() {
             }}
             className="p-2 -mr-2 text-fg"
           >
-            <Search className="w-6 h-6" strokeWidth={1.75} />
+            <Search className="w-6 h-6" strokeWidth={2} />
           </button>
         </div>
       </header>
@@ -192,7 +192,7 @@ function FilterChipRow({
   ];
 
   return (
-    <div className="px-5 grid grid-cols-6 gap-1 py-1">
+    <div className="px-5 grid grid-cols-6 gap-1 py-2">
       {chips.map((c) => {
         const isSelected = selected === c.key;
         const iconClass =
