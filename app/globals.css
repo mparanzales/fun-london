@@ -10,6 +10,10 @@
   --fl-muted-fg: #756c5d;
   --fl-card: #ffffff;
   --fl-border: #e3ddd2;
+  /* Brand colors are theme-stable. Surfaces (bg/fg/card/muted/border)
+     invert between day and night, but the brand purple and its contrast
+     foreground stay the same so CTAs read identically across themes
+     and the wordmark color doesn't shift. */
   --fl-primary: hsl(233 70% 55%);
   --fl-primary-fg: #ffffff;
   --fl-accent: hsl(265 80% 60%);
@@ -25,10 +29,8 @@
   --fl-muted-fg: #9c9385;
   --fl-card: #1f1b15;
   --fl-border: #2f2a22;
-  --fl-primary: hsl(233 80% 70%);
-  --fl-primary-fg: #14110d;
-  --fl-accent: hsl(265 80% 72%);
-  --fl-accent-fg: #14110d;
+  /* primary, primary-fg, accent, accent-fg intentionally NOT overridden —
+     they inherit from :root so brand identity stays consistent. */
 }
 
 html, body {
@@ -41,6 +43,18 @@ html, body {
 
 * {
   box-sizing: border-box;
+}
+
+/* Keyboard focus rings.
+   `:focus-visible` only matches keyboard navigation (Tab, arrows etc.) —
+   mouse clicks don't trigger the ring. Theme-aware via --fl-primary. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--fl-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* Scrollable rails — hide scrollbar */
