@@ -1,0 +1,9 @@
+node_modules
+.next
+.vercel
+build
+dist
+out
+pnpm-lock.yaml
+supabase/seed.sql
+*.md
