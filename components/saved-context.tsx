@@ -1,10 +1,13 @@
 "use client";
 
-// Client-side saved-set state. With Supabase out of scope, heart toggles
-// propagate across tabs through this provider instead of a backend.
+// Client-side saved-set state. The set holds venue *slugs* (e.g.
+// "padella"), not venue ids — slugs are stable across mock-data,
+// Supabase reseeds, and the future Phase 3 DB migration. The schema's
+// saved_venues.venue_id FK is uuid, but the Phase 3 sign-in migration
+// will resolve slug → uuid at the data layer.
 //
-// Seeds from MOCK_SAVED_IDS on first mount, then persists to localStorage
-// so a refresh keeps the user's saves.
+// Seeds from MOCK_SAVED_IDS on first mount, then persists to
+// localStorage so a refresh keeps the user's saves.
 
 import {
   createContext,
@@ -19,9 +22,9 @@ import { MOCK_SAVED_IDS } from "@/lib/mock-data";
 const STORAGE_KEY = "fl.saved.v1";
 
 type SavedContextValue = {
-  savedSet: Set<string>;
-  isSaved: (venueId: string) => boolean;
-  toggleSaved: (venueId: string) => void;
+  savedSet: Set<string>; // venue slugs
+  isSaved: (venueSlug: string) => boolean;
+  toggleSaved: (venueSlug: string) => void;
   count: number;
 };
 
@@ -57,11 +60,11 @@ export function SavedProvider({ children }: { children: React.ReactNode }) {
     }
   }, [savedSet]);
 
-  const toggleSaved = useCallback((venueId: string) => {
+  const toggleSaved = useCallback((venueSlug: string) => {
     setSavedSet((prev) => {
       const next = new Set(prev);
-      if (next.has(venueId)) next.delete(venueId);
-      else next.add(venueId);
+      if (next.has(venueSlug)) next.delete(venueSlug);
+      else next.add(venueSlug);
       return next;
     });
   }, []);
@@ -69,7 +72,7 @@ export function SavedProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<SavedContextValue>(
     () => ({
       savedSet,
-      isSaved: (id) => savedSet.has(id),
+      isSaved: (slug) => savedSet.has(slug),
       toggleSaved,
       count: savedSet.size,
     }),

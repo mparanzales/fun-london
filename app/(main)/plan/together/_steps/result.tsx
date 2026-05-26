@@ -1,17 +1,17 @@
 "use client";
 
-import { getParticipants, getVenues } from "@/lib/mock-data";
+import { getParticipants } from "@/lib/mock-data";
 import type { Participant, Venue } from "@/lib/types";
 
 // Plan Together — Step 4: Result.
 // 3-step mixed itinerary with voter attribution. All votes hardcoded —
-// no real swipe data carries through from Step 2 in MVP.
+// no real swipe data carries through from Step 2 in MVP. Venues come
+// from the server-fetched catalog via TogetherFlow.
 
 const STEP_LABELS = ["Start", "Then", "Finish"] as const;
 
-export function Result() {
+export function Result({ venues }: { venues: Venue[] }) {
   // Three venues (matches prototype: PLACES[1], PLACES[2], PLACES[6]).
-  const venues = getVenues();
   const stepVenues: Venue[] = [venues[1], venues[2], venues[6]].filter(Boolean);
   const participants = getParticipants();
 

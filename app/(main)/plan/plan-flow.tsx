@@ -5,7 +5,6 @@
 // No map, no why-it-works — the prototype's Plan My Night doesn't have them.
 
 import { useMemo, useState } from "react";
-import { getVenues } from "@/lib/mock-data";
 import type { Venue } from "@/lib/types";
 
 const AREAS = ["Soho", "Shoreditch", "Camden", "Fitzrovia"] as const;
@@ -27,9 +26,15 @@ type PlanStep = Venue & { minutes: number };
 // Step labels for the itinerary marker.
 const STEP_LABELS = ["Start", "Then", "Finish"] as const;
 
-// Exact port of `computePlan` from screens.jsx.
-function computePlan(area: Area, _vibe: Vibe, _budget: Budget): PlanStep[] {
-  const venues = getVenues();
+// Exact port of `computePlan` from screens.jsx. Venues come from the
+// page-level server fetch and are passed in as a prop so the same flow
+// can run as a client component.
+function computePlan(
+  venues: Venue[],
+  area: Area,
+  _vibe: Vibe,
+  _budget: Budget,
+): PlanStep[] {
   const inArea = venues.filter((v) => v.neighbourhood === area);
   const pool = inArea.length >= 3 ? inArea : venues;
   const start = pool.find((v) => v.type === "Restaurant") ?? pool[0];
@@ -54,15 +59,15 @@ function computePlan(area: Area, _vibe: Vibe, _budget: Budget): PlanStep[] {
     .map((v, i) => ({ ...(v as Venue), minutes: minutes[i] }));
 }
 
-export function PlanFlow() {
+export function PlanFlow({ venues }: { venues: Venue[] }) {
   const [step, setStep] = useState<"setup" | "result">("setup");
   const [area, setArea] = useState<Area>("Shoreditch");
   const [vibe, setVibe] = useState<Vibe>("Chill");
   const [budget, setBudget] = useState<Budget>("££");
 
   const plan = useMemo(
-    () => computePlan(area, vibe, budget),
-    [area, vibe, budget],
+    () => computePlan(venues, area, vibe, budget),
+    [venues, area, vibe, budget],
   );
 
   if (step === "setup") {
