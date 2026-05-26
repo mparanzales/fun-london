@@ -106,6 +106,9 @@ function SignedInProfile({
     { icon: "🌗", label: "Theme: Auto" },
   ];
 
+  // Edit profile row has its own handler (navigates), so it sits outside
+  // the stub action rows above.
+
   async function handleSignOut() {
     setSigningOut(true);
     const supabase = createClient();
@@ -141,6 +144,17 @@ function SignedInProfile({
       </div>
 
       <div className="px-5 flex flex-col gap-2.5">
+        <Link
+          href="/profile/edit"
+          className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold no-underline"
+        >
+          <span className="flex gap-2.5 items-center">
+            <span>✏️</span>
+            <span>Edit profile</span>
+          </span>
+          <span className="text-muted-fg">›</span>
+        </Link>
+
         {actionRows.map((r) => (
           <button
             key={r.label}
