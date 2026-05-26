@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { getVenues } from "@/lib/mock-data";
 import type { Venue } from "@/lib/types";
 
 // Plan Together — Step 2: Group Swipe.
@@ -13,9 +12,14 @@ const SWIPE_QUESTIONS = [
   { label: "Late night?", moodPill: "🌙 Mood", venueIdx: 6 },
 ] as const;
 
-export function Swipe({ onDone }: { onDone: () => void }) {
+export function Swipe({
+  onDone,
+  venues,
+}: {
+  onDone: () => void;
+  venues: Venue[];
+}) {
   const [qIdx, setQIdx] = useState(0);
-  const venues = getVenues();
   const q = SWIPE_QUESTIONS[qIdx];
   const venue: Venue = venues[q.venueIdx] ?? venues[0];
 

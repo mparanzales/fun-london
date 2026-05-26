@@ -36,7 +36,7 @@ const RESERVABLE_TYPES: VenueType[] = [
 export function VenueDetail({ venue }: { venue: Venue }) {
   const router = useRouter();
   const { isSaved, toggleSaved } = useSaved();
-  const saved = isSaved(venue.id);
+  const saved = isSaved(venue.slug);
 
   const isReservable = RESERVABLE_TYPES.includes(venue.type);
 
@@ -85,7 +85,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         {/* Heart button — overlays photo, top-right */}
         <button
           type="button"
-          onClick={() => toggleSaved(venue.id)}
+          onClick={() => toggleSaved(venue.slug)}
           aria-label={saved ? "Unsave" : "Save"}
           className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 backdrop-blur-md shadow flex items-center justify-center"
         >
@@ -149,7 +149,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
       >
         <button
           type="button"
-          onClick={() => toggleSaved(venue.id)}
+          onClick={() => toggleSaved(venue.slug)}
           aria-label={saved ? "Unsave" : "Save"}
           className="flex-shrink-0 inline-flex items-center gap-2 px-5 py-3 border border-fg/15 rounded-full text-fg text-sm font-medium"
         >

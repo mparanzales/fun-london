@@ -21,12 +21,12 @@ export function VenueCard({
   showCategoryTag = true,
 }: Props) {
   const { isSaved, toggleSaved } = useSaved();
-  const saved = isSaved(venue.id);
+  const saved = isSaved(venue.slug);
 
   const onHeart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleSaved(venue.id);
+    toggleSaved(venue.slug);
   };
 
   // The whole card is wrapped in a Link to /venue/[slug]. The heart
