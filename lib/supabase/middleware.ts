@@ -27,21 +27,11 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Refresh the session
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const path = request.nextUrl.pathname;
-  const isAuthPage = path.startsWith("/sign-in") || path.startsWith("/auth");
-  const isPublic = path === "/" || isAuthPage;
-
-  // Gate the (main) shell behind auth
-  if (!user && !isPublic) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/sign-in";
-    return NextResponse.redirect(url);
-  }
+  // Refresh the session cookie if it's near expiry. We don't read the
+  // user — every Server Component / Route Handler that cares pulls
+  // auth.getUser() itself via lib/auth.ts. Auth-optional model: no
+  // redirects here; routes decide their own gating.
+  await supabase.auth.getUser();
 
   return response;
 }
