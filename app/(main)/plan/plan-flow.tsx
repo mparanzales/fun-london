@@ -252,7 +252,7 @@ function Chip({
       type="button"
       onClick={onClick}
       className={
-        "px-3.5 py-2 rounded-full border-[1.5px] text-xs font-bold " +
+        "px-4 py-3.5 rounded-full border-[1.5px] text-xs font-bold " +
         (on
           ? "border-accent bg-accent text-accent-fg"
           : "border-border bg-card text-fg")

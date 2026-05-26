@@ -43,7 +43,7 @@ export default function EventsPage() {
               key={f}
               onClick={() => setDateFilter(f)}
               className={
-                "px-3.5 py-1.5 rounded-full text-[11px] font-extrabold uppercase tracking-[0.06em] transition " +
+                "px-4 py-3 rounded-full text-[11px] font-extrabold uppercase tracking-[0.06em] transition " +
                 (on ? "bg-primary text-primary-fg" : "bg-muted text-muted-fg")
               }
             >
@@ -61,7 +61,7 @@ export default function EventsPage() {
               key={c.id}
               onClick={() => setCategoryFilter(c.id)}
               className={
-                "px-3 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap border transition " +
+                "px-3.5 py-3 rounded-full text-[11px] font-bold whitespace-nowrap border transition " +
                 (on
                   ? "bg-accent/10 text-accent border-accent"
                   : "bg-card text-fg border-border")

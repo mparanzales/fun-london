@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 import { getParticipants } from "@/lib/mock-data";
 import { Avatar } from "./avatar";
 
@@ -30,13 +31,15 @@ export function Lobby({ onStart }: { onStart: () => void }) {
 
   return (
     <div className="px-5 py-4 flex flex-col">
+      {/* Negative margin pulls visual position to original "‹" location
+          while the p-2.5 gives a real 44×44 tap target. */}
       <button
         type="button"
         onClick={() => router.push("/plan")}
         aria-label="Back"
-        className="self-start text-xl text-muted-fg mb-1.5 leading-none"
+        className="self-start -ml-2 p-2.5 text-muted-fg mb-1"
       >
-        ‹
+        <ArrowLeft className="w-5 h-5" strokeWidth={2} />
       </button>
 
       <div className="text-[11px] font-extrabold text-primary uppercase tracking-[0.12em]">
@@ -53,7 +56,7 @@ export function Lobby({ onStart }: { onStart: () => void }) {
         <span>{SHARE_LINK}</span>
         <button
           type="button"
-          className="bg-primary text-primary-fg rounded-lg px-2.5 py-1 text-[11px] font-extrabold"
+          className="bg-primary text-primary-fg rounded-lg px-3.5 py-3 text-[11px] font-extrabold"
         >
           Copy
         </button>
@@ -64,7 +67,7 @@ export function Lobby({ onStart }: { onStart: () => void }) {
           <button
             key={s}
             type="button"
-            className="flex-1 h-8 rounded-full border border-border bg-card text-[11px] font-bold text-fg"
+            className="flex-1 h-11 rounded-full border border-border bg-card text-[11px] font-bold text-fg"
           >
             {s}
           </button>
