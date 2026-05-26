@@ -1,18 +1,26 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-26 (end of day, post Phase 1 + Phase 2)
-**Branch state:** Supabase migration Phases 1 + 2 are merged to `main`
-and live in production.
+**Last updated:** 2026-05-26 (post Phase 1 + 2 + 3, post cleanup PR)
+**Branch state:** Supabase migration complete (Phases 1 + 2 + 3 merged
+to `main` and live in production).
 
-• **Phase 1** — the catalog (venues + events) reads from Supabase via
-  Server Components. `lib/mock-data.ts` is no longer the source of
-  truth for venues/events; user state (saved + bookings + profile
-  prefs) still lives in localStorage / mock until Phase 3.
-• **Phase 2** — magic-link sign-in is live. Anonymous browsing still
-  works (Auth Optional model); `/profile` branches between anon
-  (Sign in CTA) and authed (existing UI + Sign Out).
+• **Phase 1** — catalog (venues + events) reads from Supabase via
+  Server Components in `lib/queries.ts`. `lib/mock-data.ts` no longer
+  owns catalog data.
+• **Phase 2** — magic-link sign-in live (`/sign-in` + `/auth/callback`).
+  Session-refresh middleware. Auth-optional model — anonymous
+  browsing fully supported; `/profile` branches per auth state.
+• **Phase 3** — `useSaved` and `useBookings` are dual-mode:
+  localStorage when anonymous, `public.saved_venues` /
+  `public.bookings` when signed in. One-time slug→uuid migration
+  on first sign-in.
 
-Codebase remains team-ready: strict TS, clean ESLint, Prettier-enforced.
+What's still NOT in Supabase: profile `display_name` + `preferences`
+(reads from `MOCK_USER` as fallback), and the Plan Together
+participants (static demo data). Both deliberately deferred.
+
+Codebase: strict TS, clean ESLint, Prettier-enforced. `lib/mock-data.ts`
+trimmed from 502 → 70 LOC (only the 5 still-imported exports remain).
 
 This is a point-in-time snapshot. For contribution conventions see
 [`CONTRIBUTING.md`](./CONTRIBUTING.md). For durable stack info see
@@ -104,27 +112,29 @@ One font family across the entire consumer app.
 
 ---
 
-## Data layer (Phase 1 + 2 shipped)
+## Data layer (Phase 1 + 2 + 3 shipped)
 
 | Source | Lives in | Read via |
 |---|---|---|
 | Venues (11) | Supabase `public.venues` | `lib/queries.ts → fetchVenues / fetchVenueBySlug / fetchVenueById` |
 | Events (5) | Supabase `public.events` | `lib/queries.ts → fetchEvents` |
-| Saved set | localStorage `fl.saved.v1` (slugs) | `components/saved-context.tsx → useSaved()` |
-| Bookings | localStorage `fl.bookings.v1` | `components/bookings-context.tsx → useBookings()` |
+| Saved set | anon: localStorage `fl.saved.v1` · authed: `public.saved_venues` | `components/saved-context.tsx → useSaved()` |
+| Bookings | anon: localStorage `fl.bookings.v1` · authed: `public.bookings` | `components/bookings-context.tsx → useBookings()` |
 | Auth user | Supabase Auth cookies (HTTPOnly) | `lib/auth.ts → getAuthUser()` |
-| Profile display name + preferences | `MOCK_USER` (auth email fallback when signed in) | `lib/mock-data.ts → getCurrentUser()` — **Phase 3 moves to `public.profiles`** |
-| Plan Together participants (4) | `MOCK_PARTICIPANTS` (static demo data) | `lib/mock-data.ts → getParticipants()` |
+| Profile display name + preferences | `MOCK_USER` fallback (Phase 3.5: read from `public.profiles`) | `lib/mock-data.ts → getCurrentUser()` |
+| Plan Together participants (4) | `MOCK_PARTICIPANTS` (static demo data, no DB story) | `lib/mock-data.ts → getParticipants()` |
 
 **Slug-based references:** `useSaved` keys by `venue.slug` (e.g.
 `"padella"`), not `venue.id` (Supabase uuid). Slugs are stable across
-reseeds; uuids are not. Phase 3's sign-in migration resolves slug→uuid
-when moving saved/bookings into `public.saved_venues` / `public.bookings`.
+reseeds; uuids are not. The Phase 3 sign-in migration resolves
+slug → uuid at the moment of moving local rows into
+`public.saved_venues` / `public.bookings`.
 
-**Mock data not removed yet.** `lib/mock-data.ts` still contains
-`MOCK_VENUES`, `MOCK_EVENTS`, and the old catalog accessors — they're
-no longer imported by anything but kept as a local fallback during
-testing. Will be removed in a cleanup PR after Phase 3.
+**One-time local→DB migration** runs in the SavedProvider /
+BookingsProvider whenever they mount with `authUserId` set AND
+localStorage still holds rows. FK-safe (unknown slugs are dropped),
+idempotent (upsert on the PK), and local data is cleared only after
+a successful insert.
 
 **Venue overlap on Explore.** The "For You" filter concatenates every
 venue + every event. Padella, Dishoom, and Bao all qualify as evening
@@ -173,29 +183,26 @@ prototype's overlap; not a bug.
 
 In rough priority order:
 
-1. **Phase 3 — user-scoped data to Supabase.** `useSaved` and
-   `useBookings` become dual-mode: localStorage when anonymous, DB
-   when authed. One-time migration on first sign-in: read existing
-   localStorage entries (slugs), resolve slug→uuid, INSERT into
-   `public.saved_venues` / `public.bookings` for the new user, then
-   clear local storage. `/profile` reads `display_name` +
-   `preferences` from `public.profiles` instead of `MOCK_USER`.
+1. **Phase 3.5 — profile to Supabase.** `/profile` reads `display_name`
+   and `preferences` from `public.profiles` instead of `MOCK_USER`.
    `/onboarding` writes preferences to the profile row and flips
-   `onboarded`.
-2. **Cleanup PR after Phase 3.** Remove `MOCK_VENUES`, `MOCK_EVENTS`,
-   and the catalog accessors from `lib/mock-data.ts` (currently
-   dead code).
-3. **Real venue data** — replace the 11 hand-seeded venues with
-   curated London venues + image rights cleared. Maria adds them
-   directly via the Supabase Dashboard (or a small admin script).
-4. **Custom SMTP for auth emails** — wire Resend (or similar) so the
+   `onboarded = true` on completion. Small follow-up to fully retire
+   `MOCK_USER` (the last piece of mock-data still wired into the UI).
+2. **Real venue data** — replace the 11 hand-seeded venues with
+   curated London venues + image rights cleared. Add directly via the
+   Supabase Dashboard (Table Editor → `venues`) or update
+   `supabase/seed.sql` and re-run.
+3. **Custom SMTP for auth emails** — wire Resend (or similar) so the
    ~3-4/hour rate limit on Supabase's built-in email service stops
    being a launch blocker.
-5. **Vercel Deployment Protection off** — when the site should be
+4. **Vercel Deployment Protection off** — when the site should be
    publicly browsable, toggle off in Vercel → Settings.
-6. **Stripe Connect for partners** — partner-side payments / booking
-   commissions. Partner Dashboard prototype lives in `project/Partner
-   Dashboard.html` (static HTML, not part of this Next.js app yet).
+5. **Stripe Connect for partners** — partner-side payments / booking
+   commissions. Partner Dashboard prototype lives in
+   `project/_design-handoff/Partner Dashboard.html` (static HTML, not
+   part of this Next.js app yet).
+6. **PWA manifest** — `app/layout.tsx` references `manifest.json` but
+   the file doesn't exist; harmless 404 in dev.
 
 ---
 
