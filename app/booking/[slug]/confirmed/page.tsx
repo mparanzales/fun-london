@@ -3,6 +3,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Check, Calendar, Share2 } from "lucide-react";
 import { getVenueBySlug } from "@/lib/mock-data";
+import { BookingRecorder } from "./booking-recorder";
 
 // Booking confirmation (Figma frame 3c).
 // Top-level route OUTSIDE the (main) group — no bottom nav, full-screen
@@ -28,6 +29,13 @@ export default function BookingConfirmedPage({
     // Mobile-shell constraint matches the (main) route group (max-w-md).
     // Keeps visual width consistent across the reservation flow.
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
+      <BookingRecorder
+        id={bookingRef}
+        venueId={venue.id}
+        venueSlug={venue.slug}
+        partySize={partySize}
+        slotLabel={venue.nextSlotLabel}
+      />
       {/* Top bar — back returns to the venue detail page */}
       <div className="px-5 pt-4">
         <Link

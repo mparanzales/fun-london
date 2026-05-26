@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import { SavedProvider } from "@/components/saved-context";
+import { BookingsProvider } from "@/components/bookings-context";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -34,13 +35,15 @@ export default function RootLayout({
   return (
     <html lang="en" className={jakarta.variable}>
       <body className="font-sans antialiased min-h-screen">
-        {/* SavedProvider + ThemeProvider live at root so every route
-            (consumer (main) shell, splash, onboarding, /venue/[slug])
-            shares one provider tree. The venue detail route sits outside
-            (main) to hide the bottom nav and needs the same provider
-            context for heart-save state. */}
+        {/* SavedProvider, BookingsProvider, ThemeProvider live at root so
+            every route (consumer (main) shell, splash, onboarding,
+            /venue/[slug], /booking/[slug]/confirmed) shares one provider
+            tree. Bookings sits inside Saved purely for read order; they
+            don't depend on each other. */}
         <ThemeProvider />
-        <SavedProvider>{children}</SavedProvider>
+        <SavedProvider>
+          <BookingsProvider>{children}</BookingsProvider>
+        </SavedProvider>
         <Analytics />
       </body>
     </html>
