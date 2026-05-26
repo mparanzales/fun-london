@@ -6,9 +6,9 @@ import Link from "next/link";
 
 export function PlanTogetherCard() {
   return (
-    <div className="px-4 py-4.5">
+    <div className="px-5 pt-8 pb-4.5">
       <div
-        className="rounded-[18px] p-5.5 text-white h-[200px] relative overflow-hidden"
+        className="rounded-2xl px-7 py-7 text-white relative overflow-hidden"
         style={{
           background:
             "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
@@ -16,17 +16,16 @@ export function PlanTogetherCard() {
       >
         {/* Decorative offset circle, half off-canvas top-right */}
         <div className="absolute -top-[30px] -right-[30px] w-[140px] h-[140px] rounded-full bg-white/[0.12]" />
-        <div className="flex gap-1 text-[22px]">👥✨🎉</div>
-        <h2 className="text-[22px] font-extrabold mt-4 mb-1.5 tracking-tight">
+        <h2 className="text-[22px] font-extrabold mb-2 tracking-tight">
           Plan with friends
         </h2>
-        <div className="text-xs opacity-90 leading-relaxed">
+        <div className="text-xs opacity-90 leading-relaxed max-w-[78%]">
           Everyone swipes their vote. We balance it into one plan you&apos;ll
           all actually want to do.
         </div>
         <Link
           href="/plan/together"
-          className="inline-block mt-3.5 bg-white text-primary rounded-full px-4 py-2 font-extrabold text-xs no-underline"
+          className="inline-block mt-5 bg-white text-primary rounded-full px-5 py-2.5 font-extrabold text-xs no-underline"
         >
           Start a session →
         </Link>

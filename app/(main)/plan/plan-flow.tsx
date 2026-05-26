@@ -73,7 +73,7 @@ export function PlanFlow() {
             Plan My Night
           </h1>
           <div className="text-[13px] text-muted-fg mt-1">
-            Tell us what you&apos;re feeling — we&apos;ll do the rest.
+            Tell us what you&apos;re feeling. We&apos;ll do the rest.
           </div>
         </div>
 
@@ -138,7 +138,11 @@ export function PlanFlow() {
           <button
             type="button"
             onClick={() => setStep("result")}
-            className="w-full h-[52px] rounded-[14px] bg-primary text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
+            className="w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
+            style={{
+              background:
+                "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
+            }}
           >
             Make my plan ✨
           </button>
@@ -186,7 +190,7 @@ export function PlanFlow() {
                 {STEP_LABELS[i]}
               </div>
             </div>
-            <div className="bg-card border border-border rounded-[14px] overflow-hidden">
+            <div className="bg-card border border-border rounded-2xl overflow-hidden">
               <div
                 className="h-[120px]"
                 style={{ background: `url(${s.imgUrl}) center/cover` }}
