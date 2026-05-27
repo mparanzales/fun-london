@@ -252,7 +252,8 @@ export const VENUE_SEEDS: VenueSeed[] = [
       {
         publication: "Andy Hayler",
         url: "https://www.andyhayler.com/restaurant/sessions-arts-club",
-        title: "Sessions Arts Club — Andy Hayler Feb 2024 review (post Florence Knight)",
+        title:
+          "Sessions Arts Club — Andy Hayler Feb 2024 review (post Florence Knight)",
         date: "2024-02-01",
       },
       {
@@ -719,6 +720,585 @@ export const VENUE_SEEDS: VenueSeed[] = [
       {
         label: "Quick turnover by design",
         body: "Counter seats, brisk pace. Not a long lingering meal.",
+      },
+    ],
+  },
+
+  // ── 12. The Marksman ─────────────────────────────────────────────────
+  {
+    slug: "the-marksman",
+    searchQuery: "The Marksman Public House 254 Hackney Road London",
+    neighbourhood: "Hackney",
+    vibe: "Victorian boozer below, St. JOHN alums plating brown-butter tart above.",
+    longDescription:
+      "Tom Harris and Jon Rotheram's Grade II-listed Hackney Road pub: downstairs a proper drinking den, upstairs the dining room turning out the beef-and-barley buns and brown butter & honey tart that built the queue. Michelin Pub of the Year 2017, Bib Gourmand, ten years deep.",
+    type: "Pub",
+    price: "£££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks"],
+    vibeTags: ["Gastropub", "British", "Sunday roast", "St. JOHN lineage"],
+    editorialSources: [
+      {
+        publication: "Michelin Guide",
+        url: "https://guide.michelin.com/gb/en/greater-london/london/restaurant/marksman",
+        title: "Marksman — Bib Gourmand, London",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/bars-and-pubs/marksman",
+        title: "The Marksman, Hackney",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/marksman",
+        title: "Marksman — Hackney review",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Restaurant-Reviews/East-London/the-marksman",
+        title: "The Marksman — Hackney",
+      },
+      {
+        publication: "The Good Food Guide",
+        url: "https://www.thegoodfoodguide.co.uk/restaurant/the-marksman/id/27665",
+        title: "The Marksman, Hackney — review",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Two rooms, two experiences",
+        body: "Downstairs is a Victorian boozer with bar snacks and pints; the proper menu — and the famous tart — lives in the small upstairs dining room. Book if you want the full thing.",
+      },
+      {
+        label: "Spend honestly",
+        body: "Closer to a restaurant than a pub on the bill. Diners flag Sunday roasts around £35, starters that add up fast. Easy £50+ a head with a drink.",
+      },
+      {
+        label: "Sunday roast is the headline act",
+        body: "Weekend lunches and Sunday roast book out weeks ahead via OpenTable. Midweek dinners are the quieter way in.",
+      },
+    ],
+  },
+
+  // ── 13. The French House ─────────────────────────────────────────────
+  {
+    slug: "the-french-house",
+    searchQuery: "The French House restaurant 49 Dean Street Soho London",
+    neighbourhood: "Soho",
+    vibe: "Seven tables above Soho's Frenchest pub; Neil Borthwick on the pans.",
+    longDescription:
+      "The tiny upstairs dining room at 49 Dean Street, where Neil Borthwick (ex-Merchants Tavern, married to Angela Hartnett) cooks a short, hand-written daily menu of robust French country food. Twelve covers, two sittings, a room that's been Soho's living room since 1891.",
+    type: "Pub",
+    price: "£££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks"],
+    vibeTags: ["French", "Historic Soho", "Tiny dining room", "Long lunch"],
+    editorialSources: [
+      {
+        publication: "Michelin Guide",
+        url: "https://guide.michelin.com/gb/en/greater-london/london/restaurant/french-house",
+        title: "The French House — London",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/upstairs-at-the-french-house",
+        title: "Upstairs at the French House, Soho",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/the-french-house",
+        title: "The French House — Soho review",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Gastroblog/Test-drive/french-house-soho-restaurant-review-neil-borthwick-london-dean-street",
+        title: "Test Driving The French House with Neil Borthwick",
+      },
+      {
+        publication: "Jancis Robinson",
+        url: "https://www.jancisrobinson.com/articles/fine-french-lunch-soho",
+        title: "A fine French lunch in Soho",
+      },
+      {
+        publication: "Edible Reading",
+        url: "https://ediblereading.com/2025/08/29/restaurant-review-the-french-house-soho/",
+        title: "Restaurant review — The French House, Soho",
+        date: "2025-08-29",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Topjaw",
+        handle: "@topjaw",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@topjaw/video/7313983451818888481",
+        verdict: "positive",
+        note: "'An absolute essential' of the London pub scene — deep-rooted, industry-favourite, feels like walking into someone's home.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Upstairs only is bookable",
+        body: "The famous downstairs pub is walk-in (and famously no-phones, half-pints-of-beer-only). The dining room above is the bookable bit. Reserve via frenchhousesoho.com — diary opens 60 days out.",
+      },
+      {
+        label: "Tiny room, tight rules",
+        body: "Seven tables, max party of six, two sittings per service. Not a long-lingering room on a busy night. Lunch is the connoisseur's move.",
+      },
+      {
+        label: "Daily handwritten menu",
+        body: "No menu on the website; the day's list goes up on Instagram. Lovely if you trust the kitchen, awkward if you've got a fussy eater in tow.",
+      },
+    ],
+  },
+
+  // ── 14. Ronnie Scott's ───────────────────────────────────────────────
+  {
+    slug: "ronnie-scotts",
+    searchQuery: "Ronnie Scott's Jazz Club 47 Frith Street Soho London",
+    neighbourhood: "Soho",
+    vibe: "London's oldest jazz club — velvet booths, two sets a night.",
+    longDescription:
+      "Independent Soho institution opened by saxophonist Ronnie Scott in 1959. Two ticketed sets nightly — dinner-and-show, then the cheaper Late Late Show after 11.15pm — in a dim, candle-lit room with velvet booths.",
+    type: "Live Music",
+    price: "£££",
+    timeOfDay: "Night",
+    moodTags: ["culture", "drinks"],
+    vibeTags: ["Since 1959", "Two sets a night", "Late Late Show", "Soho"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/music/ronnie-scotts",
+        title: "Ronnie Scott's — Music in Soho, London",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/news/legendary-london-jazz-club-ronnie-scotts-has-revealed-the-official-opening-date-of-its-new-music-venue-011926",
+        title:
+          "Ronnie Scott's reveals opening date of its new 140-capacity venue, Upstairs at Ronnie's",
+        date: "2026-01-19",
+      },
+      {
+        publication: "Jazzwise",
+        url: "https://www.jazzwise.com/features/article/the-house-that-ronnie-and-pete-built-celebrating-ronnie-scott-s-at-60",
+        title:
+          "The house that Ronnie and Pete built: celebrating Ronnie Scott's at 60",
+      },
+      {
+        publication: "Clash",
+        url: "https://www.clashmusic.com/live/upstairs-at-ronnie-scotts-elevates-sound-elegance-in-sohos-iconic-music-venue/",
+        title:
+          "Upstairs At Ronnie Scott's Elevates Sound & Elegance In Soho's Iconic Music Venue",
+      },
+      {
+        publication: "BFI Sight & Sound",
+        url: "https://www.bfi.org.uk/sight-and-sound/reviews/ronnies-ronnie-scott-world-famous-jazz-club-documentary-oliver-murray",
+        title: "Ronnie's review: Soho's old jazz scene in blue",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "London Weekender",
+        handle: "@londonweekender",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@londonweekender/video/7267975290175950081",
+        verdict: "positive",
+        note: "'Genuinely the best cocktails I have had in London so far' — date-night/live-music angle.",
+      },
+      {
+        creator: "indiana_mg",
+        handle: "@indiana_mg",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@indiana_mg/video/7268594531984018694",
+        verdict: "positive",
+        note: "Flags the student/musician concession — £6 entry to the Late Late Show with student ID.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Two shows a night — pick the right one",
+        body: "Main show is dinner-and-music (steep — expect £££ once food, service and minimum spend land). The Late Late Show from ~11.15pm is £12 advance and skips the dining commitment. Student/musician concession drops it to ~£6 on Wed/Thu.",
+      },
+      {
+        label: "Book direct via ronniescotts.co.uk",
+        body: "All tickets sold through the venue's own site (no DICE/Ticketweb). Popular acts sell out weeks ahead — walk-up is risky.",
+      },
+      {
+        label: "Seating is cramped and assigned",
+        body: "Velvet booths look romantic but tables are tight and shared. Arrive at door-time, not show-time, if you want a sightline. Bar stools are first-come.",
+      },
+    ],
+  },
+
+  // ── 15. Café OTO ─────────────────────────────────────────────────────
+  {
+    slug: "cafe-oto",
+    searchQuery: "Cafe OTO 18-22 Ashwin Street Dalston London",
+    neighbourhood: "Dalston",
+    vibe: "Bare-bones Dalston room where the world's experimental musicians actually want to play.",
+    longDescription:
+      "Independent 150-cap venue opened in 2008 by Hamish Dunbar and Keiko Yamamoto in a former paint factory. Free jazz, improv, noise, electronica and unclassifiable music seven nights a week — plus café and record shop by day, OTOROKU live-recording label on the side.",
+    type: "Live Music",
+    price: "££",
+    timeOfDay: "Night",
+    moodTags: ["culture"],
+    vibeTags: ["Experimental", "No stage", "Sets not gigs", "OTOROKU label"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/music/you-always-know-youll-get-something-interesting-an-oral-history-of-cafe-oto",
+        title:
+          "'You always know you'll get something interesting': an oral history of Cafe OTO",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/things-to-do/cafe-oto",
+        title: "Cafe Oto: Time Out's guide to the experimental music haven",
+      },
+      {
+        publication: "The Quietus",
+        url: "https://thequietus.com/articles/24806-anthony-braxton-cafe-oto-live-review",
+        title: "LIVE REPORT: Anthony Braxton At Cafe Oto",
+      },
+      {
+        publication: "Bandcamp Daily",
+        url: "https://daily.bandcamp.com/features/cafe-oto-album-guide",
+        title: "Café OTO Turns 15 — an album guide",
+      },
+      {
+        publication: "Eastlondonlines",
+        url: "https://www.eastlondonlines.co.uk/2025/03/inside-cafe-oto-the-dalston-venue-name-checked-in-oscar-acceptance-speech/",
+        title:
+          "Inside Cafe Oto: the Dalston venue name-checked in Oscar acceptance speech",
+        date: "2025-03-15",
+      },
+      {
+        publication: "The Jazz Mann",
+        url: "https://www.thejazzmann.com/reviews/review/marc-ribot-solo-performance-cafe-oto-dalston-london-day-two-of-a-two-day-residency-18-may-2025",
+        title: "Marc Ribot Solo Performance, Cafe Oto",
+        date: "2025-05-18",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Book in advance on cafeoto.co.uk",
+        body: "Tickets are advance-only via the venue's own site (10% fee capped at £2.80). Most shows are a mix of seated + standing on first-come basis — turn up at door-time, not start-time, if you want a chair.",
+      },
+      {
+        label: "It's a room, not a venue",
+        body: "No stage, no backstage, no frills. That bare-paint-factory austerity is the appeal — performers play at floor level, a metre from you. Sets, not gigs; listen quietly.",
+      },
+      {
+        label: "Most shows wrap by 11pm",
+        body: "Door times listed on each event; music typically starts 30 min after doors and is done by 11pm. Café/record shop runs in daytime — worth a separate trip.",
+      },
+    ],
+  },
+
+  // ── 16. The Dusty Knuckle ────────────────────────────────────────────
+  {
+    slug: "dusty-knuckle",
+    searchQuery: "The Dusty Knuckle Bakery Abbot Street Dalston London",
+    neighbourhood: "Dalston",
+    vibe: "Social-enterprise bakery making London's most-hyped sandwiches.",
+    longDescription:
+      "Started in 2014 by Max Tobias, Rebecca Oliver and Daisy Terry as a Dalston shipping-container bakery with a youth-training mission. Now a TikTok-famous focaccia-sandwich destination with a second bakery in Harringay and a Highbury van.",
+    type: "Cafe",
+    price: "££",
+    timeOfDay: "Day",
+    moodTags: ["culture"],
+    vibeTags: [
+      "Sourdough",
+      "Social enterprise",
+      "Focaccia sandwiches",
+      "Walk-in",
+    ],
+    editorialSources: [
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/dusty-knuckle-bakery-1",
+        title: "The Dusty Knuckle Bakery — Dalston review",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/the-dusty-knuckle",
+        title: "The Dusty Knuckle, Dalston",
+      },
+      {
+        publication: "Square Meal",
+        url: "https://www.squaremeal.co.uk/restaurants/the-dusty-knuckle-dalston_22424",
+        title: "The Dusty Knuckle Dalston — review, menu, opening times",
+      },
+      {
+        publication: "Foodism",
+        url: "https://foodism.co.uk/features/long-reads/rise-of-the-sandwich/",
+        title: "Why the sandwich is London's hottest food trend",
+      },
+      {
+        publication: "Country & Town House",
+        url: "https://www.countryandtownhouse.com/food-and-drink/the-dusty-knuckle/",
+        title: "The Dusty Knuckle: What's The Hype Around This Viral Bakery?",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Baking Hermann",
+        handle: "@bakinghermann",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@bakinghermann/video/7204772553104051462",
+        verdict: "positive",
+        note: "'The secret to London's ultimate sandwich' — behind-the-scenes at Dalston.",
+      },
+      {
+        creator: "Baking Hermann",
+        handle: "@bakinghermann",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@bakinghermann/video/7250070111757798683",
+        verdict: "positive",
+        note: "How London's best sandwich is made at The Dusty Knuckle.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Sandwiches sell out by lunch",
+        body: "Going viral on TikTok means the bakes routinely run out well before close. Get there by 12, especially on weekends, or you'll miss the focaccia sandwich entirely.",
+      },
+      {
+        label: "Queue is real, no online ordering",
+        body: "20+ minute queues round the block on weekends are standard at both Dalston and Harringay. Walk-in only — no booking, no pre-order, no app.",
+      },
+      {
+        label: "Social-enterprise mission, not a gimmick",
+        body: "Founded to train at-risk young people through a paid bakery programme. The prison-bakery scheme is a real ongoing initiative, not marketing dressing.",
+      },
+    ],
+  },
+
+  // ── 17. Brawn ─────────────────────────────────────────────────────────
+  {
+    slug: "brawn",
+    searchQuery: "Brawn 49 Columbia Road Bethnal Green London",
+    neighbourhood: "Columbia Road",
+    vibe: "The natural-wine bistro that taught London small plates.",
+    longDescription:
+      "Opened in 2010 as the Terroirs team's east-London outpost and now fully run by chef Ed Wilson. This Columbia Road bistro pioneered the small-plates-and-low-intervention-wine template that the rest of the city spent the next decade copying.",
+    type: "Wine Bar",
+    price: "£££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks"],
+    vibeTags: [
+      "Natural wine",
+      "Small plates",
+      "Neighbourhood bistro",
+      "European",
+    ],
+    editorialSources: [
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/brawn",
+        title: "Brawn — review, Shoreditch",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/brawn",
+        title: "Brawn — restaurants in Bethnal Green",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/London-restaurants/East-London/brawn-columbia-road-wine-bar-terroirs-london",
+        title: "Brawn — Columbia Road wine bar from the Terroirs team",
+      },
+      {
+        publication: "Square Meal",
+        url: "https://www.squaremeal.co.uk/restaurants/brawn_3209",
+        title: "Brawn, London — review, menu, opening times",
+      },
+      {
+        publication: "The Good Food Guide",
+        url: "https://www.thegoodfoodguide.co.uk/restaurant/brawn/id/13571",
+        title: "Review of Brawn, Bethnal Green",
+      },
+      {
+        publication: "Harden's",
+        url: "https://www.hardens.com/az/restaurants/london/e2/brawn.htm",
+        title: "Brawn — Harden's London review",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Kate Nevs",
+        handle: "@katenevs",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@katenevs/video/7302181612362517793",
+        verdict: "positive",
+        note: "'I've had my own birthday dinner at Brawn — is there a higher compliment a London gal can make?'",
+      },
+      {
+        creator: "Hungry Hobbit",
+        handle: "@hungryhobbit11",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@hungryhobbit11/video/7142828023933324549",
+        verdict: "positive",
+        note: "'Immaculate vibes and plates' on Columbia Road.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Book ahead, especially Sunday",
+        body: "Small converted-warehouse room on Columbia Road — and the Sunday flower-market crowd makes lunchtime walk-ins nearly impossible. Reserve via the website.",
+      },
+      {
+        label: "Natural wine list runs the show",
+        body: "The list leans heavily into low-intervention, organic and biodynamic bottles. If you want a classic Bordeaux or a familiar New World pour, this isn't that bistro — trust the staff or you'll be lost.",
+      },
+      {
+        label: "Closed Sunday dinner / Monday lunch",
+        body: "Lunch is Tues-Sat only; dinner Mon-Sat. Sunday is the Columbia Road flower-market lunch service — plan accordingly.",
+      },
+    ],
+  },
+
+  // ── 18. 40 Maltby Street ─────────────────────────────────────────────
+  {
+    slug: "40-maltby-street",
+    searchQuery: "40 Maltby Street wine bar SE1 3PA Bermondsey London",
+    neighbourhood: "Bermondsey",
+    vibe: "Natural-wine bar under a Bermondsey railway arch.",
+    longDescription:
+      "Raef Hodgson's wine bar and modern European kitchen tucked inside the Gergovie Wines warehouse, with chef Steve Williams (ex-Ledbury, ex-Harwood Arms) turning out a weekly-changing chalkboard of small plates. A no-bookings room of ~30 covers built for long, slow sessions through a 120+ bin natural wine list.",
+    type: "Wine Bar",
+    price: "£££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks"],
+    vibeTags: ["Natural wine", "Railway arch", "No bookings", "Chef-loved"],
+    editorialSources: [
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/40-maltby-street",
+        title: "40 Maltby Street — Review, Bermondsey",
+        date: "2024-04-01",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/40-maltby-street",
+        title: "40 Maltby Street — Restaurants in Bermondsey",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Restaurant-Reviews/South-Bank-London-Bridge-Bermondsey/40-maltby-street-bermondsey",
+        title: "40 Maltby Street, Bermondsey",
+      },
+      {
+        publication: "Square Meal",
+        url: "https://www.squaremeal.co.uk/restaurants/40-maltby-street_3758",
+        title: "40 Maltby Street — Restaurant Review",
+      },
+      {
+        publication: "The Good Food Guide",
+        url: "https://www.thegoodfoodguide.co.uk/restaurant/40-maltby-street/id/26285",
+        title: "Review of 40 Maltby Street, Bermondsey",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Cheese and Biscuits",
+        handle: "cheesenbiscuits",
+        platform: "blog",
+        url: "https://cheesenbiscuits.blogspot.com/2022/11/40-maltby-street-bermondsey.html",
+        verdict: "positive",
+        note: "Cheddar puffs and white beans with aioli — 'all of London's best restaurant instincts in a professional, friendly package'.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "No bookings, tiny room",
+        body: "Walk-in only with ~30 covers on long shared high tables. Best shot is lunch Thu-Sat from 12 — dinner queues form before the 5:30 open.",
+      },
+      {
+        label: "Natural wine, all the way",
+        body: "The list is 100% low-intervention. If you want a polished classical Burgundy or a clean New World Chardonnay, this isn't the room — the funk isn't for everyone.",
+      },
+      {
+        label: "Railway-arch acoustics",
+        body: "Hard surfaces, exposed brick, vaulted ceiling. It gets loud once the room fills, and trains rumble overhead — part of the charm, not a quiet date.",
+      },
+    ],
+  },
+
+  // ── 19. Forza Wine (Peckham) ─────────────────────────────────────────
+  {
+    slug: "forza-wine-peckham",
+    searchQuery: "Forza Wine 133a Rye Lane Peckham London",
+    neighbourhood: "Peckham",
+    vibe: "Rooftop Italian small plates above Peckhamplex.",
+    longDescription:
+      "Bash Redford and Michael Lavery's rooftop wine bar on top of the Peckhamplex car park, with floor-to-ceiling glass on the indoor cube and a bench-filled terrace facing the South London skyline. Italian-leaning snacks, frozen grape daiquiris and a tight, Italy-heavy wine list.",
+    type: "Wine Bar",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["drinks", "dinner"],
+    vibeTags: ["Rooftop", "Sunset", "Italian", "Skyline view"],
+    editorialSources: [
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/forza-wine",
+        title: "Forza Wine — Review, Peckham",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/bars-and-pubs/forza-wine",
+        title: "Forza Wine, Peckham",
+      },
+      {
+        publication: "Square Meal",
+        url: "https://www.squaremeal.co.uk/restaurants/forza-wine_23237",
+        title: "Forza Wine — Restaurant Review, Menu, Opening Times",
+      },
+      {
+        publication: "The Nudge",
+        url: "https://thenudge.com/london-restaurants/forza-wine/",
+        title: "Forza Wine — Rooftop Italian From The Forza Win Team",
+      },
+      {
+        publication: "Restaurant Online",
+        url: "https://www.restaurantonline.co.uk/Article/2026/02/27/a-show-of-forza-bash-redford-and-michael-lavery-on-their-new-soho-venture/",
+        title:
+          "A show of Forza: Bash Redford and Michael Lavery on their new Soho venture",
+        date: "2026-02-27",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Bald Flavours",
+        handle: "baldflavours",
+        platform: "blog",
+        url: "https://baldflavours.com/forzawine/",
+        verdict: "positive",
+        note: "Walkthrough of the Rye Lane rooftop and the small-plates menu.",
+      },
+      {
+        creator: "Eats Dulwich",
+        handle: "eatsdulwich",
+        platform: "blog",
+        url: "https://eatsdulwich.substack.com/p/restaurant-review-forza-wine",
+        verdict: "positive",
+        note: "Substack review of the Peckham original — pre-Covid favourite that 'feels like part of the furniture'.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Bookings are tight in summer",
+        body: "Capacity is ~100 across indoor cube + terrace. Tables are bookable via the Forza website, but in summer the sunset slots vanish weeks ahead and the walk-in terrace fills fast from 5pm.",
+      },
+      {
+        label: "It's on top of a car park",
+        body: "Entry is via the Peckhamplex multi-storey lift on Rye Lane — first-timers regularly walk past it. Stick with the signage; the lift goes straight to the 5th floor.",
+      },
+      {
+        label: "Snacks, not a full dinner",
+        body: "The kitchen is small plates priced £4-18, designed for grazing with wine. Big appetites should order more than feels reasonable, or eat before.",
       },
     ],
   },
