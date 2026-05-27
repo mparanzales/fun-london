@@ -23,6 +23,8 @@ create table if not exists public.profiles (
 -- Renamed from `places` in v1. Columns expanded to match the v2 Venue type
 -- (longDescription, reviewCount, walkingMins, tablesFree, nextSlotLabel,
 --  address, lat, lng) that the venue detail page renders.
+-- v3 (Phase 4): added real-venue ingestion columns (google_place_id,
+-- booking_links, website_url, phone, instagram_handle, editorial_sources).
 create table if not exists public.venues (
   id uuid primary key default gen_random_uuid(),
   slug text unique not null,
@@ -44,11 +46,21 @@ create table if not exists public.venues (
   img_url text not null,
   mood_tags text[] not null default '{}',
   vibe_tags text[] not null default '{}',
+  -- Real-venue ingestion (Phase 4). All nullable so the existing 11 demo
+  -- rows remain valid; populated by scripts/ingest-venues.ts when adding
+  -- real venues sourced from Google Places + cross-referenced editorial.
+  google_place_id text unique,             -- canonical id, lets us re-sync
+  booking_links jsonb,                     -- [{platform, url, priority}]
+  website_url text,
+  phone text,
+  instagram_handle text,
+  editorial_sources jsonb,                 -- [{publication, url, title, date}]
   created_at timestamptz not null default now()
 );
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
 create index if not exists venues_type_idx on public.venues(type);
 create index if not exists venues_slug_idx on public.venues(slug);
+create index if not exists venues_google_place_id_idx on public.venues(google_place_id);
 
 -- Events — backs the `Event` type
 -- Note: events may or may not have a venue in our taxonomy. venue_id is
@@ -176,3 +188,32 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ─────────────────────────────────────────────────────────
+-- Migrations (idempotent in-place ALTERs for existing dbs)
+--
+-- Re-running this block is safe: each statement uses `if not exists`.
+-- Order: most recent at the BOTTOM. Each migration is dated + named.
+-- ─────────────────────────────────────────────────────────
+
+-- 2026-05-27 · Phase 4 real-venue ingestion columns ───────────────────────
+alter table public.venues
+  add column if not exists google_place_id text,
+  add column if not exists booking_links jsonb,
+  add column if not exists website_url text,
+  add column if not exists phone text,
+  add column if not exists instagram_handle text,
+  add column if not exists editorial_sources jsonb;
+
+-- Unique constraint on google_place_id (skip if it already exists)
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'venues_google_place_id_key'
+  ) then
+    alter table public.venues
+      add constraint venues_google_place_id_key unique (google_place_id);
+  end if;
+end$$;
+
+create index if not exists venues_google_place_id_idx on public.venues(google_place_id);

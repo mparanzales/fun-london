@@ -27,6 +27,8 @@ import type {
   EventCategory,
   Profile,
   UserPreferences,
+  BookingLink,
+  EditorialSource,
 } from "./types";
 
 // ── Row shapes (raw DB) ─────────────────────────────────────────────────
@@ -52,6 +54,13 @@ type VenueRow = {
   img_url: string;
   mood_tags: string[];
   vibe_tags: string[];
+  // Phase 4 — nullable on existing demo rows.
+  google_place_id: string | null;
+  booking_links: BookingLink[] | null;
+  website_url: string | null;
+  phone: string | null;
+  instagram_handle: string | null;
+  editorial_sources: EditorialSource[] | null;
   created_at: string;
 };
 
@@ -93,6 +102,12 @@ function mapVenue(r: VenueRow): Venue {
     imgUrl: r.img_url,
     moodTags: r.mood_tags as Mood[],
     vibeTags: r.vibe_tags,
+    googlePlaceId: r.google_place_id,
+    bookingLinks: r.booking_links,
+    websiteUrl: r.website_url,
+    phone: r.phone,
+    instagramHandle: r.instagram_handle,
+    editorialSources: r.editorial_sources,
     createdAt: r.created_at,
   };
 }
