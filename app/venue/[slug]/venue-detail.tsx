@@ -56,16 +56,21 @@ export function VenueDetail({ venue }: { venue: Venue }) {
     (!!venue.editorialSources && venue.editorialSources.length > 0) ||
     (!!venue.creatorCoverage && venue.creatorCoverage.length > 0);
 
-  // First pill: prefix "Tonight " only for reservable venues whose
-  // nextSlotLabel is a time. Non-reservable venues seed labels like
-  // "Open till 6 PM" or "Open Sun · noon" which read better unprefixed.
-  // "Tables free" pill is hidden for non-reservable venues (a museum
-  // showing "0 tables free" doesn't make sense) AND hidden when the
-  // count is 0 (don't signal "fully booked" next to a working Reserve
-  // button — confuses the user).
+  // First pill: only prefix "Tonight " when nextSlotLabel is a TIME
+  // (e.g. "8:30 PM") — not a state phrase ("Open today", "Open till 6
+  // PM"). Heuristic: time labels include a digit AND don't start with
+  // "Open". Avoids the awkward "Tonight Open today" reading.
+  const slotIsTime =
+    /\d/.test(venue.nextSlotLabel) &&
+    !venue.nextSlotLabel.trim().toLowerCase().startsWith("open");
+  // "Tables free" pill is hidden for non-reservable venues AND hidden
+  // when the count is 0 (don't signal "fully booked" next to a working
+  // Reserve button).
   const showTablesPill = isReservable && venue.tablesFree > 0;
   const pills = [
-    isReservable ? `Tonight ${venue.nextSlotLabel}` : venue.nextSlotLabel,
+    isReservable && slotIsTime
+      ? `Tonight ${venue.nextSlotLabel}`
+      : venue.nextSlotLabel,
     `${venue.walkingMins} min walk`,
     ...(showTablesPill ? [`${venue.tablesFree} tables free`] : []),
     venue.vibeTags.join(" · "),
@@ -85,6 +90,9 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           fill
           priority
           sizes="(max-width: 640px) 100vw, 640px"
+          // Google Places photo URLs 302-redirect with an API key;
+          // bypass Vercel's optimizer for those.
+          unoptimized={venue.imgUrl.includes("googleapis.com")}
           className="object-cover"
         />
 
@@ -154,36 +162,39 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         </div>
 
         {/* ── Real Talk ──────────────────────────────────────────────
-            Critical flags surfaced boldly — the brand's honesty rule.
-            Each flag is a left-accented card with bold label + body. */}
+            Editorial pull-quote treatment. Eyebrow + headline above,
+            then a single vertical accent rule running down the side of
+            the flag list, with hairline dividers between flags and
+            italic body copy. The brand promise: honest signal,
+            magazine-style, never buried. */}
         {hasRealTalk && (
-          <div className="mt-7">
-            <div className="flex items-baseline gap-2 mb-3">
-              <span className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-accent">
-                Real Talk
-              </span>
-              <span className="text-[11px] text-muted-fg">
-                what to actually expect
-              </span>
+          <div className="mt-10">
+            <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-accent mb-1.5">
+              Real Talk
             </div>
-            <div className="flex flex-col gap-2">
-              {venue.criticalFlags!.map((flag, i) => (
-                <div
-                  key={i}
-                  className="relative rounded-2xl bg-muted/40 border border-fg/10 px-4 py-3 pl-5"
-                >
-                  <span
-                    aria-hidden
-                    className="absolute left-0 top-2 bottom-2 w-1 rounded-r bg-accent"
-                  />
-                  <div className="text-sm font-extrabold text-fg leading-tight">
-                    {flag.label}
+            <h2 className="text-[20px] font-bold text-heading leading-tight mb-6">
+              What to actually expect.
+            </h2>
+            <div className="relative pl-5">
+              <span
+                aria-hidden
+                className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent rounded-full"
+              />
+              <div className="flex flex-col">
+                {venue.criticalFlags!.map((flag, i) => (
+                  <div
+                    key={i}
+                    className={i > 0 ? "mt-5 pt-5 border-t border-fg/10" : ""}
+                  >
+                    <div className="text-[15px] font-extrabold text-fg leading-snug">
+                      {flag.label}
+                    </div>
+                    <p className="text-[14px] italic text-muted-fg leading-relaxed mt-1.5">
+                      {flag.body}
+                    </p>
                   </div>
-                  <div className="text-[13px] text-muted-fg leading-snug mt-0.5">
-                    {flag.body}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         )}
