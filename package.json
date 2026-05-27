@@ -11,7 +11,9 @@
     "format": "prettier --write \"app/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"*.{ts,tsx,json,js}\"",
     "format:check": "prettier --check \"app/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"*.{ts,tsx,json,js}\"",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
-    "clean": "rm -rf .next .turbo node_modules/.cache"
+    "clean": "rm -rf .next .turbo node_modules/.cache",
+    "ingest:dry": "tsx scripts/ingest-venues.ts --dry-run",
+    "ingest": "tsx scripts/ingest-venues.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
@@ -27,11 +29,13 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
+    "dotenv": "^17.4.2",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.15",
     "postcss": "^8.4.47",
     "prettier": "^3.8.3",
     "tailwindcss": "^3.4.13",
+    "tsx": "^4.22.3",
     "typescript": "^5.6.2"
   },
   "packageManager": "pnpm@9.0.0",
