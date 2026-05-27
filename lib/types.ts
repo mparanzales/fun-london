@@ -58,6 +58,28 @@ export type EditorialSource = {
   date?: string; // ISO date when the source was published / last verified
 };
 
+// Third-party creator coverage (Phase 4.5). Surfaced in the "Why this is
+// here" expandable on the venue detail page. Stored as JSONB array on
+// `venues.creator_coverage`.
+export type CreatorVerdict = "positive" | "mixed" | "critical";
+export type CreatorCoverage = {
+  creator: string; // "Topjaw", "Eating With Tod", "Bon Appétit"
+  handle: string; // "@topjaw"
+  platform: "tiktok" | "youtube" | "instagram" | "blog";
+  url: string;
+  verdict: CreatorVerdict;
+  note?: string; // optional 1-line summary of what they said
+  followerCount?: number; // optional
+};
+
+// "Real Talk" flags — honest concerns surfaced boldly in the UI, not
+// buried. Stored as JSONB array on `venues.critical_flags`. Surfaced as
+// labelled cards on the venue detail page.
+export type CriticalFlag = {
+  label: string; // "Expect a queue", "Chef change Jan 2024"
+  body: string; // "Borough Market location, weekend mornings 20+ min standard"
+};
+
 export type Venue = {
   id: string;
   slug: string;
@@ -88,7 +110,42 @@ export type Venue = {
   phone: string | null;
   instagramHandle: string | null;
   editorialSources: EditorialSource[] | null;
+  // Phase 4.5 — third-party creator coverage + Real Talk flags.
+  creatorCoverage: CreatorCoverage[] | null;
+  criticalFlags: CriticalFlag[] | null;
   createdAt: string;
+};
+
+// Partner BD prospect (Phase 4.5). Venues that pass editorial curation but
+// have no major-platform booking. Stored in `public.partner_prospects`,
+// locked to service-role only via RLS.
+export type PartnerProspectStatus =
+  | "prospect"
+  | "contacted"
+  | "in_conversation"
+  | "partnered"
+  | "declined"
+  | "passed";
+
+export type PartnerProspect = {
+  id: string;
+  name: string;
+  googlePlaceId: string | null;
+  type: VenueType | null;
+  neighbourhood: string | null;
+  address: string | null;
+  websiteUrl: string | null;
+  phone: string | null;
+  instagramHandle: string | null;
+  whyQualified: string | null;
+  currentBookingMethod: string | null;
+  editorialSources: EditorialSource[] | null;
+  creatorCoverage: CreatorCoverage[] | null;
+  criticalFlags: CriticalFlag[] | null;
+  bdStatus: PartnerProspectStatus;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Event = {

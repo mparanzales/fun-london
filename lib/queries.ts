@@ -29,6 +29,8 @@ import type {
   UserPreferences,
   BookingLink,
   EditorialSource,
+  CreatorCoverage,
+  CriticalFlag,
 } from "./types";
 
 // ── Row shapes (raw DB) ─────────────────────────────────────────────────
@@ -61,6 +63,9 @@ type VenueRow = {
   phone: string | null;
   instagram_handle: string | null;
   editorial_sources: EditorialSource[] | null;
+  // Phase 4.5 — creator coverage + Real Talk flags.
+  creator_coverage: CreatorCoverage[] | null;
+  critical_flags: CriticalFlag[] | null;
   created_at: string;
 };
 
@@ -108,6 +113,8 @@ function mapVenue(r: VenueRow): Venue {
     phone: r.phone,
     instagramHandle: r.instagram_handle,
     editorialSources: r.editorial_sources,
+    creatorCoverage: r.creator_coverage,
+    criticalFlags: r.critical_flags,
     createdAt: r.created_at,
   };
 }
