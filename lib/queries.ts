@@ -137,11 +137,17 @@ function mapEvent(r: EventRow): Event {
 
 // ── Queries ─────────────────────────────────────────────────────────────
 
+// Catalog read-side: only return venues that have been ingested from
+// Google Places (google_place_id IS NOT NULL). The original demo seed
+// rows remain in the DB so existing saved_venues / bookings rows stay
+// FK-valid, but they're hidden from the user-facing catalog feed. To
+// surface a former demo venue, ingest it via scripts/ingest-venues.ts.
 export async function fetchVenues(): Promise<Venue[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("venues")
     .select("*")
+    .not("google_place_id", "is", null)
     .order("created_at", { ascending: true });
   if (error) throw new Error(`fetchVenues: ${error.message}`);
   return (data as VenueRow[]).map(mapVenue);
@@ -153,6 +159,7 @@ export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {
     .from("venues")
     .select("*")
     .eq("slug", slug)
+    .not("google_place_id", "is", null)
     .maybeSingle();
   if (error) throw new Error(`fetchVenueBySlug(${slug}): ${error.message}`);
   return data ? mapVenue(data as VenueRow) : null;
@@ -164,6 +171,7 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
     .from("venues")
     .select("*")
     .eq("id", id)
+    .not("google_place_id", "is", null)
     .maybeSingle();
   if (error) throw new Error(`fetchVenueById(${id}): ${error.message}`);
   return data ? mapVenue(data as VenueRow) : null;

@@ -57,6 +57,10 @@ export function VenueCard({
             sizes={
               variant === "tall" ? "170px" : "(max-width: 640px) 50vw, 240px"
             }
+            // Google Places photo URLs 302-redirect with a per-request
+            // API key; bypass Vercel's optimizer for those so we don't
+            // burn the optimization quota on rerenderable proxies.
+            unoptimized={venue.imgUrl.includes("googleapis.com")}
             className="object-cover group-hover:scale-105 transition-transform duration-500"
           />
           {/* Bottom gradient for any future title overlay */}
