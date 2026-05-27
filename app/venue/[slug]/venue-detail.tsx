@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Heart, Star } from "lucide-react";
+import { ArrowLeft, ChevronDown, Heart, Star } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
 import type { Venue, VenueType } from "@/lib/types";
 
@@ -37,8 +38,23 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const router = useRouter();
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
+  const [whyOpen, setWhyOpen] = useState(false);
 
   const isReservable = RESERVABLE_TYPES.includes(venue.type);
+
+  // Top-priority booking link if we have one. The agent thesis V1:
+  // Reserve button deep-links to the venue's best-known booking URL
+  // (lowest `priority` number wins). If absent, falls through to the
+  // legacy in-app confirmation stub.
+  const topBookingLink =
+    venue.bookingLinks && venue.bookingLinks.length > 0
+      ? [...venue.bookingLinks].sort((a, b) => a.priority - b.priority)[0]
+      : null;
+
+  const hasRealTalk = !!venue.criticalFlags && venue.criticalFlags.length > 0;
+  const hasWhy =
+    (!!venue.editorialSources && venue.editorialSources.length > 0) ||
+    (!!venue.creatorCoverage && venue.creatorCoverage.length > 0);
 
   // First pill: prefix "Tonight " only for reservable venues whose
   // nextSlotLabel is a time. Non-reservable venues seed labels like
@@ -136,6 +152,155 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             </span>
           ))}
         </div>
+
+        {/* ── Real Talk ──────────────────────────────────────────────
+            Critical flags surfaced boldly — the brand's honesty rule.
+            Each flag is a left-accented card with bold label + body. */}
+        {hasRealTalk && (
+          <div className="mt-7">
+            <div className="flex items-baseline gap-2 mb-3">
+              <span className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-accent">
+                Real Talk
+              </span>
+              <span className="text-[11px] text-muted-fg">
+                what to actually expect
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {venue.criticalFlags!.map((flag, i) => (
+                <div
+                  key={i}
+                  className="relative rounded-2xl bg-muted/40 border border-fg/10 px-4 py-3 pl-5"
+                >
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-2 bottom-2 w-1 rounded-r bg-accent"
+                  />
+                  <div className="text-sm font-extrabold text-fg leading-tight">
+                    {flag.label}
+                  </div>
+                  <div className="text-[13px] text-muted-fg leading-snug mt-0.5">
+                    {flag.body}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Why this is here ───────────────────────────────────────
+            Editorial sources + creator coverage as a collapsible
+            expandable. Transparency promise — users can fact-check the
+            catalog independent of our own editorial. */}
+        {hasWhy && (
+          <div className="mt-7">
+            <button
+              type="button"
+              onClick={() => setWhyOpen((v) => !v)}
+              aria-expanded={whyOpen}
+              className="w-full flex items-center justify-between px-1 py-2 text-left"
+            >
+              <span className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-primary">
+                Why this is here
+              </span>
+              <ChevronDown
+                className={
+                  "w-4 h-4 text-muted-fg transition-transform " +
+                  (whyOpen ? "rotate-180" : "rotate-0")
+                }
+                strokeWidth={2}
+              />
+            </button>
+            {whyOpen && (
+              <div className="mt-2 rounded-2xl bg-muted/30 border border-fg/10 px-4 py-3">
+                {venue.editorialSources &&
+                  venue.editorialSources.length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-1.5">
+                        Editorial coverage
+                      </div>
+                      <ul className="space-y-1">
+                        {venue.editorialSources.map((src, i) => (
+                          <li key={i} className="text-[13px] leading-snug">
+                            <a
+                              href={src.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
+                            >
+                              {src.publication}
+                            </a>
+                            {src.title && (
+                              <span className="text-muted-fg">
+                                {" "}
+                                — {src.title}
+                              </span>
+                            )}
+                            {src.date && (
+                              <span className="text-muted-fg/80 italic">
+                                {" · "}
+                                {new Date(src.date).toLocaleDateString(
+                                  "en-GB",
+                                  { month: "short", year: "numeric" },
+                                )}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                {venue.creatorCoverage && venue.creatorCoverage.length > 0 && (
+                  <div
+                    className={
+                      venue.editorialSources &&
+                      venue.editorialSources.length > 0
+                        ? "mt-3 pt-3 border-t border-fg/10"
+                        : ""
+                    }
+                  >
+                    <div className="text-[10px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-1.5">
+                      Creators covering this
+                    </div>
+                    <ul className="space-y-1">
+                      {venue.creatorCoverage.map((c, i) => (
+                        <li key={i} className="text-[13px] leading-snug">
+                          <a
+                            href={c.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
+                          >
+                            {c.creator}
+                          </a>
+                          <span className="text-muted-fg/80">
+                            {" "}
+                            · {c.platform}
+                          </span>
+                          {c.verdict === "critical" && (
+                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-accent/15 text-accent">
+                              Critical
+                            </span>
+                          )}
+                          {c.verdict === "mixed" && (
+                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-fg/10 text-fg">
+                              Mixed
+                            </span>
+                          )}
+                          {c.note && (
+                            <div className="text-[12px] text-muted-fg italic mt-0.5">
+                              “{c.note}”
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* ── Sticky CTA bar ────────────────────────────────────────── */}
@@ -162,7 +327,23 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           />
           Save
         </button>
-        {isReservable ? (
+        {isReservable && topBookingLink ? (
+          // Agent thesis V1: deep-link to the venue's top-priority
+          // booking platform. Opens in a new tab so the user keeps the
+          // Fun London tab open and can come back.
+          <a
+            href={topBookingLink.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm text-center no-underline"
+          >
+            Reserve →{" "}
+            {topBookingLink.platform === "website"
+              ? "their site"
+              : topBookingLink.platform}
+          </a>
+        ) : isReservable ? (
+          // Legacy fallback for demo venues without bookingLinks.
           <button
             type="button"
             onClick={() => router.push(`/booking/${venue.slug}/confirmed`)}
