@@ -55,6 +55,10 @@ create table if not exists public.venues (
   phone text,
   instagram_handle text,
   editorial_sources jsonb,                 -- [{publication, url, title, date}]
+  -- Phase 4.5 — creator coverage + critical flags (the "Real Talk" UI
+  -- surface). Both nullable. See project-product-thesis memory.
+  creator_coverage jsonb,                  -- [{creator, handle, platform, url, verdict, follower_count?}]
+  critical_flags jsonb,                    -- [{label, body}] — "Expect 20-min queue"
   created_at timestamptz not null default now()
 );
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
@@ -119,16 +123,44 @@ create table if not exists public.plans (
 );
 create index if not exists plans_user_idx on public.plans(user_id);
 
+-- Partner prospects (Phase 4.5) — venues that pass editorial curation but
+-- have no major-platform booking (OpenTable/Resy/SevenRooms/TheFork/Quandoo).
+-- These are the highest-likelihood targets for Fun London's partner-side
+-- BD pipeline. Locked tight via RLS — internal-only, no anon read.
+create table if not exists public.partner_prospects (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  google_place_id text unique,
+  type text,                               -- VenueType enum (text-encoded)
+  neighbourhood text,
+  address text,
+  website_url text,
+  phone text,
+  instagram_handle text,
+  why_qualified text,                      -- "passed all 4 hard filters, no major booking platform"
+  current_booking_method text,             -- "walk-in only" | "own website" | "phone only"
+  editorial_sources jsonb,
+  creator_coverage jsonb,
+  critical_flags jsonb,
+  bd_status text not null default 'prospect',  -- prospect | contacted | in_conversation | partnered | declined | passed
+  notes text,                              -- Maria's freeform BD notes
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists partner_prospects_status_idx on public.partner_prospects(bd_status);
+create index if not exists partner_prospects_place_id_idx on public.partner_prospects(google_place_id);
+
 -- ─────────────────────────────────────────────────────────
 -- Row-Level Security
 -- ─────────────────────────────────────────────────────────
 
-alter table public.profiles       enable row level security;
-alter table public.venues         enable row level security;
-alter table public.events         enable row level security;
-alter table public.saved_venues   enable row level security;
-alter table public.bookings       enable row level security;
-alter table public.plans          enable row level security;
+alter table public.profiles          enable row level security;
+alter table public.venues            enable row level security;
+alter table public.events            enable row level security;
+alter table public.saved_venues      enable row level security;
+alter table public.bookings          enable row level security;
+alter table public.plans             enable row level security;
+alter table public.partner_prospects enable row level security;
 
 -- Profiles: users can read/update only their own row, insert their own row
 drop policy if exists "profiles self read"   on public.profiles;
@@ -217,3 +249,37 @@ begin
 end$$;
 
 create index if not exists venues_google_place_id_idx on public.venues(google_place_id);
+
+-- 2026-05-27 evening · Phase 4.5 creator coverage, critical flags,
+-- partner prospects ───────────────────────────────────────────────────────
+alter table public.venues
+  add column if not exists creator_coverage jsonb,
+  add column if not exists critical_flags jsonb;
+
+create table if not exists public.partner_prospects (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  google_place_id text unique,
+  type text,
+  neighbourhood text,
+  address text,
+  website_url text,
+  phone text,
+  instagram_handle text,
+  why_qualified text,
+  current_booking_method text,
+  editorial_sources jsonb,
+  creator_coverage jsonb,
+  critical_flags jsonb,
+  bd_status text not null default 'prospect',
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists partner_prospects_status_idx on public.partner_prospects(bd_status);
+create index if not exists partner_prospects_place_id_idx on public.partner_prospects(google_place_id);
+
+alter table public.partner_prospects enable row level security;
+-- No anon policies — locked to service-role only (internal BD pipeline).
+-- Drop any prior policies first for idempotency.
+drop policy if exists "partner_prospects no anon" on public.partner_prospects;
