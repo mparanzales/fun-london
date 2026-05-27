@@ -29,6 +29,35 @@ export type BookingStatus = "pending" | "confirmed" | "cancelled" | "completed";
 
 // ── Core entities ────────────────────────────────────────────────────────
 
+// A bookable platform's link for a venue. Phase 4 supports multiple
+// links per venue (Fun London = agent / aggregator, not locked to one).
+// `priority` is 1 = best (e.g. official OpenTable for an OpenTable venue),
+// higher numbers = fallback (e.g. the venue's own website).
+export type BookingPlatform =
+  | "opentable"
+  | "resy"
+  | "sevenrooms"
+  | "thefork"
+  | "quandoo"
+  | "tablein"
+  | "website";
+
+export type BookingLink = {
+  platform: BookingPlatform;
+  url: string;
+  priority: number;
+};
+
+// Provenance trail — every real venue must be cross-referenced in 2+
+// independent publications before it lands in the catalog. Stored as a
+// JSONB array on `venues.editorial_sources`.
+export type EditorialSource = {
+  publication: string; // "Time Out", "Eater London", "The Infatuation", etc.
+  url: string;
+  title?: string;
+  date?: string; // ISO date when the source was published / last verified
+};
+
 export type Venue = {
   id: string;
   slug: string;
@@ -52,6 +81,13 @@ export type Venue = {
   // vibeTags is free-form display strings (e.g. "Spicy", "Hand-rolled").
   // Not constrained to the Vibe enum, which is for filtering/preferences.
   vibeTags: string[];
+  // Phase 4 — real-venue ingestion. All nullable; demo venues leave blank.
+  googlePlaceId: string | null;
+  bookingLinks: BookingLink[] | null;
+  websiteUrl: string | null;
+  phone: string | null;
+  instagramHandle: string | null;
+  editorialSources: EditorialSource[] | null;
   createdAt: string;
 };
 
