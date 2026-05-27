@@ -1,33 +1,92 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-26 (post Phase 3.5)
-**Branch state:** Supabase migration complete (Phases 1 + 2 + 3 + 3.5
-merged to `main` and live in production).
+**Last updated:** 2026-05-28 (Batch 2 ingestion — catalog at 19 venues)
+**Branch state:** Phases 1 + 2 + 3 + 3.5 + 4 + 4.5 + Stage 3 ingestion +
+Batch 2 (8 new venues) all merged to `main` and live in production.
+**The catalog is real.**
 
-• **Phase 1** — catalog (venues + events) reads from Supabase via
-  Server Components in `lib/queries.ts`. `lib/mock-data.ts` no longer
-  owns catalog data.
-• **Phase 2** — magic-link sign-in live (`/sign-in` + `/auth/callback`).
-  Session-refresh middleware. Auth-optional model — anonymous
-  browsing fully supported; `/profile` branches per auth state.
-• **Phase 3** — `useSaved` and `useBookings` are dual-mode:
-  localStorage when anonymous, `public.saved_venues` /
-  `public.bookings` when signed in. One-time slug→uuid migration
-  on first sign-in.
-• **Phase 3.5** — profile `display_name` + `preferences` now come
-  from `public.profiles` via `fetchProfile(userId)`. `/profile` and
-  `/explore` greeting read from the DB row (email-prefix fallback
-  when `display_name` is null). `/onboarding` upserts preferences +
-  flips `onboarded = true` when signed in. One-time
-  localStorage→DB migration of onboarding prefs on first sign-in via
-  `<ProfilePrefsMigration>` in the root layout.
+• **Phase 1** — catalog reads from Supabase via Server Components in
+  `lib/queries.ts`.
+• **Phase 2** — magic-link sign-in (`/sign-in` + `/auth/callback`),
+  session-refresh middleware, auth-optional model.
+• **Phase 3** — `useSaved` + `useBookings` dual-mode (localStorage anon,
+  DB authed) with one-time slug→uuid migration on first sign-in.
+• **Phase 3.5** — profile `display_name` + `preferences` from
+  `public.profiles` via `fetchProfile()`. Includes name-at-sign-in.
+• **Phase 4** (2026-05-27 AM) — venues schema extended for real
+  ingestion: `google_place_id`, `booking_links`, `website_url`, `phone`,
+  `instagram_handle`, `editorial_sources`.
+• **Phase 4.5** (2026-05-27 evening) — added `creator_coverage` +
+  `critical_flags` on venues, plus a separate `public.partner_prospects`
+  table (internal BD overlay, locked via RLS — no anon access).
+• **Stage 3** (2026-05-27 evening) — **11 real London venues ingested**
+  via `scripts/ingest-venues.ts` calling Google Places API. All have
+  real photos, addresses, ratings, editorial sources, creator coverage,
+  Real Talk flags, and deep-link Reserve buttons.
+• **Batch 2** (2026-05-28) — **+8 new venues bringing the catalog to 19.**
+  Intentionally diversified: 2 pubs (Marksman, French House), 2 live-
+  music venues (Ronnie Scott's, Cafe OTO), 1 cafe (Dusty Knuckle), 3
+  wine bars (Brawn, 40 Maltby Street, Forza Wine Peckham). First time
+  the catalog has used the `Pub`, `Wine Bar`, and `Live Music` types.
+  Geographic expansion: Hackney, Dalston, Columbia Road, Bermondsey,
+  Peckham. Ronnie Scott's required an in-place `UPDATE` to bind its
+  demo-row UUID to the real Google place_id before the ingest could
+  upsert (preserved any saved/booking FKs).
 
-What's still NOT in Supabase: the Plan Together participants (static
-demo data, no DB story yet).
+What's still NOT in Supabase: Plan Together participants (static
+demo data, no DB story).
 
-Codebase: strict TS, clean ESLint, Prettier-enforced. `MOCK_USER` and
-`getCurrentUser()` fully retired — `lib/mock-data.ts` is down to two
-exports (`MOCK_SAVED_IDS` + `MOCK_PARTICIPANTS`).
+Codebase: strict TS, clean ESLint, Prettier-enforced. `MOCK_USER` /
+`getCurrentUser()` fully retired. `lib/mock-data.ts` has just
+`MOCK_SAVED_IDS` + `MOCK_PARTICIPANTS`.
+
+## The 19 real venues live in production
+
+| Slug | Name | Area | Type | ★ |
+|---|---|---|---|---|
+| brat | Brat x Climpson's Arch | Shoreditch | Restaurant | 4.3 |
+| st-john | St. John | Smithfield | Restaurant | 4.5 |
+| quo-vadis | Quo Vadis | Soho | Restaurant | 4.4 |
+| sessions-arts-club | Sessions Arts Club | Clerkenwell | Restaurant | 4.2 |
+| sabor | Sabor | Mayfair | Restaurant | 4.6 |
+| manteca | manteca | Shoreditch | Restaurant | 4.4 |
+| quality-chop-house | The Quality Chop House | Farringdon | Restaurant | 4.6 |
+| tayer-elementary | Tayēr + Elementary | Old Street | Bar | 4.4 |
+| monmouth-coffee | Monmouth Coffee Company | Borough | Cafe | 4.5 |
+| andrew-edmunds | Andrew Edmunds | Soho | Restaurant | 4.5 |
+| padella | Padella Borough Market | Borough Market | Restaurant | 4.7 |
+| the-marksman | Marksman | Hackney | Pub | 4.2 |
+| the-french-house | The French House | Soho | Pub | 4.5 |
+| ronnie-scotts | Ronnie Scott's | Soho | Live Music | 4.7 |
+| cafe-oto | Cafe OTO | Dalston | Live Music | 4.6 |
+| dusty-knuckle | The Dusty Knuckle Bakery | Dalston | Cafe | 4.6 |
+| brawn | Brawn | Columbia Road | Wine Bar | 4.6 |
+| 40-maltby-street | 40 Maltby Street | Bermondsey | Wine Bar | 4.7 |
+| forza-wine-peckham | Forza Wine Peckham | Peckham | Wine Bar | 4.5 |
+
+All 19 are also rows in `public.partner_prospects` (BD pipeline —
+they're all owner-managed without OpenTable/Resy, perfect partner
+targets). The original demo venues (Bao Soho, Dishoom, etc.) remain
+in the DB so saved/bookings FKs stay valid, but `fetchVenues()` now
+filters to `google_place_id IS NOT NULL` so they're hidden from the
+user-facing catalog.
+
+**Type / area distribution (Batch 2 closed the early gaps):**
+9 Restaurants · 3 Wine Bars · 2 Pubs · 2 Live Music · 2 Cafes · 1 Bar.
+14 venues are central (Soho / Shoreditch / Smithfield / Mayfair /
+Clerkenwell / Borough / Farringdon / Old Street). 5 are east+south
+(Hackney, Dalston x2, Columbia Road, Bermondsey, Peckham).
+
+## Real Talk UI
+
+`/venue/[slug]` surfaces three Phase 4.5 things prominently:
+- **"REAL TALK / What to actually expect."** — `critical_flags` rendered
+  with editorial pull-quote treatment (single accent rule, hairline
+  dividers, italic body)
+- **"Why this is here"** collapsible expandable — `editorial_sources`
+  list + `creator_coverage` list with Mixed/Critical badges
+- **Reserve button** deep-links to `booking_links[0]` (top priority) —
+  the agent thesis V1; falls back to legacy stub for demo venues
 
 This is a point-in-time snapshot. For contribution conventions see
 [`CONTRIBUTING.md`](./CONTRIBUTING.md). For durable stack info see
@@ -55,10 +114,15 @@ Two variables, copied from Supabase → Project Settings → API Keys:
 NEXT_PUBLIC_SUPABASE_URL=https://fxfuzabrivuianfwdopc.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_…
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
+GOOGLE_PLACES_API_KEY=AIza…              # server-only · used by ingest script + future re-sync
+SUPABASE_SERVICE_ROLE_KEY=eyJ…           # local-only · NEVER set on Vercel · ingestion writes
 ```
 
-The same two `NEXT_PUBLIC_SUPABASE_*` values are set on Vercel for
-Production + Preview environments. `.env.local` is gitignored.
+Both `NEXT_PUBLIC_SUPABASE_*` values + `GOOGLE_PLACES_API_KEY` are
+also set on Vercel (Production + Preview). The service-role key lives
+**only** in local `.env.local` — it's the master key, used by the
+ingestion script to write to `public.venues` and
+`public.partner_prospects`.
 
 ---
 
@@ -119,11 +183,13 @@ One font family across the entire consumer app.
 
 ---
 
-## Data layer (Phase 1 + 2 + 3 shipped)
+## Data layer (Phase 1 + 2 + 3 + 4 + 4.5 shipped)
 
 | Source | Lives in | Read via |
 |---|---|---|
-| Venues (11) | Supabase `public.venues` | `lib/queries.ts → fetchVenues / fetchVenueBySlug / fetchVenueById` |
+| Venues (11 real, post-ingestion) | Supabase `public.venues` filtered to `google_place_id IS NOT NULL` | `lib/queries.ts → fetchVenues / fetchVenueBySlug / fetchVenueById` |
+| Partner prospects (11 — internal BD overlay) | Supabase `public.partner_prospects` | RLS-locked, no anon access. Internal use only. |
+| Venue ingestion | `scripts/venues-seed.ts` (editorial overrides) + `scripts/ingest-venues.ts` (Google Places fetch + dual-write) | `pnpm ingest` (or `pnpm ingest:dry`). Idempotent on `google_place_id`. |
 | Events (5) | Supabase `public.events` | `lib/queries.ts → fetchEvents` |
 | Saved set | anon: localStorage `fl.saved.v1` · authed: `public.saved_venues` | `components/saved-context.tsx → useSaved()` |
 | Bookings | anon: localStorage `fl.bookings.v1` · authed: `public.bookings` | `components/bookings-context.tsx → useBookings()` |
@@ -190,30 +256,42 @@ prototype's overlap; not a bug.
 
 In rough priority order:
 
-1. **Custom SMTP for auth emails** — wire Resend (or similar) so the
+1. **Business model deep-think** — coach feedback from 2026-05-27.
+   Revenue mix between consumer freemium, partner commissions, partner
+   subscriptions. Maria will tackle this strategically; not blocking.
+2. **Custom SMTP for auth emails** — wire Resend (or similar) so the
    ~3-4/hour rate limit on Supabase's built-in email service stops
    being a launch blocker.
-2. **Real venue data** — replace the 11 hand-seeded venues with
-   curated London venues + image rights cleared. Add directly via the
-   Supabase Dashboard (Table Editor → `venues`) or update
-   `supabase/seed.sql` and re-run.
-3. **Vercel Deployment Protection off** — when the site should be
-   publicly browsable, toggle off in Vercel → Settings.
-4. **Edit display name + preferences UI** — `/profile` shows the email
-   prefix when `display_name` is null and "Not set" for empty prefs,
-   but there's no UI yet to edit either. Small follow-up: an Edit
-   screen that writes back to `public.profiles`.
-5. **Splash respects DB onboarded status** — currently `app/page.tsx`
+3. **More venues** — workflow now established: append an entry to
+   `scripts/venues-seed.ts` with the editorial overrides + a Google
+   Places search query, then `pnpm ingest`. The script handles the
+   rest (Google Places fetch, dual-write to venues + partner_prospects).
+   ~2 min per venue.
+4. **Vercel Deployment Protection off** — toggle when ready to share
+   publicly with non-Vercel-SSO users.
+5. **Real events** — same pattern as venues but for `public.events`.
+   Sources: Eventbrite + Ticketmaster Discovery + DICE + Skiddle.
+   Sprint 5 work; not yet started.
+6. **Splash respects DB onboarded status** — currently `app/page.tsx`
    routes based on localStorage only. Cross-device sign-in re-prompts
    onboarding because the new device has no `fl.onboarding.v1`. Make
-   the splash a Server Component that prefers `profile.onboarded` for
-   signed-in users.
-6. **Stripe Connect for partners** — partner-side payments / booking
-   commissions. Partner Dashboard prototype lives in
-   `project/_design-handoff/Partner Dashboard.html` (static HTML, not
-   part of this Next.js app yet).
-7. **PWA manifest** — `app/layout.tsx` references `manifest.json` but
-   the file doesn't exist; harmless 404 in dev.
+   splash a Server Component that prefers `profile.onboarded` when
+   signed in.
+7. **"Trending" / "Hidden classics" filter chips** — concept floated
+   during curation: split venues into trending (Manteca, Brat, QCH,
+   Sabor, Sessions) vs hidden classics (Quo Vadis, Andrew Edmunds,
+   Tayer + Elementary). Sprint 5+ idea.
+8. **Photo handling V2** — currently Google Places photo URLs include
+   an inline API key. Eventually: download + reupload to Supabase
+   Storage for clean public URLs.
+9. **V2 booking-aggregator** — store every venue's booking links
+   (multi-platform) and eventually query real-time availability across
+   OpenTable / Resy / SevenRooms / venue site. V1 deep-links to one.
+10. **Stripe Connect for partners** — partner-side payments. Partner
+   dashboard prototype lives in `project/_design-handoff/Partner
+   Dashboard.html` (not in this Next.js app yet).
+11. **PWA manifest** — referenced in `app/layout.tsx` but file
+   doesn't exist; harmless 404 in dev.
 
 ---
 
