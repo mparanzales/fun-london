@@ -108,8 +108,10 @@ function EmptyState() {
       <div className="text-3xl mb-2">🎉</div>
       <h2 className="text-sm font-extrabold text-heading mb-1">Queue clear</h2>
       <p className="text-xs text-muted-fg leading-relaxed">
-        No candidates waiting. The scout cron runs daily at 03:30 UTC; check
-        back tomorrow.
+        No candidates waiting. The scout is currently scaffold-only —
+        publication adapters land in Phase 2B, autonomous cron in Phase 2B+.
+        Run <code>pnpm scout-candidates:dry</code> locally to test the
+        pipeline shape.
       </p>
     </div>
   );
