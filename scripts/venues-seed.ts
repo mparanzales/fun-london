@@ -693,8 +693,8 @@ export const VENUE_SEEDS: VenueSeed[] = [
       },
       {
         publication: "Hot Dinners",
-        url: "https://www.hot-dinners.com/Restaurant-Reviews/Bridge-Bankside-South-Bank/padella",
-        title: "Padella — Hot Dinners profile",
+        url: "https://www.hot-dinners.com/Gastroblog/Test-drive/test-driving-padella-speedy-pasta-in-borough-market",
+        title: "Test Driving Padella — speedy pasta in Borough Market",
       },
       {
         publication: "Square Meal",
