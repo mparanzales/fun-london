@@ -4,6 +4,18 @@ import { getAuthUser } from "@/lib/auth";
 import { Logo } from "@/components/logo";
 import { SignInForm } from "./sign-in-form";
 
+// Maps the `?error=…` tag set by /auth/callback into a user-readable
+// line for the form. Lowercase to match the page voice.
+function initialErrorFor(tag: string | undefined): string | null {
+  if (tag === "callback_failed") {
+    return "that link expired or was already used. try again.";
+  }
+  if (tag === "oauth_failed") {
+    return "sign-in with google failed. check the dev server log for the exact reason and try again.";
+  }
+  return null;
+}
+
 // Sign-in page. Google OAuth primary, magic-link fallback. No passwords.
 // Auth-optional model: this page is reachable from the "You" tab when
 // anonymous, the "Sign in" pill on /profile, and from the
@@ -49,11 +61,7 @@ export default async function SignInPage({
 
       <SignInForm
         returnTo={searchParams.return}
-        initialError={
-          searchParams.error === "callback_failed"
-            ? "That link expired or was already used. Try again."
-            : null
-        }
+        initialError={initialErrorFor(searchParams.error)}
       />
 
       {/* Escape hatch — Fun London is auth-optional. Anonymous users get

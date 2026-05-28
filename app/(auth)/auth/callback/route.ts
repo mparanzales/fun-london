@@ -23,6 +23,22 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const returnTo = searchParams.get("return") ?? "/explore";
 
+  // Supabase forwards provider-side OAuth failures here without a `code`,
+  // instead populating `error` + `error_description`. Surface those to
+  // the dev server log so misconfigured providers are debuggable, and
+  // pass a more specific tag back to /sign-in for the UI.
+  const providerError = searchParams.get("error");
+  const providerErrorCode = searchParams.get("error_code");
+  const providerErrorDesc = searchParams.get("error_description");
+  if (providerError) {
+    console.error(
+      `[callback] provider error: ${providerError}` +
+        (providerErrorCode ? ` (${providerErrorCode})` : "") +
+        (providerErrorDesc ? ` — ${providerErrorDesc}` : ""),
+    );
+    return NextResponse.redirect(`${origin}/sign-in?error=oauth_failed`);
+  }
+
   if (code) {
     const supabase = createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -30,6 +46,7 @@ export async function GET(request: NextRequest) {
       await maybeBackfillDisplayName(supabase);
       return NextResponse.redirect(`${origin}${returnTo}`);
     }
+    console.error(`[callback] exchangeCodeForSession failed: ${error.message}`);
   }
 
   return NextResponse.redirect(`${origin}/sign-in?error=callback_failed`);
