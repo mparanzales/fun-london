@@ -54,7 +54,13 @@ and signing in via Google works.**
   **Blocked on:** the publication adapters need to be wired one by
   one (Time Out RSS first — easiest). No external API keys required;
   it's just scraping/RSS work.
-• **Phase 5 Tier 3 (live cron, 2026-05-28 evening)** — **Events pipeline.**
+• **Phase 5 Tier 3 (autonomous + producing real events, 2026-05-29 evening)** —
+  **Events pipeline.** First real adapter (Ticketmaster Discovery API)
+  wired end-to-end, first real subscription (Ronnie Scott's, venue id
+  `KovZ9177Jn0`) registered, and 2 real events live in `public.events`.
+  Cron now runs every 4 hours autonomously and produces output that
+  flows directly to the Events page. First CI run with the real
+  adapter: success.
   `public.events` extended with `source`, `source_id`, `source_url`,
   `description`, `last_synced_at`, `sold_out`, `cancelled_at`, plus a
   unique (`source`, `source_id`) constraint for idempotent upserts.
