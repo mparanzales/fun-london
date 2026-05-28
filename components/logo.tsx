@@ -1,12 +1,13 @@
 import Image from "next/image";
 
 type Variant = "gradient" | "white" | "icon";
-type Size = "sm" | "md" | "lg";
+type Size = "sm" | "md" | "lg" | "xl";
 
 const HEIGHT_PX: Record<Size, number> = {
   sm: 24,
   md: 32,
   lg: 64,
+  xl: 96,
 };
 
 // Intrinsic aspect ratio (width / height) of each source PNG.
