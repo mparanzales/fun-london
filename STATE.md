@@ -34,6 +34,22 @@ and signing in via Google works.**
   Peckham. Ronnie Scott's required an in-place `UPDATE` to bind its
   demo-row UUID to the real Google place_id before the ingest could
   upsert (preserved any saved/booking FKs).
+• **Phase 5 Tier 3 (scaffolded, 2026-05-28)** — **Events pipeline foundation.**
+  `public.events` extended with `source`, `source_id`, `source_url`,
+  `description`, `last_synced_at`, `sold_out`, `cancelled_at`, plus
+  a unique (`source`, `source_id`) constraint for idempotent upserts.
+  Existing 5 demo events backfilled with `source='manual'`.
+  `scripts/events-seed.ts` defines the `EventSubscription` discriminated
+  union (eventbrite / ticketmaster / skiddle / dice) — per-venue feed
+  subscriptions, not individual events.
+  `scripts/ingest-events.ts` is the orchestrator skeleton: walks the
+  seed, resolves venue_id by slug, calls per-provider adapters, will
+  upsert via ON CONFLICT and mark missing-rows as cancelled.
+  Provider adapters are STUBS (return empty arrays) until API keys
+  land — Maria's next homework is signing up at Eventbrite Developer,
+  Ticketmaster Developer Portal, and Skiddle Developer. DICE has no
+  public API; deferred. Once any one key is in `.env.local`, wire the
+  matching adapter; cron + remaining adapters follow.
 • **Phase 5 Tier 1** (2026-05-28) — **Daily autonomous maintenance.**
   `scripts/refresh-venues.ts` runs every day at 03:00 UTC via
   `.github/workflows/maintenance.yml`. Re-pulls Google Places for all
