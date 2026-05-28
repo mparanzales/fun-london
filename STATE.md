@@ -1,10 +1,11 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-28 (Phase 5 Tier 1 live — daily maintenance cron)
+**Last updated:** 2026-05-28 (Google sign-in live + Phase 5 Tier 1 + Batch 2)
 **Branch state:** Phases 1 + 2 + 3 + 3.5 + 4 + 4.5 + Stage 3 ingestion +
-Batch 2 (8 new venues) + Phase 5 Tier 1 (autonomous maintenance) all
-merged to `main` and live in production. **The catalog is real and
-self-maintaining.**
+Batch 2 (8 new venues) + Phase 5 Tier 1 (autonomous maintenance) +
+Google sign-in (OAuth, primary alongside magic-link) all merged to
+`main` and live in production. **The catalog is real, self-maintaining,
+and signing in via Google works.**
 
 • **Phase 1** — catalog reads from Supabase via Server Components in
   `lib/queries.ts`.
@@ -247,10 +248,31 @@ prototype's overlap; not a bug.
 - **Routes that need a user check themselves.** `/profile` is the only
   one today; it's a Server Component that calls `getAuthUser()` and
   renders either an inline Sign In CTA or the existing profile UI.
-- **Sign-in flow:** `/sign-in` page → email input → `signInWithOtp` →
-  magic link in user's inbox → click → `/auth/callback?code=…` →
-  `exchangeCodeForSession` → cookies set → redirect to `?return=` or
-  `/explore`. PKCE flow under @supabase/ssr v0.5.
+- **Sign-in methods (both supported):**
+  - **Google OAuth (primary, 2026-05-28).** "Continue with Google"
+    on `/sign-in` calls `signInWithOAuth({ provider: 'google' })`
+    with `prompt: select_account`. User picks their Google account →
+    Supabase auth.v1/callback exchanges the code → app's
+    `/auth/callback?code=…` lands them → redirect to `/explore`.
+    Supabase auto-links to an existing email-magic-link account when
+    the email matches (so the same user can sign in either way).
+  - **Magic-link (still supported).** `/sign-in` form → email +
+    optional display_name → `signInWithOtp` → link in inbox → click
+    → same callback → redirect to `?return=` or `/explore`. PKCE
+    flow under @supabase/ssr v0.5. Rate-limited to ~3-4 emails/hour
+    on Supabase's built-in SMTP — Google sign-in is the launch-blocker
+    workaround for that limit; custom SMTP is still pending if you
+    want unlimited magic-link sends.
+  - **Skip for now (tertiary).** Anonymous tap-through link at the
+    bottom of `/sign-in` routes to `/explore`. The whole app works
+    anonymously via localStorage (saved venues + bookings); a later
+    sign-in migrates the local data to Supabase via the Phase 3
+    one-time sync.
+- **Display-name backfill.** `/auth/callback` picks the first
+  non-empty value from `user_metadata.display_name` (set by the
+  magic-link form), `full_name` (Google), or `name` (Google
+  alternative) and writes it to `public.profiles.display_name` —
+  but only if no explicit name was already set there.
 - **Sign-out:** `/profile` includes a "Sign out" action row that calls
   `supabase.auth.signOut()` and `router.refresh()` to drop back to the
   anonymous view.
