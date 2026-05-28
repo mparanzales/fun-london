@@ -59,6 +59,10 @@ create table if not exists public.venues (
   -- surface). Both nullable. See project-product-thesis memory.
   creator_coverage jsonb,                  -- [{creator, handle, platform, url, verdict, follower_count?}]
   critical_flags jsonb,                    -- [{label, body}] — "Expect 20-min queue"
+  -- Phase 5 (Tier 1 maintenance) — sync metadata, written by
+  -- scripts/refresh-venues.ts on a daily GitHub Actions cron.
+  last_synced_at timestamptz,              -- last time Google Places re-pulled
+  closed_at timestamptz,                   -- set when businessStatus == CLOSED_PERMANENTLY (alert flag, not a hide-from-catalog flag)
   created_at timestamptz not null default now()
 );
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);

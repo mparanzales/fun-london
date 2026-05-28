@@ -1,0 +1,87 @@
+name: maintenance
+
+# Tier 1 — daily venue refresh.
+#
+# Re-pulls Google Places data for every venue with a google_place_id,
+# diffs against the live DB, applies updates (rating, photo, address,
+# businessStatus, etc.), and HEAD-checks every editorial_sources +
+# creator_coverage URL for rot.
+#
+# Closures (businessStatus → CLOSED_PERMANENTLY) are flagged via
+# venues.closed_at, NOT auto-hidden — the maintainer reviews and removes manually.
+#
+# Schedule: 03:00 UTC daily (≈ 03–04 London depending on DST).
+# Manual trigger also enabled — run from the Actions tab anytime.
+
+on:
+  schedule:
+    # 03:00 UTC every day. https://crontab.guru/#0_3_*_*_*
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    # Manual run from GitHub Actions UI. Useful for ad-hoc syncs after
+    # a fresh ingestion or when investigating a closure.
+    inputs:
+      skip_link_check:
+        description: "Skip the dead-link HEAD scan (faster)"
+        type: boolean
+        default: false
+
+jobs:
+  refresh-venues:
+    name: refresh real venues + link-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # Version comes from package.json "packageManager" field (pnpm@9.0.0)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Refresh venues + write summary
+        env:
+          # Service role key — required for UPDATE on public.venues. Stored
+          # ONLY in GitHub Actions secrets (NOT in Vercel — see STATE.md).
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+        run: |
+          set -o pipefail
+          # Run the refresh and tee output both to stdout (live logs) and
+          # a file we'll pull into the GitHub step summary at the end.
+          if [ "${{ inputs.skip_link_check }}" = "true" ]; then
+            pnpm refresh-venues -- --skip-link-check 2>&1 | tee refresh.log
+          else
+            pnpm refresh-venues 2>&1 | tee refresh.log
+          fi
+
+      - name: Render step summary
+        # Always runs (even on script failure) so closures + dead links
+        # are visible in the GitHub UI without digging into raw logs.
+        if: always()
+        run: |
+          {
+            echo "## Venue refresh summary"
+            echo ""
+            echo '```'
+            # Pull just the summary section (everything after the divider)
+            # plus any FAILED block. Falls back to full log if neither
+            # marker found.
+            if grep -q "─── SUMMARY ───" refresh.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' refresh.log
+            else
+              tail -40 refresh.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
