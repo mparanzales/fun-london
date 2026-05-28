@@ -283,16 +283,18 @@ prototype's overlap; not a bug.
 
 ## Known config caveats
 
-- **No `public/manifest.json`** despite `app/layout.tsx` referencing
-  `manifest: "/manifest.json"` — harmless 404 in dev. PWA manifest is a
-  forward-looking item.
 - **No `favicon.ico`.** App Router serves `app/icon.png` (1024×1024
   square) and `app/apple-icon.png` instead. Modern browsers handle this.
-- **`themeColor: "#f0eee9"`** in `app/layout.tsx` is hardcoded to day
-  cream. iOS chrome bar won't adapt to night theme. P3 follow-up.
 - **Tailwind spacing scale extended** with `4.5` / `5.5` / `6.5` in
   `tailwind.config.ts` because the codebase already used those classes
   (`bottom-4.5`, `pb-5.5`) and they were silently failing.
+- **In-app theme is time-based, iOS chrome is OS-theme-based.** As of
+  2026-05-28, `viewport.themeColor` adapts to `prefers-color-scheme`
+  (cream on light, near-black on dark), so the iOS Safari status-bar
+  tint reads correctly at install time before the JS theme provider
+  mounts. The in-app body still flips at 18:00 / 06:00 via the
+  ThemeProvider — so a user at night with their OS in light mode will
+  see a cream chrome bar above a dark app body. Acceptable trade.
 
 ---
 
