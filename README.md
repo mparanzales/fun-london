@@ -6,9 +6,10 @@ A mobile-first Next.js app that helps Londoners decide where to go tonight.
 
 - **Next.js 14** App Router + TypeScript (strict)
 - **Tailwind CSS** with CSS variables for day/night theming
-- **Supabase** — Postgres + Auth (magic link, PKCE) + RLS
+- **Supabase** — Postgres + Auth (Google OAuth + magic-link, PKCE) + RLS
 - **Vercel** — production hosting + preview deploys
-- **pnpm** workspace, Node 20.16 (`.nvmrc`)
+- **GitHub Actions** — `check.yml` PR gate + `maintenance.yml` daily venue-refresh cron
+- **pnpm** workspace, Node 20.16 (`.nvmrc`) — maintenance cron overrides to Node 22 for Supabase realtime
 
 ## Quick start
 
@@ -28,9 +29,9 @@ Before pushing, run **`pnpm check`** (typecheck + lint + format:check).
 fun-london-app/
 ├─ app/
 │  ├─ (auth)/                       # Auth-related routes (no bottom nav)
-│  │  ├─ auth/callback/route.ts     # Magic-link exchange
+│  │  ├─ auth/callback/route.ts     # Magic-link + OAuth code exchange
 │  │  ├─ onboarding/                # 2-step mood/vibe quiz
-│  │  └─ sign-in/                   # Email input + magic-link send
+│  │  └─ sign-in/                   # Google OAuth + magic-link + skip-for-now
 │  ├─ (main)/                       # Bottom-nav consumer shell
 │  │  ├─ layout.tsx                 # max-w-md mobile shell + nav
 │  │  ├─ events/                    # page.tsx (server) + events-feed.tsx (client)
@@ -68,7 +69,14 @@ fun-london-app/
 ├─ middleware.ts                    # Next.js middleware entry
 ├─ supabase/
 │  ├─ schema.sql                    # Tables + RLS + auto-profile trigger
-│  └─ seed.sql                      # 11 venues + 5 events
+│  └─ seed.sql                      # Demo seed (real venues come from scripts/)
+├─ scripts/
+│  ├─ venues-seed.ts                # 19 curated venue entries (editorial overrides)
+│  ├─ ingest-venues.ts              # `pnpm ingest` — Google Places + dual-write to DB
+│  └─ refresh-venues.ts             # `pnpm refresh-venues` — daily maintenance, runs in CI
+├─ .github/workflows/
+│  ├─ check.yml                     # Typecheck + lint + format gate on PRs / pushes
+│  └─ maintenance.yml               # Daily 03:00 UTC cron — refresh + dead-link scan
 ├─ public/                          # app-icon, logo, etc.
 ├─ .nvmrc / .editorconfig / .prettierrc / .eslintrc.json
 ├─ next.config.js / tailwind.config.ts / tsconfig.json
@@ -83,15 +91,19 @@ fun-london-app/
 ```
 Browser (Client Components)              Server (Server Components)            Supabase
 ─────────────────────────                ──────────────────────────             ────────
-useSaved / useBookings                   Page-level Server Components           public.venues
-  • anon  → localStorage                   • await fetchVenues / fetchEvents    public.events
-  • authed → public.saved_venues /          (via lib/queries.ts)                 public.profiles  (auto-created
-                  bookings                  • await getAuthUser()                   on auth.users insert)
-                                            (via lib/auth.ts)                    public.saved_venues
-Auth via signInWithOtp →                  Pass data + authUserId as props      public.bookings
-  /auth/callback exchanges code             to client leaves                   Auth (email magic-link)
-  → cookies set                                                                RLS: each user sees only
-                                                                                  their own rows
+useSaved / useBookings                   Page-level Server Components           public.venues   (real venues
+  • anon  → localStorage                   • await fetchVenues / fetchEvents      ingested via scripts/, daily
+  • authed → public.saved_venues /          (via lib/queries.ts)                  refresh via GitHub Actions)
+                  bookings                  • await getAuthUser()                public.events
+                                            (via lib/auth.ts)                   public.profiles  (auto-created
+Auth — two paths to /auth/callback:       Pass data + authUserId as props          on auth.users insert)
+  1. signInWithOAuth("google") →            to client leaves                     public.saved_venues
+     Google → Supabase → callback                                                public.bookings
+  2. signInWithOtp(email) →                                                      public.partner_prospects (BD
+     magic link → callback                                                          overlay, service-role only)
+  → cookies set on either path                                                   Auth: Google OAuth + magic-link
+                                                                                 RLS: each user sees only
+                                                                                    their own rows
 ```
 
 ## Where to read next
