@@ -1,0 +1,86 @@
+name: events-ingest
+
+# Tier 3 — events pipeline.
+#
+# Runs scripts/ingest-events.ts every 4 hours. The script walks
+# EVENT_SUBSCRIPTIONS in scripts/events-seed.ts, calls each provider
+# adapter (Eventbrite / Ticketmaster / Skiddle / DICE), upserts events
+# into public.events (idempotent via the (source, source_id) unique
+# constraint), and sets cancelled_at on events that have disappeared
+# from the provider's response.
+#
+# Until provider adapters are wired (each behind its own API key — see
+# scripts/event-sources/), this workflow runs successfully but produces
+# zero events. That's fine: it proves the cron infrastructure works,
+# and the moment any single adapter is wired its events start flowing.
+#
+# Schedule: 30 minutes past every 4th hour (00:30, 04:30, 08:30,
+# 12:30, 16:30, 20:30 UTC). Offset from the maintenance cron at 03:00
+# UTC so the two jobs don't queue together.
+#
+# Provider env vars are pre-wired below. Empty values are OK — the
+# stubs don't read them. When Maria adds e.g. EVENTBRITE_PRIVATE_TOKEN
+# to GitHub Actions secrets, the next scheduled run picks it up.
+
+on:
+  schedule:
+    # https://crontab.guru/#30_*/4_*_*_*
+    - cron: "30 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  ingest-events:
+    name: ingest events from providers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Same Node 22 override as maintenance.yml — Supabase realtime
+          # initialises a WebSocket at client construction, native
+          # WebSocket arrived in Node 22.4. See maintenance.yml for the
+          # full reasoning.
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run events ingestion + render summary
+        env:
+          # Supabase credentials — required.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          # Provider API keys — pre-wired. Empty until Maria adds them
+          # in Settings → Secrets and variables → Actions. The stubs
+          # don't read these; real adapters check process.env and
+          # throw a clear error if the matching key is missing.
+          EVENTBRITE_PRIVATE_TOKEN: ${{ secrets.EVENTBRITE_PRIVATE_TOKEN }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+          SKIDDLE_API_KEY: ${{ secrets.SKIDDLE_API_KEY }}
+        run: |
+          set -o pipefail
+          pnpm ingest-events 2>&1 | tee ingest-events.log
+
+      - name: Render step summary
+        if: always()
+        run: |
+          {
+            echo "## Events ingestion summary"
+            echo ""
+            echo '```'
+            if grep -q "─── SUMMARY ───" ingest-events.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' ingest-events.log
+            else
+              tail -40 ingest-events.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

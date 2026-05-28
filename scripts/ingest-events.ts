@@ -58,6 +58,37 @@ const supabase =
       })
     : null;
 
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+// public.events.date_label is a UI display label ("Tonight" / "This
+// Weekend" / "This Week"). We compute it at ingest time relative to
+// the wall clock and overwrite on every cron run (4-hourly), so the
+// label stays fresh as time passes. Events further than ~7 days out
+// still get "This Week" — the UI doesn't filter beyond a week, so
+// they're effectively "upcoming" until the day approaches.
+function dateLabelFor(
+  startsAt: Date,
+  now: Date = new Date(),
+): "Tonight" | "This Weekend" | "This Week" {
+  const startOfTomorrow = new Date(now);
+  startOfTomorrow.setHours(0, 0, 0, 0);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+  if (startsAt < startOfTomorrow) return "Tonight";
+
+  // "This Weekend" = the next Sat/Sun within 7 days
+  const day = startsAt.getDay(); // 0 = Sun, 6 = Sat
+  const dayDelta = (startsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+  if ((day === 0 || day === 6) && dayDelta <= 7) return "This Weekend";
+
+  return "This Week";
+}
+
+// Generic placeholder when a provider doesn't return an image and the
+// venue itself has no img_url. public.events.img_url is NOT NULL.
+const FALLBACK_IMG_URL =
+  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
+
 // ── Provider adapters — STUBS for now ───────────────────────────────────
 //
 // Each adapter takes a subscription and returns a list of normalised
@@ -137,13 +168,17 @@ async function processSubscription(sub: EventSubscription): Promise<{
 }> {
   console.log(`\n→ ${sub.source} · ${sub.venueSlug}`);
 
-  // Lookup venue id once per subscription.
+  // Lookup venue identity + display fields once per subscription. We
+  // need neighbourhood (→ events.area) and img_url (→ events.img_url
+  // fallback when the provider doesn't return an image).
   let venueId: string | null = null;
   let venueName: string | null = null;
+  let venueArea: string | null = null;
+  let venueImgUrl: string | null = null;
   if (supabase) {
     const { data, error } = await supabase
       .from("venues")
-      .select("id, name")
+      .select("id, name, neighbourhood, img_url")
       .eq("slug", sub.venueSlug)
       .maybeSingle();
     if (error) {
@@ -154,6 +189,8 @@ async function processSubscription(sub: EventSubscription): Promise<{
     }
     venueId = data?.id ?? null;
     venueName = data?.name ?? null;
+    venueArea = data?.neighbourhood ?? null;
+    venueImgUrl = data?.img_url ?? null;
     if (!venueId) {
       console.log(`  ! no venue row for slug "${sub.venueSlug}" — skipping`);
       return { fetched: 0, upserted: 0, cancelled: 0 };
@@ -171,13 +208,99 @@ async function processSubscription(sub: EventSubscription): Promise<{
     return { fetched: fetched.length, upserted: 0, cancelled: 0 };
   }
 
-  // TODO(orchestrator): once adapters return rows, build the events row
-  // shape and run:
-  //   supabase.from("events").upsert(rows, { onConflict: "source,source_id" })
-  // Then list existing source rows not in fetched.map(f => f.source_id)
-  // and set cancelled_at = now() on them.
+  if (!supabase) throw new Error("Supabase client not initialised");
+  if (!venueId || !venueName || !venueArea) {
+    throw new Error(
+      `Internal: venue lookup didn't populate required fields for ${sub.venueSlug}`,
+    );
+  }
 
-  return { fetched: fetched.length, upserted: 0, cancelled: 0 };
+  // ── Upsert ──────────────────────────────────────────────────────────
+  //
+  // Map FetchedEvent[] into public.events row shape. Re-running this
+  // every cron tick is safe because of the (source, source_id) unique
+  // constraint — ON CONFLICT just updates the existing row, refreshing
+  // rating / time / price / etc. as the provider's data drifts.
+
+  const nowIso = new Date().toISOString();
+  const eventRows = fetched.map((e) => ({
+    name: e.name,
+    venue_name: venueName,
+    venue_id: venueId,
+    area: venueArea,
+    date_label: dateLabelFor(new Date(e.starts_at)),
+    time_label: e.time_label,
+    starts_at: e.starts_at,
+    price: e.price,
+    category: e.category,
+    img_url: e.img_url || venueImgUrl || FALLBACK_IMG_URL,
+    source: sub.source,
+    source_id: e.source_id,
+    source_url: e.source_url,
+    description: e.description,
+    last_synced_at: nowIso,
+    sold_out: e.sold_out,
+  }));
+
+  let upserted = 0;
+  if (eventRows.length > 0) {
+    const { error: upsertErr } = await supabase
+      .from("events")
+      .upsert(eventRows, { onConflict: "source,source_id" });
+    if (upsertErr) {
+      throw new Error(`upsert failed: ${upsertErr.message}`);
+    }
+    upserted = eventRows.length;
+    console.log(`  ✓ upserted ${upserted} events`);
+  }
+
+  // ── Cancellation pass ──────────────────────────────────────────────
+  //
+  // Only run when the provider returned at least one event. An empty
+  // response is ambiguous — could mean "no listings" OR "API blip" —
+  // and we don't want to mass-cancel on a transient failure.
+  //
+  // When the provider DID return events, an existing future row whose
+  // source_id is NOT in the fetched set means the organiser removed
+  // or cancelled that listing. We set cancelled_at on those rows
+  // (alert flag — UI can show "cancelled" without auto-hiding).
+
+  let cancelled = 0;
+  if (fetched.length > 0) {
+    const { data: existing, error: existErr } = await supabase
+      .from("events")
+      .select("id, source_id")
+      .eq("source", sub.source)
+      .eq("venue_id", venueId)
+      .gte("starts_at", nowIso)
+      .is("cancelled_at", null);
+
+    if (existErr) {
+      throw new Error(`cancellation lookup failed: ${existErr.message}`);
+    }
+
+    const fetchedSourceIds = new Set(fetched.map((e) => e.source_id));
+    const toCancel = (existing ?? []).filter(
+      (e) => !fetchedSourceIds.has(e.source_id),
+    );
+
+    if (toCancel.length > 0) {
+      const { error: cancelErr } = await supabase
+        .from("events")
+        .update({ cancelled_at: nowIso })
+        .in(
+          "id",
+          toCancel.map((e) => e.id),
+        );
+      if (cancelErr) {
+        throw new Error(`cancellation update failed: ${cancelErr.message}`);
+      }
+      cancelled = toCancel.length;
+      console.log(`  ★ cancelled ${cancelled} events removed from provider`);
+    }
+  }
+
+  return { fetched: fetched.length, upserted, cancelled };
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
