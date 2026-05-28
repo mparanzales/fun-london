@@ -89,6 +89,11 @@ function dateLabelFor(
 const FALLBACK_IMG_URL =
   "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
 
+// How far ahead each provider adapter looks. Two months gives the
+// `dateLabelFor` enough runway to flip events into "This Week" /
+// "This Weekend" as the cron ticks every 4 hours.
+const EVENT_HORIZON_DAYS = 60;
+
 // ── Provider adapters — STUBS for now ───────────────────────────────────
 //
 // Each adapter takes a subscription and returns a list of normalised
@@ -119,13 +124,170 @@ async function fetchEventbrite(
 }
 
 async function fetchTicketmaster(
-  _sub: Extract<EventSubscription, { source: "ticketmaster" }>,
+  sub: Extract<EventSubscription, { source: "ticketmaster" }>,
 ): Promise<FetchedEvent[]> {
-  // TODO(ticketmaster-adapter): wire to Discovery API once
-  // TICKETMASTER_API_KEY is in .env.local.
-  // Endpoint: GET https://app.ticketmaster.com/discovery/v2/events.json
-  // Filter: venueId=<K-id>, startDateTime=now, endDateTime=+14d, sort=date,asc.
-  return [];
+  const apiKey = process.env.TICKETMASTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "TICKETMASTER_API_KEY missing — adapter requires it. Add to .env.local " +
+        "(local) and GitHub Actions secrets (cron).",
+    );
+  }
+
+  // Pull events between now and EVENT_HORIZON_DAYS days out (defaults to
+  // 60). The UI filters by "Tonight" / "This Weekend" / "This Week" but
+  // we store events further out so the date_label flips them in as time
+  // approaches. Ticketmaster's Discovery API caps responses at
+  // `size=200`; for any single small venue this is wildly more than
+  // enough.
+  const now = new Date();
+  const horizon = new Date(now);
+  horizon.setDate(horizon.getDate() + EVENT_HORIZON_DAYS);
+
+  const params = new URLSearchParams({
+    venueId: sub.ticketmasterVenueId,
+    startDateTime: isoNoMillis(now),
+    endDateTime: isoNoMillis(horizon),
+    sort: "date,asc",
+    size: "100",
+    apikey: apiKey,
+  });
+
+  const url = `https://app.ticketmaster.com/discovery/v2/events.json?${params}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Ticketmaster ${res.status}: ${await res.text()}`);
+  }
+  const json = (await res.json()) as TicketmasterEventsResponse;
+  const events = json._embedded?.events ?? [];
+
+  return events.map(tmToFetched).filter((e): e is FetchedEvent => e !== null);
+}
+
+// Ticketmaster requires startDateTime / endDateTime as ISO without
+// fractional seconds (their API rejects ".123Z"). Trim those bits.
+function isoNoMillis(d: Date): string {
+  return d.toISOString().replace(/\.\d+Z$/, "Z");
+}
+
+// ── Ticketmaster response types (subset of what we actually read) ──────
+
+type TicketmasterEvent = {
+  id: string;
+  name: string;
+  url?: string;
+  info?: string;
+  pleaseNote?: string;
+  dates?: {
+    start?: {
+      localDate?: string;
+      localTime?: string;
+      dateTime?: string;
+    };
+    status?: { code?: string };
+  };
+  classifications?: {
+    segment?: { name?: string };
+    genre?: { name?: string };
+  }[];
+  images?: { url: string; width?: number; height?: number; ratio?: string }[];
+  priceRanges?: { min?: number; max?: number; currency?: string }[];
+};
+
+type TicketmasterEventsResponse = {
+  _embedded?: { events?: TicketmasterEvent[] };
+};
+
+// Map Ticketmaster's segment → Fun London's EventCategory.
+// Our union is "Music" | "Food" | "Art" | "Comedy" | "Club". We mostly
+// see Music + Arts & Theatre + Sports at the venues in our catalog;
+// Sports gets remapped to Music as a safe fallback because we wouldn't
+// curate a sports venue anyway.
+function tmCategory(segment: string | undefined): string {
+  switch (segment) {
+    case "Music":
+      return "Music";
+    case "Arts & Theatre":
+      return "Art";
+    case "Comedy":
+      return "Comedy";
+    default:
+      return "Music";
+  }
+}
+
+function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
+  // Need a stable start time. Ticketmaster sometimes returns only
+  // localDate (no time) for early-announced shows; coerce to 19:00
+  // local in that case so the row still validates.
+  const localDate = e.dates?.start?.localDate;
+  if (!localDate) return null;
+  const startsAt = (() => {
+    if (e.dates?.start?.dateTime) return e.dates.start.dateTime;
+    if (e.dates?.start?.localTime) {
+      return `${localDate}T${e.dates.start.localTime}Z`;
+    }
+    return `${localDate}T19:00:00Z`;
+  })();
+
+  const localTime = e.dates?.start?.localTime ?? "";
+  const timeLabel = localTime ? formatTimeLabel(localTime) : "Time TBD";
+
+  // Pick the widest 16:9 image we get back, fall back to the first.
+  const img =
+    (e.images ?? []).find((i) => i.ratio === "16_9" && (i.width ?? 0) > 600) ??
+    e.images?.[0];
+
+  const priceRange = e.priceRanges?.[0];
+  const price = formatPrice(
+    priceRange?.min,
+    priceRange?.max,
+    priceRange?.currency,
+  );
+
+  const segment = e.classifications?.[0]?.segment?.name;
+  const soldOut =
+    (e.dates?.status?.code ?? "").toLowerCase() === "cancelled" ||
+    (e.dates?.status?.code ?? "").toLowerCase() === "offsale";
+
+  return {
+    source_id: e.id,
+    source_url: e.url ?? "",
+    name: e.name,
+    starts_at: startsAt,
+    time_label: timeLabel,
+    price,
+    category: tmCategory(segment),
+    img_url: img?.url ?? "",
+    description: e.info ?? e.pleaseNote ?? null,
+    sold_out: soldOut,
+  };
+}
+
+function formatTimeLabel(localTime: string): string {
+  // "20:00:00" → "8:00 PM"
+  const [hStr, mStr] = localTime.split(":");
+  const h = Number(hStr);
+  const m = Number(mStr ?? "0");
+  if (isNaN(h)) return localTime;
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m.toString().padStart(2, "0")} ${period}`;
+}
+
+function formatPrice(
+  min: number | undefined,
+  max: number | undefined,
+  currency: string | undefined,
+): string {
+  const cur =
+    currency === "GBP" ? "£" : currency === "USD" ? "$" : (currency ?? "");
+  if (min == null && max == null) return "Tickets via Ticketmaster";
+  if (min != null && max != null && min !== max) {
+    return `${cur}${min.toFixed(0)}–${cur}${max.toFixed(0)}`;
+  }
+  const val = min ?? max ?? 0;
+  return `From ${cur}${val.toFixed(0)}`;
 }
 
 async function fetchSkiddle(
