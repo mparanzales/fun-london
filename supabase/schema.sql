@@ -166,13 +166,18 @@ alter table public.bookings          enable row level security;
 alter table public.plans             enable row level security;
 alter table public.partner_prospects enable row level security;
 
+-- Policies for tables that scope rows by the calling user wrap the
+-- `auth.uid()` call as `(select auth.uid())`. This lets Postgres
+-- treat it as a query-constant initplan instead of re-evaluating it
+-- per row. See Supabase docs on Auth RLS InitPlan optimisation.
+
 -- Profiles: users can read/update only their own row, insert their own row
 drop policy if exists "profiles self read"   on public.profiles;
 drop policy if exists "profiles self insert" on public.profiles;
 drop policy if exists "profiles self update" on public.profiles;
-create policy "profiles self read"   on public.profiles for select using (auth.uid() = id);
-create policy "profiles self insert" on public.profiles for insert with check (auth.uid() = id);
-create policy "profiles self update" on public.profiles for update using (auth.uid() = id);
+create policy "profiles self read"   on public.profiles for select using ((select auth.uid()) = id);
+create policy "profiles self insert" on public.profiles for insert with check ((select auth.uid()) = id);
+create policy "profiles self update" on public.profiles for update using ((select auth.uid()) = id);
 
 -- Venues + Events: public read (catalog)
 drop policy if exists "venues public read" on public.venues;
@@ -184,26 +189,26 @@ create policy "events public read" on public.events for select using (true);
 drop policy if exists "saved self read"   on public.saved_venues;
 drop policy if exists "saved self write"  on public.saved_venues;
 drop policy if exists "saved self delete" on public.saved_venues;
-create policy "saved self read"   on public.saved_venues for select using (auth.uid() = user_id);
-create policy "saved self write"  on public.saved_venues for insert with check (auth.uid() = user_id);
-create policy "saved self delete" on public.saved_venues for delete using (auth.uid() = user_id);
+create policy "saved self read"   on public.saved_venues for select using ((select auth.uid()) = user_id);
+create policy "saved self write"  on public.saved_venues for insert with check ((select auth.uid()) = user_id);
+create policy "saved self delete" on public.saved_venues for delete using ((select auth.uid()) = user_id);
 
 -- Bookings: users only see/modify their own (partner-side will use a
 -- service-role connection for venue-scoped reads — handled separately).
 drop policy if exists "bookings self read"   on public.bookings;
 drop policy if exists "bookings self write"  on public.bookings;
 drop policy if exists "bookings self update" on public.bookings;
-create policy "bookings self read"   on public.bookings for select using (auth.uid() = user_id);
-create policy "bookings self write"  on public.bookings for insert with check (auth.uid() = user_id);
-create policy "bookings self update" on public.bookings for update using (auth.uid() = user_id);
+create policy "bookings self read"   on public.bookings for select using ((select auth.uid()) = user_id);
+create policy "bookings self write"  on public.bookings for insert with check ((select auth.uid()) = user_id);
+create policy "bookings self update" on public.bookings for update using ((select auth.uid()) = user_id);
 
 -- Plans: users only see/modify their own
 drop policy if exists "plans self read"   on public.plans;
 drop policy if exists "plans self write"  on public.plans;
 drop policy if exists "plans self delete" on public.plans;
-create policy "plans self read"   on public.plans for select using (auth.uid() = user_id);
-create policy "plans self write"  on public.plans for insert with check (auth.uid() = user_id);
-create policy "plans self delete" on public.plans for delete using (auth.uid() = user_id);
+create policy "plans self read"   on public.plans for select using ((select auth.uid()) = user_id);
+create policy "plans self write"  on public.plans for insert with check ((select auth.uid()) = user_id);
+create policy "plans self delete" on public.plans for delete using ((select auth.uid()) = user_id);
 
 -- ─────────────────────────────────────────────────────────
 -- Auto-create a profile row on new auth.users
@@ -224,6 +229,29 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Close the public RPC surface on this SECURITY DEFINER function. The
+-- trigger above still fires (triggers run as the function owner), but
+-- nobody can hit /rest/v1/rpc/handle_new_user from the outside. We
+-- revoke from PUBLIC because that's the default-granted role; anon
+-- and authenticated inherit from PUBLIC, so a revoke from them alone
+-- would not actually close the door.
+revoke execute on function public.handle_new_user() from public;
+
+-- Same hardening for rls_auto_enable() if it exists (set up at
+-- Supabase project init as an event trigger that auto-enables RLS
+-- on new public.* tables). Wrapped in DO so this is a no-op on fresh
+-- projects that don't have it.
+do $$
+begin
+  if exists (
+    select 1 from pg_proc p
+    join pg_namespace n on p.pronamespace = n.oid
+    where n.nspname = 'public' and p.proname = 'rls_auto_enable'
+  ) then
+    execute 'revoke execute on function public.rls_auto_enable() from public';
+  end if;
+end$$;
 
 -- ─────────────────────────────────────────────────────────
 -- Migrations (idempotent in-place ALTERs for existing dbs)
