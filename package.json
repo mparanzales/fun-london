@@ -13,7 +13,9 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
     "clean": "rm -rf .next .turbo node_modules/.cache",
     "ingest:dry": "tsx scripts/ingest-venues.ts --dry-run",
-    "ingest": "tsx scripts/ingest-venues.ts"
+    "ingest": "tsx scripts/ingest-venues.ts",
+    "refresh-venues:dry": "tsx scripts/refresh-venues.ts --dry-run",
+    "refresh-venues": "tsx scripts/refresh-venues.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
