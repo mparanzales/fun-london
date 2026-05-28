@@ -404,16 +404,7 @@ In rough priority order:
 
 ## Files flagged for future review
 
-**Forward-looking but currently unused** (kept with `@unused` JSDoc):
-
-- `MOCK_BOOKINGS`, `MOCK_SAVED_VENUES`, `getVenueById`,
-  `getSavedVenueIds`, `getNeighbourhoods` (all in `lib/mock-data.ts`)
-- Types `Booking`, `BookingStatus`, `SavedVenue`, `TimeOfDay` in
-  `lib/types.ts`
-
-These are scaffolding for the partner side / future flows. The
-`@unused` JSDoc explains intent so future devs don't bulk-delete.
-
-**Orphan asset:** `public/logo-fun-white heart.png` (1.3 MB, dated Feb
-24). Old square white-logo backup before the tight-crop re-export. Not
-referenced.
+*(none)* — the `@unused` mock-data scaffolds and the orphan white-logo
+asset that earlier versions of this section called out have all been
+cleaned up. Current cleanliness audit (2026-05-28): 0 TODO/FIXME, 0
+untracked files, 0 orphan assets, 0 unused exports flagged.
