@@ -1,9 +1,16 @@
-// Magic-link callback. Supabase's signInWithOtp sends the user here with
-// a `code` query param after they click the link in their email. We
-// exchange that code for a session (which writes auth cookies via the
-// server client) and — if the user supplied a display name on the
-// sign-in form — copy it from auth.user_metadata into public.profiles
-// when the profile row doesn't already have one.
+// Auth callback. Handles BOTH magic-link and OAuth (Google) sign-ins.
+// Supabase sends the user here with a `code` query param after the OTP
+// is verified (magic-link click) OR after the OAuth provider redirects
+// back (Google sign-in completes). exchangeCodeForSession works the
+// same way for both — Supabase recognises the code type internally.
+//
+// After session is set we backfill display_name into public.profiles
+// when the row doesn't already have one. Sources, in priority order:
+//   1. user_metadata.display_name  — set by the magic-link form when
+//      the user typed a name into the "Your name (optional)" field
+//   2. user_metadata.full_name     — set by Google OAuth (Google's
+//      "full name" from the user's Google profile)
+//   3. user_metadata.name          — alternative Google key
 //
 // On error (expired / reused link) we bounce back to /sign-in with an
 // error flag the form can display.
@@ -42,10 +49,14 @@ async function maybeBackfillDisplayName(
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    const metaName =
-      typeof user.user_metadata?.display_name === "string"
-        ? user.user_metadata.display_name.trim()
-        : "";
+    // Pick the first non-empty name source in priority order.
+    const meta = user.user_metadata ?? {};
+    const metaName = (
+      [meta.display_name, meta.full_name, meta.name]
+        .filter((v): v is string => typeof v === "string")
+        .map((v) => v.trim())
+        .find((v) => v.length > 0) ?? ""
+    ).slice(0, 80);
     if (!metaName) return;
 
     const { data: existing, error: readErr } = await supabase

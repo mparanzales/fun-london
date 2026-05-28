@@ -27,3 +27,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Claude Code agent local config (preview/launch.json etc.) — not part
+# of the project's source of truth.
+.claude/
