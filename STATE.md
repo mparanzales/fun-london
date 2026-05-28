@@ -1,9 +1,10 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-28 (Batch 2 ingestion — catalog at 19 venues)
+**Last updated:** 2026-05-28 (Phase 5 Tier 1 live — daily maintenance cron)
 **Branch state:** Phases 1 + 2 + 3 + 3.5 + 4 + 4.5 + Stage 3 ingestion +
-Batch 2 (8 new venues) all merged to `main` and live in production.
-**The catalog is real.**
+Batch 2 (8 new venues) + Phase 5 Tier 1 (autonomous maintenance) all
+merged to `main` and live in production. **The catalog is real and
+self-maintaining.**
 
 • **Phase 1** — catalog reads from Supabase via Server Components in
   `lib/queries.ts`.
@@ -32,6 +33,21 @@ Batch 2 (8 new venues) all merged to `main` and live in production.
   Peckham. Ronnie Scott's required an in-place `UPDATE` to bind its
   demo-row UUID to the real Google place_id before the ingest could
   upsert (preserved any saved/booking FKs).
+• **Phase 5 Tier 1** (2026-05-28) — **Daily autonomous maintenance.**
+  `scripts/refresh-venues.ts` runs every day at 03:00 UTC via
+  `.github/workflows/maintenance.yml`. Re-pulls Google Places for all
+  venues with `google_place_id`, diffs against the DB, applies
+  updates (rating, photo, address, businessStatus, websiteUri,
+  phone). Closure detection writes `venues.closed_at` once — alert
+  flag for Maria's review, NOT auto-hide. Dead-link checker scans
+  every `editorial_sources` + `creator_coverage` URL, classifies
+  into "real dead" (HTTP 404/410/400 from cooperative hosts) vs
+  "bot-blocked / FYI" (403, timeouts, known anti-bot hosts like
+  Square Meal / Jancis / Substack). First steady-state: 1 real dead
+  link surfaced (Padella's Hot Dinners URL, genuine 404 — Hot
+  Dinners renamed the page). Workflow runs on Node 22 (overrides
+  `.nvmrc`'s Node 20 pin because Supabase realtime requires native
+  WebSocket which arrived in Node 22).
 
 What's still NOT in Supabase: Plan Together participants (static
 demo data, no DB story).
@@ -130,7 +146,13 @@ ingestion script to write to `public.venues` and
 
 - **GitHub:** [`mparanzales/fun-london`](https://github.com/mparanzales/fun-london) — branch `main`, in sync with `origin/main`.
 - **Vercel (Production):** [`fun-london.vercel.app`](https://fun-london.vercel.app) — running on Supabase. **Still gated by Vercel Deployment Protection** (HTTP 401 to anyone not signed into Vercel SSO). Toggle off in Vercel → Settings → Deployment Protection when ready to share publicly.
-- **CI:** `.github/workflows/` gates merges on `pnpm check`.
+- **CI:** `.github/workflows/check.yml` gates merges on `pnpm check`.
+- **Maintenance cron:** `.github/workflows/maintenance.yml` runs daily at
+  03:00 UTC (≈ 04:00 BST London). Re-pulls Google Places + dead-link
+  scan + closure detection. Manual trigger via the Actions tab. Secrets
+  live in GitHub Actions secrets (not Vercel): `SUPABASE_SERVICE_ROLE_KEY`,
+  `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `GOOGLE_PLACES_API_KEY`.
 - **Vercel env vars:** `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` set for Production + Preview.
 - **Supabase project:** `fun-london` (project id `fxfuzabrivuianfwdopc`), region eu-west-2 (London). Schema + 11-venue / 5-event seed loaded. Auth → Email provider enabled, magic-link redirect URLs configured for `localhost:3000` and `fun-london.vercel.app`.
 - **Email sender:** built-in Supabase SMTP, rate-limited to ~3-4 emails/hour on free tier. Replace with Resend (or similar) before any kind of launch.
