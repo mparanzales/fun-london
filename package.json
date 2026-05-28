@@ -15,7 +15,9 @@
     "ingest:dry": "tsx scripts/ingest-venues.ts --dry-run",
     "ingest": "tsx scripts/ingest-venues.ts",
     "refresh-venues:dry": "tsx scripts/refresh-venues.ts --dry-run",
-    "refresh-venues": "tsx scripts/refresh-venues.ts"
+    "refresh-venues": "tsx scripts/refresh-venues.ts",
+    "ingest-events:dry": "tsx scripts/ingest-events.ts --dry-run",
+    "ingest-events": "tsx scripts/ingest-events.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

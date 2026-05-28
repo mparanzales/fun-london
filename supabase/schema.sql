@@ -86,10 +86,24 @@ create table if not exists public.events (
   price text not null,
   category text not null,                  -- EventCategory
   img_url text not null,
-  created_at timestamptz not null default now()
+  -- Phase 5 Tier 3 — ingestion + status surface, written by
+  -- scripts/ingest-events.ts on the events GitHub Actions cron.
+  source text,                             -- 'eventbrite' | 'ticketmaster' | 'dice' | 'skiddle' | 'manual'
+  source_id text,                          -- provider's unique id (idempotency key when combined with source)
+  source_url text,                         -- original event page URL (ticket-buy deep link)
+  description text,                        -- short editorial 1-liner (nullable; demo events lack)
+  last_synced_at timestamptz,              -- last provider re-pull
+  sold_out boolean not null default false, -- provider-side status mirror
+  cancelled_at timestamptz,                -- set once on provider cancellation (alert flag, not auto-hide)
+  created_at timestamptz not null default now(),
+  constraint events_source_unique unique (source, source_id)
 );
 create index if not exists events_date_label_idx on public.events(date_label);
 create index if not exists events_starts_at_idx  on public.events(starts_at);
+-- For the future "this venue's upcoming events" surface on /venue/[slug].
+create index if not exists events_venue_starts_idx
+  on public.events(venue_id, starts_at)
+  where venue_id is not null;
 
 -- Saved venues (user ↔ venue) — backs the `SavedVenue` type
 -- Renamed from `saved_places` in v1.
