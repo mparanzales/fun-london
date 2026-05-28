@@ -34,6 +34,26 @@ and signing in via Google works.**
   Peckham. Ronnie Scott's required an in-place `UPDATE` to bind its
   demo-row UUID to the real Google place_id before the ingest could
   upsert (preserved any saved/booking FKs).
+• **Phase 5 Tier 2 (scaffolded, 2026-05-28)** — **Candidate scout foundation.**
+  New `public.pending_candidates` table (provenance + AI-drafted
+  editorial + filter audit trail + status workflow). RLS-locked: no
+  policies, service-role only. `/admin/candidates` Server Component
+  route gated to admin emails (`FL_ADMIN_EMAILS` env, defaults to
+  Maria's Gmail) — renders the queue, decision via Server Actions
+  (approve / snooze 6mo / reject), revalidates on submit.
+  `scripts/scout-candidates.ts` is the orchestrator (6 publication
+  adapters in parallel → normalise → group by name → require ≥2
+  distinct publications → dedupe vs public.venues → upsert). Six
+  publication stubs in `scripts/candidate-sources/` (Time Out / Eater
+  / Infatuation / Hot Dinners / Square Mile / Harden's) all return
+  empty for now — each has a docstring noting which RSS / scrape
+  pattern to wire. Chain detection via Google Places count heuristic
+  is stubbed (returns 0). Dry-run `pnpm scout-candidates:dry` runs
+  cleanly: "0 mentions → 0 multi-source candidates" with a friendly
+  "expected — adapters are stubs" message.
+  **Blocked on:** the publication adapters need to be wired one by
+  one (Time Out RSS first — easiest). No external API keys required;
+  it's just scraping/RSS work.
 • **Phase 5 Tier 3 (scaffolded, 2026-05-28)** — **Events pipeline foundation.**
   `public.events` extended with `source`, `source_id`, `source_url`,
   `description`, `last_synced_at`, `sold_out`, `cancelled_at`, plus
