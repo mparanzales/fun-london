@@ -141,9 +141,18 @@ type DeadLink = {
 
 // Domains that aggressively block automated HEAD/GET requests via
 // Cloudflare-style anti-bot protection. URLs at these hosts that return
-// 403/503 are almost always fine in a real browser — we surface them in
-// a separate "bot-blocked" section so they don't drown out real 404s.
+// 403/503 (or time out) are almost always fine in a real browser — we
+// surface them in a separate "bot-blocked" section so they don't drown
+// out real 404s.
+//
+// This is a known-friction list — add domains as they show up in CI
+// runs with the runner's IP being flagged. The cost of including a
+// domain here is that a REAL 404 at it will get classified as
+// "bot-blocked" rather than "dead" (the maintainer has to browse-verify
+// periodically). The cost of excluding it is alert noise that trains
+// the eye to ignore the digest.
 const BOT_BLOCKED_HOSTS = new Set<string>([
+  // Publication sites with Cloudflare bot challenges
   "www.squaremeal.co.uk",
   "squaremeal.co.uk",
   "www.jancisrobinson.com",
@@ -154,7 +163,17 @@ const BOT_BLOCKED_HOSTS = new Set<string>([
   "eastlondonlines.co.uk",
   "www.hardens.com",
   "hardens.com",
+  "www.clashmusic.com",
+  "clashmusic.com",
+  "thequietus.com",
+  "www.thequietus.com",
+  "foodism.co.uk",
+  "www.foodism.co.uk",
 ]);
+
+// Suffix matches — any subdomain of these hosts is treated as bot-blocked.
+// Substack blocks all substack.com subdomains from automated GET.
+const BOT_BLOCKED_SUFFIXES = [".substack.com"];
 
 function hostnameOf(url: string): string {
   try {
@@ -162,6 +181,11 @@ function hostnameOf(url: string): string {
   } catch {
     return "";
   }
+}
+
+function isBotBlockedHost(host: string): boolean {
+  if (BOT_BLOCKED_HOSTS.has(host)) return true;
+  return BOT_BLOCKED_SUFFIXES.some((suffix) => host.endsWith(suffix));
 }
 
 // ── Diff helpers ────────────────────────────────────────────────────────
@@ -309,7 +333,7 @@ function classify(
   // the request time out outright — all the same problem from our side.
   // We trust these publications enough to assume the URL works in a real
   // browser unless we have other signal.
-  if (BOT_BLOCKED_HOSTS.has(hostnameOf(url))) {
+  if (isBotBlockedHost(hostnameOf(url))) {
     return "bot-blocked";
   }
   return "dead";
