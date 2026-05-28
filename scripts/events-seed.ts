@@ -76,30 +76,30 @@ export type EventSubscription =
 // DICE: dice.fm/venue/<slug-from-url>.
 export const EVENT_SUBSCRIPTIONS: EventSubscription[] = [
   // ── Live Music venues — ticketed event flows ─────────────────────
-  // {
-  //   source: "ticketmaster",
-  //   venueSlug: "ronnie-scotts",
-  //   ticketmasterVenueId: "KovZpZA17vJA", // PLACEHOLDER — confirm
-  //   defaultCategory: "Music",
-  //   notes:
-  //     "Ronnie's tours through Ticketmaster for headline acts; smaller " +
-  //     "weeknight slots are direct via ronniescotts.co.uk so a venue-site " +
-  //     "scrape may complement this later.",
-  // },
-  // {
-  //   source: "skiddle",
-  //   venueSlug: "cafe-oto",
-  //   skiddleVenueId: "TBD",
-  //   defaultCategory: "Music",
-  //   notes: "Cafe OTO mostly sells direct on cafeoto.co.uk; Skiddle may not cover all shows.",
-  // },
-  // ── Restaurant + bar venues — Eventbrite for one-off ticketed nights ─
-  // {
-  //   source: "eventbrite",
-  //   venueSlug: "tayer-elementary",
-  //   defaultCategory: "Music", // listening sessions / takeovers
-  //   notes: "Look up the bar's organizer id once Eventbrite key is in place.",
-  // },
+  {
+    source: "ticketmaster",
+    venueSlug: "ronnie-scotts",
+    // Confirmed via Ticketmaster Discovery API venue search on 2026-05-28
+    // — venue keyword "Ronnie Scotts" returns exactly one match at
+    // 47 Frith Street, London. Real but sparse: at last check 2 events
+    // in the next 90 days (mostly direct via ronniescotts.co.uk).
+    ticketmasterVenueId: "KovZ9177Jn0",
+    defaultCategory: "Music",
+    notes:
+      "Ronnie's tours through Ticketmaster for headline acts; weeknight " +
+      "slots are direct via ronniescotts.co.uk. A venue-site scrape may " +
+      "complement this later.",
+  },
+  // ── Future subscriptions to consider once each provider is wired ──
+  //
+  // Cafe OTO — has Ticketmaster venue id KovZpZAlv6tA but Ticketmaster
+  // returned 0 events in our probe (they sell direct via cafeoto.co.uk).
+  // Skiddle adapter is the more likely fit.
+  //
+  // Restaurants + bars + pubs (Brat, St. JOHN, Quo Vadis, Tayer +
+  // Elementary, etc.) generally don't use Ticketmaster at all. The
+  // Eventbrite venue-events endpoint can be used IF a specific venue
+  // has a discoverable Eventbrite venue page — manual hunt per venue.
 ];
 
 export function getSubscriptionsBySlug(slug: string): EventSubscription[] {
