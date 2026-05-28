@@ -26,7 +26,16 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#f0eee9",
+  // Adapts iOS Safari's status-bar / browser-chrome tint to the user's
+  // OS-level light/dark preference. Note: the in-app theme is TIME-based
+  // (18:00–06:00 = night) via components/theme-provider.tsx, so the
+  // chrome tint and the app body can diverge for users whose OS theme
+  // doesn't match the wall clock. That's an acceptable trade for keeping
+  // chrome legible at install time before the JS theme provider mounts.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f0eee9" },
+    { media: "(prefers-color-scheme: dark)", color: "#14110d" },
+  ],
 };
 
 export default async function RootLayout({

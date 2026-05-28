@@ -1,0 +1,28 @@
+{
+  "name": "Fun London",
+  "short_name": "Fun London",
+  "description": "Your curated guide to London's best hidden gems.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f0eee9",
+  "theme_color": "#f0eee9",
+  "lang": "en-GB",
+  "dir": "ltr",
+  "categories": ["food", "entertainment", "lifestyle", "travel"],
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
