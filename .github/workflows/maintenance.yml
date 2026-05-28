@@ -42,7 +42,13 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          # NOTE: this workflow intentionally OVERRIDES .nvmrc (pinned to 20).
+          # @supabase/supabase-js initialises a realtime client at construction
+          # time, and Supabase's realtime-js requires native WebSocket support,
+          # which arrived in Node 22. Node 20 throws on createClient(). Local
+          # dev + the `check` workflow stay on the .nvmrc pin; only this
+          # cron's runner overrides.
+          node-version: "22"
           cache: pnpm
 
       - name: Install dependencies
