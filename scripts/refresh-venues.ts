@@ -322,21 +322,31 @@ async function checkUrl(url: string): Promise<number | string> {
   }
 }
 
+// Classifier philosophy: high-PRECISION dead-link alerts. The cron only
+// flags a link as "dead" when the response says, with confidence, that
+// the page is gone (HTTP 404 / 410). Timeouts, DNS errors, 403/503, and
+// other 4xx/5xx responses fall into the softer "bot-blocked / uncertain"
+// bucket. This means some genuinely-dead pages might slip into the
+// FYI section — but the daily alert stays signal-rich rather than noise.
+const CONFIDENT_DEAD_STATUSES = new Set<number>([
+  400, // explicit bad request — the URL is malformed
+  404, // page not found
+  410, // gone, intentionally removed
+]);
+
 function classify(
   url: string,
   status: number | string,
 ): "ok" | "dead" | "bot-blocked" {
   if (typeof status === "number" && status >= 200 && status < 400) return "ok";
-  if (typeof status === "number" && status === 405) return "ok"; // HEAD not allowed, treat as OK
-  // Known-blocked host: anything other than a clean 2xx/3xx is "bot-blocked"
-  // not dead. Cloudflare sometimes 403s, sometimes 503s, sometimes makes
-  // the request time out outright — all the same problem from our side.
-  // We trust these publications enough to assume the URL works in a real
-  // browser unless we have other signal.
-  if (isBotBlockedHost(hostnameOf(url))) {
-    return "bot-blocked";
+  if (typeof status === "number" && status === 405) return "ok"; // HEAD not allowed
+  if (isBotBlockedHost(hostnameOf(url))) return "bot-blocked";
+  // Only HTTP responses that explicitly mean "this page is gone" count
+  // as dead. Anything else is uncertain.
+  if (typeof status === "number" && CONFIDENT_DEAD_STATUSES.has(status)) {
+    return "dead";
   }
-  return "dead";
+  return "bot-blocked";
 }
 
 async function deadLinksForVenue(row: VenueRow): Promise<DeadLink[]> {
