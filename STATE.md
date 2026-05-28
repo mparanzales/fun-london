@@ -54,22 +54,34 @@ and signing in via Google works.**
   **Blocked on:** the publication adapters need to be wired one by
   one (Time Out RSS first — easiest). No external API keys required;
   it's just scraping/RSS work.
-• **Phase 5 Tier 3 (scaffolded, 2026-05-28)** — **Events pipeline foundation.**
+• **Phase 5 Tier 3 (live cron, 2026-05-28 evening)** — **Events pipeline.**
   `public.events` extended with `source`, `source_id`, `source_url`,
-  `description`, `last_synced_at`, `sold_out`, `cancelled_at`, plus
-  a unique (`source`, `source_id`) constraint for idempotent upserts.
+  `description`, `last_synced_at`, `sold_out`, `cancelled_at`, plus a
+  unique (`source`, `source_id`) constraint for idempotent upserts.
   Existing 5 demo events backfilled with `source='manual'`.
   `scripts/events-seed.ts` defines the `EventSubscription` discriminated
   union (eventbrite / ticketmaster / skiddle / dice) — per-venue feed
   subscriptions, not individual events.
-  `scripts/ingest-events.ts` is the orchestrator skeleton: walks the
-  seed, resolves venue_id by slug, calls per-provider adapters, will
-  upsert via ON CONFLICT and mark missing-rows as cancelled.
-  Provider adapters are STUBS (return empty arrays) until API keys
-  land — Maria's next homework is signing up at Eventbrite Developer,
-  Ticketmaster Developer Portal, and Skiddle Developer. DICE has no
-  public API; deferred. Once any one key is in `.env.local`, wire the
-  matching adapter; cron + remaining adapters follow.
+  `scripts/ingest-events.ts` is the orchestrator — complete: walks the
+  seed, resolves venue_id + neighbourhood + img_url by slug, calls
+  per-provider adapters in series, upserts via `ON CONFLICT
+  (source, source_id)` with venue-image fallback + a dynamic
+  `date_label` computed each run (Tonight / This Weekend / This Week),
+  then runs a cancellation pass marking `cancelled_at` on any future
+  event the provider dropped from its response (skips cancellation
+  when fetched count is 0 — an empty response could be transient).
+  `.github/workflows/events-ingest.yml` runs the script every 4 hours
+  (00:30 / 04:30 / 08:30 / 12:30 / 16:30 / 20:30 UTC). Node 22
+  override (same Supabase realtime / WebSocket reason as
+  maintenance.yml). Provider API key secrets pre-wired
+  (EVENTBRITE_PRIVATE_TOKEN / TICKETMASTER_API_KEY / SKIDDLE_API_KEY).
+  First manual CI run: success.
+  Provider adapters are STUBS (return empty arrays) until each API
+  key lands — Maria's next homework is signing up at Eventbrite
+  Developer (recommended first), Ticketmaster Developer Portal, and
+  Skiddle Developer. DICE has no public API; deferred. Once any one
+  key + a subscription is in place, real events start flowing on the
+  very next cron tick — no further infrastructure work needed.
 • **Phase 5 Tier 1** (2026-05-28) — **Daily autonomous maintenance.**
   `scripts/refresh-venues.ts` runs every day at 03:00 UTC via
   `.github/workflows/maintenance.yml`. Re-pulls Google Places for all
@@ -184,12 +196,19 @@ ingestion script to write to `public.venues` and
 - **GitHub:** [`mparanzales/fun-london`](https://github.com/mparanzales/fun-london) — branch `main`, in sync with `origin/main`.
 - **Vercel (Production):** [`fun-london.vercel.app`](https://fun-london.vercel.app) — running on Supabase. **Still gated by Vercel Deployment Protection** (HTTP 401 to anyone not signed into Vercel SSO). Toggle off in Vercel → Settings → Deployment Protection when ready to share publicly.
 - **CI:** `.github/workflows/check.yml` gates merges on `pnpm check`.
-- **Maintenance cron:** `.github/workflows/maintenance.yml` runs daily at
-  03:00 UTC (≈ 04:00 BST London). Re-pulls Google Places + dead-link
-  scan + closure detection. Manual trigger via the Actions tab. Secrets
-  live in GitHub Actions secrets (not Vercel): `SUPABASE_SERVICE_ROLE_KEY`,
-  `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-  `GOOGLE_PLACES_API_KEY`.
+- **Maintenance cron (Tier 1):** `.github/workflows/maintenance.yml`
+  runs daily at 03:00 UTC (≈ 04:00 BST London). Re-pulls Google
+  Places + dead-link scan + closure detection. Manual trigger via the
+  Actions tab. Secrets live in GitHub Actions secrets (not Vercel):
+  `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GOOGLE_PLACES_API_KEY`.
+- **Events cron (Tier 3):** `.github/workflows/events-ingest.yml` runs
+  every 4 hours at :30 past (00:30 / 04:30 / 08:30 / 12:30 / 16:30 /
+  20:30 UTC). Calls the same script as `pnpm ingest-events`. Same
+  Supabase secrets plus provider-specific (`EVENTBRITE_PRIVATE_TOKEN`,
+  `TICKETMASTER_API_KEY`, `SKIDDLE_API_KEY` — empty until each is
+  signed-up for). Provider adapters are still stubs; cron exits
+  cleanly with "0 subscriptions" until the first one is wired.
 - **Vercel env vars:** `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` set for Production + Preview.
 - **Supabase project:** `fun-london` (project id `fxfuzabrivuianfwdopc`), region eu-west-2 (London). Schema + 11-venue / 5-event seed loaded. Auth → Email provider enabled, magic-link redirect URLs configured for `localhost:3000` and `fun-london.vercel.app`.
 - **Email sender:** built-in Supabase SMTP, rate-limited to ~3-4 emails/hour on free tier. Replace with Resend (or similar) before any kind of launch.
