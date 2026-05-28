@@ -1,75 +1,43 @@
-"use client";
-
-// Splash screen — animated wordmark, holds briefly, then routes based on
-// onboarding state. Plays every time "/" is visited (no session skip).
+// Splash entry point — Server Component.
 //
-// Routing rule:
-//   localStorage["fl.onboarding.v1"] set → /explore
-//   otherwise                             → /onboarding
+// Plays every time "/" is visited (no session skip). Reads the user's
+// onboarding state from public.profiles when they're signed in, so
+// signing in on a new device doesn't re-prompt onboarding. Anonymous
+// visitors still fall back to localStorage["fl.onboarding.v1"], which
+// the onboarding flow writes on completion.
 //
-// The onboarding-flow writes that key on completion (or skip) in
-// app/(auth)/onboarding/onboarding-flow.tsx.
+// Routing rule (resolved in SplashClient after the brand-mark animation
+// finishes):
+//   - signed in + profile.onboarded === true   → /explore
+//   - signed in + profile.onboarded === false  → /onboarding
+//   - anonymous + localStorage key             → /explore
+//   - anonymous + no key                       → /onboarding
+//
+// Keeping the splash for everyone (even authed+onboarded users) preserves
+// the brand moment on every cold open.
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
+import { getAuthUser } from "@/lib/auth";
+import { fetchProfile } from "@/lib/queries";
+import { SplashClient } from "./splash-client";
 
-const ONBOARDING_KEY = "fl.onboarding.v1";
-const TOTAL_DURATION_MS = 1700;
+// Force dynamic rendering so getAuthUser() (which reads cookies) doesn't
+// trigger Next's "can't use cookies in a static page" error at build time.
+export const dynamic = "force-dynamic";
 
-export default function SplashPage() {
-  const router = useRouter();
+export default async function SplashPage() {
+  const user = await getAuthUser();
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      let onboarded = false;
-      try {
-        onboarded = !!window.localStorage.getItem(ONBOARDING_KEY);
-      } catch {
-        // localStorage unavailable — treat as not onboarded.
-      }
-      router.replace(onboarded ? "/explore" : "/onboarding");
-    }, TOTAL_DURATION_MS);
-    return () => clearTimeout(t);
-  }, [router]);
+  let dbOnboarded = false;
+  if (user) {
+    try {
+      const profile = await fetchProfile(user.id);
+      dbOnboarded = profile?.onboarded ?? false;
+    } catch {
+      // Profile fetch failed — fall through with dbOnboarded=false. The
+      // worst case is we send a signed-in user to /onboarding for one
+      // extra round-trip; not a user-facing error.
+    }
+  }
 
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "#000",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-      }}
-    >
-      <div className="fl-splash-mark">
-        <Image
-          src="/logo-fun.png"
-          alt="Fun London"
-          width={240}
-          height={160}
-          priority
-        />
-      </div>
-
-      <style>{`
-        .fl-splash-mark {
-          animation: fl-splash-in 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-        @keyframes fl-splash-in {
-          from {
-            opacity: 0;
-            transform: scale(0.92);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1);
-          }
-        }
-      `}</style>
-    </div>
-  );
+  return <SplashClient authed={!!user} dbOnboarded={dbOnboarded} />;
 }
