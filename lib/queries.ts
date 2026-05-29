@@ -181,10 +181,17 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
 
 export async function fetchEvents(): Promise<Event[]> {
   const supabase = createClient();
+  // Only surface events from the start of today onward — a "what's on"
+  // feed shouldn't list events that already happened. Using start-of-day
+  // (rather than the exact current time) keeps events earlier today
+  // visible all day rather than dropping them the moment they begin.
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
   const { data, error } = await supabase
     .from("events")
     .select("*")
     .is("cancelled_at", null) // hide events a provider has cancelled
+    .gte("starts_at", startOfToday.toISOString()) // hide past events
     .order("starts_at", { ascending: true });
   if (error) throw new Error(`fetchEvents: ${error.message}`);
   return (data as EventRow[]).map(mapEvent);
