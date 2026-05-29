@@ -36,6 +36,21 @@ import { EVENT_SUBSCRIPTIONS, type EventSubscription } from "./events-seed";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
+// Which passes to run this invocation:
+//   curated   — only the per-venue subscriptions (your hand-picked
+//               independents). Runs at :30 past 0/4/8/12/16/20h.
+//   discovery — only the London-wide top-10 best-of. Runs at :30 past
+//               2/6/10/14/18/22h, interleaved with curated.
+//   both      — run everything (default; used for manual/local runs).
+type IngestMode = "curated" | "discovery" | "both";
+function parseMode(): IngestMode {
+  const arg = process.argv.find((a) => a.startsWith("--mode="));
+  const val = arg?.split("=")[1];
+  if (val === "curated" || val === "discovery" || val === "both") return val;
+  return "both";
+}
+const MODE: IngestMode = parseMode();
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -108,8 +123,34 @@ const EVENT_HORIZON_DAYS = 60;
 // and request soonest-first, but no independence vetting is applied here.
 // A future filter pass (chain blocklist + venue-size heuristic) could
 // tighten this without changing the pipeline shape.
-const LONDON_DISCOVERY_TARGET = 10; // minimum events we aim to keep stocked
-const LONDON_DISCOVERY_SIZE = 60; // how many to request per run (well above target)
+const LONDON_DISCOVERY_TARGET = 10; // how many we keep stocked (the "top 10")
+const LONDON_DISCOVERY_SIZE = 60; // how many to request per run (then trim to target)
+
+// Pick a balanced top-N across categories: round-robin through the
+// categories present, taking the soonest event from each in turn. Keeps
+// the London-wide slice from being all-theatre. `events` is assumed
+// already sorted soonest-first, so per-category order is preserved.
+function selectBalanced(events: FetchedEvent[], target: number): FetchedEvent[] {
+  const byCategory = new Map<string, FetchedEvent[]>();
+  for (const e of events) {
+    const list = byCategory.get(e.category) ?? [];
+    list.push(e);
+    byCategory.set(e.category, list);
+  }
+  const categories = Array.from(byCategory.keys());
+  const picked: FetchedEvent[] = [];
+  let i = 0;
+  while (
+    picked.length < target &&
+    categories.some((c) => (byCategory.get(c)?.length ?? 0) > 0)
+  ) {
+    const list = byCategory.get(categories[i % categories.length]);
+    const next = list?.shift();
+    if (next) picked.push(next);
+    i++;
+  }
+  return picked;
+}
 
 // Ticketmaster classification terms we query the London feed for. Note
 // these are passed as `classificationName` (the fuzzy matcher that hits
@@ -606,41 +647,55 @@ async function processSubscription(sub: EventSubscription): Promise<{
 async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
   fetched: number;
   upserted: number;
-  cancelled: number;
+  removed: number;
 }> {
-  console.log(`\n→ ticketmaster · LONDON-WIDE discovery`);
+  console.log(`\n→ ticketmaster · LONDON-WIDE discovery (top ${LONDON_DISCOVERY_TARGET})`);
+
+  // Never let discovery clobber a curated row sharing the same TM id.
+  // Exclude both the ids freshly fetched by subscriptions this run AND
+  // any already-stored curated rows (venue_id IS NOT NULL). The upsert
+  // keys on (source, source_id), so without this a discovery row would
+  // overwrite the curated row and strip its venue attribution.
+  const exclude = new Set(excludeSourceIds);
+  if (supabase) {
+    const { data: curatedRows } = await supabase
+      .from("events")
+      .select("source_id")
+      .eq("source", "ticketmaster")
+      .not("venue_id", "is", null);
+    for (const r of curatedRows ?? []) exclude.add(r.source_id as string);
+  }
 
   const all = await fetchLondonDiscovery();
-  const fetched = all.filter((e) => !excludeSourceIds.has(e.source_id));
+  const candidates = all.filter((e) => !exclude.has(e.source_id));
+  const selected = selectBalanced(candidates, LONDON_DISCOVERY_TARGET);
   console.log(
-    `  fetched ${all.length} London events (${fetched.length} after de-duping ` +
-      `against curated subscriptions)`,
+    `  fetched ${all.length} London events → ${selected.length} selected ` +
+      `(balanced across categories, de-duped vs curated)`,
   );
 
-  if (fetched.length < LONDON_DISCOVERY_TARGET) {
+  if (selected.length < LONDON_DISCOVERY_TARGET) {
     console.log(
-      `  ⚠ only ${fetched.length} events available — below target of ` +
-        `${LONDON_DISCOVERY_TARGET}. Storing all we found.`,
+      `  ⚠ only ${selected.length} available — below target of ` +
+        `${LONDON_DISCOVERY_TARGET}. Keeping all we found.`,
     );
   }
 
   if (DRY_RUN) {
-    console.log(
-      `  [dry-run] would upsert ${fetched.length} London events (venue_id=null)`,
-    );
-    for (const e of fetched.slice(0, LONDON_DISCOVERY_TARGET)) {
+    console.log(`  [dry-run] would keep ${selected.length} London events:`);
+    for (const e of selected) {
       console.log(
         `    · ${e.starts_at.slice(0, 10)} — ${e.name} @ ${e.venue_name} ` +
           `(${e.category})`,
       );
     }
-    return { fetched: fetched.length, upserted: 0, cancelled: 0 };
+    return { fetched: selected.length, upserted: 0, removed: 0 };
   }
 
   if (!supabase) throw new Error("Supabase client not initialised");
 
   const nowIso = new Date().toISOString();
-  const eventRows = fetched.map((e) => ({
+  const eventRows = selected.map((e) => ({
     name: e.name,
     venue_name: e.venue_name ?? "London venue",
     venue_id: null,
@@ -668,61 +723,60 @@ async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
       throw new Error(`London discovery upsert failed: ${upsertErr.message}`);
     }
     upserted = eventRows.length;
-    console.log(`  ✓ upserted ${upserted} London events`);
+    console.log(`  ✓ kept ${upserted} London events`);
   }
 
-  // Cancellation pass — scoped to venue_id IS NULL so it only touches
-  // discovery rows, never the curated subscription rows (which always
-  // have a venue_id). A future row no longer returned by the London
-  // search gets cancelled_at set.
-  let cancelled = 0;
-  if (fetched.length > 0) {
+  // Rotation cleanup — DELETE (not cancel) future discovery rows that
+  // aren't in the new top-N. These are ephemeral wide-open listings, not
+  // events a user picked, so we trim them outright to keep the slice at
+  // ~target. Scoped to venue_id IS NULL so curated rows are never touched.
+  // No FK references point at public.events, so the delete is safe.
+  let removed = 0;
+  if (selected.length > 0) {
     const { data: existing, error: existErr } = await supabase
       .from("events")
       .select("id, source_id")
       .eq("source", "ticketmaster")
       .is("venue_id", null)
-      .gte("starts_at", nowIso)
-      .is("cancelled_at", null);
+      .gte("starts_at", nowIso);
     if (existErr) {
       throw new Error(
-        `London discovery cancellation lookup failed: ${existErr.message}`,
+        `London discovery cleanup lookup failed: ${existErr.message}`,
       );
     }
-    const fetchedIds = new Set(fetched.map((e) => e.source_id));
-    const toCancel = (existing ?? []).filter(
-      (e) => !fetchedIds.has(e.source_id),
-    );
-    if (toCancel.length > 0) {
-      const { error: cancelErr } = await supabase
+    const keepIds = new Set(selected.map((e) => e.source_id));
+    const toRemove = (existing ?? []).filter((e) => !keepIds.has(e.source_id));
+    if (toRemove.length > 0) {
+      const { error: delErr } = await supabase
         .from("events")
-        .update({ cancelled_at: nowIso })
+        .delete()
         .in(
           "id",
-          toCancel.map((e) => e.id),
+          toRemove.map((e) => e.id),
         );
-      if (cancelErr) {
-        throw new Error(
-          `London discovery cancellation update failed: ${cancelErr.message}`,
-        );
+      if (delErr) {
+        throw new Error(`London discovery cleanup delete failed: ${delErr.message}`);
       }
-      cancelled = toCancel.length;
-      console.log(`  ★ cancelled ${cancelled} events no longer listed`);
+      removed = toRemove.length;
+      console.log(`  ★ removed ${removed} rotated-out London events`);
     }
   }
 
-  return { fetched: fetched.length, upserted, cancelled };
+  return { fetched: selected.length, upserted, removed };
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
 
 async function main() {
+  const runCurated = MODE === "curated" || MODE === "both";
+  const runDiscovery = MODE === "discovery" || MODE === "both";
+
   console.log(
-    `Fun London — events ingestion · ${EVENT_SUBSCRIPTIONS.length} subscription(s) ` +
-      `+ London discovery · ${DRY_RUN ? "DRY RUN" : "WRITING"}\n`,
+    `Fun London — events ingestion · mode=${MODE} · ` +
+      `${DRY_RUN ? "DRY RUN" : "WRITING"}\n`,
   );
 
-  const tally = { fetched: 0, upserted: 0, cancelled: 0 };
+  const tally = { fetched: 0, upserted: 0, deactivated: 0 };
 
   // ── Pass 1: curated per-venue subscriptions ──────────────────────────
   // Collect every source_id we pulled here so the London-wide pass can
@@ -730,44 +784,48 @@ async function main() {
   // conflicting venue attribution).
   const subscriptionSourceIds = new Set<string>();
 
-  for (const sub of EVENT_SUBSCRIPTIONS) {
-    try {
-      const fetched = await dispatchFetch(sub);
-      for (const e of fetched) subscriptionSourceIds.add(e.source_id);
-    } catch {
-      // The per-subscription processor below logs its own failures; this
-      // pre-fetch is only to populate the de-dupe set. Ignore errors here.
+  if (runCurated) {
+    for (const sub of EVENT_SUBSCRIPTIONS) {
+      try {
+        const fetched = await dispatchFetch(sub);
+        for (const e of fetched) subscriptionSourceIds.add(e.source_id);
+      } catch {
+        // The per-subscription processor below logs its own failures;
+        // this pre-fetch only populates the de-dupe set. Ignore here.
+      }
+    }
+
+    for (const sub of EVENT_SUBSCRIPTIONS) {
+      try {
+        const r = await processSubscription(sub);
+        tally.fetched += r.fetched;
+        tally.upserted += r.upserted;
+        tally.deactivated += r.cancelled;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`  ✗ FAILED ${sub.source}/${sub.venueSlug}: ${msg}`);
+      }
     }
   }
 
-  for (const sub of EVENT_SUBSCRIPTIONS) {
+  // ── Pass 2: London-wide discovery (keeps a balanced top-N stocked) ───
+  if (runDiscovery) {
     try {
-      const r = await processSubscription(sub);
+      const r = await processLondonDiscovery(subscriptionSourceIds);
       tally.fetched += r.fetched;
       tally.upserted += r.upserted;
-      tally.cancelled += r.cancelled;
+      tally.deactivated += r.removed;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`  ✗ FAILED ${sub.source}/${sub.venueSlug}: ${msg}`);
+      console.error(`  ✗ FAILED ticketmaster/London-discovery: ${msg}`);
     }
-  }
-
-  // ── Pass 2: London-wide discovery (keeps the tab stocked at ≥10) ─────
-  try {
-    const r = await processLondonDiscovery(subscriptionSourceIds);
-    tally.fetched += r.fetched;
-    tally.upserted += r.upserted;
-    tally.cancelled += r.cancelled;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`  ✗ FAILED ticketmaster/London-discovery: ${msg}`);
   }
 
   console.log("\n─────────── SUMMARY ───────────");
-  console.log(`Subscriptions processed: ${EVENT_SUBSCRIPTIONS.length}`);
-  console.log(`Events fetched:          ${tally.fetched}`);
+  console.log(`Mode:                    ${MODE}`);
+  console.log(`Events fetched/kept:     ${tally.fetched}`);
   console.log(`Upserted:                ${tally.upserted}`);
-  console.log(`Marked cancelled:        ${tally.cancelled}`);
+  console.log(`Cancelled/removed:       ${tally.deactivated}`);
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Ingestion complete."}`);
 }
 
