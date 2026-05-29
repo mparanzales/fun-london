@@ -94,6 +94,31 @@ const FALLBACK_IMG_URL =
 // "This Weekend" as the cron ticks every 4 hours.
 const EVENT_HORIZON_DAYS = 60;
 
+// ── London-wide discovery pull ──────────────────────────────────────────
+//
+// Maria's call (2026-05-29): the events tab should always feel alive, so
+// in addition to the curated per-venue subscriptions we run a broad
+// London-wide Ticketmaster search every cron tick and keep at least
+// LONDON_DISCOVERY_TARGET upcoming events stocked.
+//
+// PRODUCT NOTE — this is a deliberate exception to the "curated
+// independents only, no chains" thesis. These events are NOT tied to a
+// curated venue (venue_id stays null) and CAN include mainstream / chain
+// venues. We restrict to our content categories (Music / Art / Comedy)
+// and request soonest-first, but no independence vetting is applied here.
+// A future filter pass (chain blocklist + venue-size heuristic) could
+// tighten this without changing the pipeline shape.
+const LONDON_DISCOVERY_TARGET = 10; // minimum events we aim to keep stocked
+const LONDON_DISCOVERY_SIZE = 60; // how many to request per run (well above target)
+
+// Ticketmaster classification terms we query the London feed for. Note
+// these are passed as `classificationName` (the fuzzy matcher that hits
+// segment OR genre names) — NOT `segmentName`. Ticketmaster's top-level
+// segments are only Music / Sports / Arts & Theatre / Film / Misc, so
+// "Comedy" (a genre under Arts & Theatre) must be matched this way or it
+// returns nothing. Querying per-term gives category variety in the feed.
+const LONDON_DISCOVERY_TERMS = ["Music", "Theatre", "Comedy"];
+
 // ── Provider adapters — STUBS for now ───────────────────────────────────
 //
 // Each adapter takes a subscription and returns a list of normalised
@@ -111,6 +136,11 @@ type FetchedEvent = {
   img_url: string;
   description: string | null;
   sold_out: boolean;
+  // Only populated by the London-wide discovery pull (events not tied to
+  // a curated venue subscription). Subscription-based fetches leave these
+  // null and the orchestrator fills venue identity from the local DB row.
+  venue_name?: string | null;
+  venue_area?: string | null;
 };
 
 async function fetchEventbrite(
@@ -170,6 +200,79 @@ function isoNoMillis(d: Date): string {
   return d.toISOString().replace(/\.\d+Z$/, "Z");
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// London-wide discovery: not venue-scoped. Queries Ticketmaster once per
+// content segment (Music / Arts & Theatre / Comedy), soonest-first, then
+// merges + de-dupes. Per-segment querying (vs a single broad city query)
+// reliably clears the target count AND gives category variety instead of
+// the result being dominated by long-running West End theatre runs.
+// Each FetchedEvent carries its own venue_name + venue_area (read from
+// the TM payload) because there's no curated venue row to attribute it to.
+async function fetchLondonDiscovery(): Promise<FetchedEvent[]> {
+  const apiKey = process.env.TICKETMASTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "TICKETMASTER_API_KEY missing — London discovery requires it. Add to " +
+        ".env.local (local) and GitHub Actions secrets (cron).",
+    );
+  }
+
+  const now = new Date();
+  const horizon = new Date(now);
+  horizon.setDate(horizon.getDate() + EVENT_HORIZON_DAYS);
+
+  // Split the per-run budget across the terms so each contributes.
+  const perTerm = Math.ceil(
+    LONDON_DISCOVERY_SIZE / LONDON_DISCOVERY_TERMS.length,
+  );
+
+  const byId = new Map<string, FetchedEvent>();
+  let first = true;
+  for (const term of LONDON_DISCOVERY_TERMS) {
+    // Ticketmaster enforces a 5-requests/second "spike arrest". We fire
+    // several queries per run (subscriptions + one per term), so pause
+    // between term queries to stay well under the cap — otherwise a
+    // term silently 429s and drops out of the pull.
+    if (!first) await sleep(300);
+    first = false;
+
+    const params = new URLSearchParams({
+      city: "London",
+      countryCode: "GB",
+      classificationName: term,
+      startDateTime: isoNoMillis(now),
+      endDateTime: isoNoMillis(horizon),
+      sort: "date,asc",
+      size: String(perTerm),
+      apikey: apiKey,
+    });
+    const url = `https://app.ticketmaster.com/discovery/v2/events.json?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      // One term failing shouldn't sink the whole pull. Log + continue.
+      console.error(
+        `  ! London "${term}" query ${res.status}: ${await res.text()}`,
+      );
+      continue;
+    }
+    const json = (await res.json()) as TicketmasterEventsResponse;
+    for (const e of json._embedded?.events ?? []) {
+      const mapped = tmToFetchedWithVenue(e);
+      if (mapped && !byId.has(mapped.source_id)) {
+        byId.set(mapped.source_id, mapped);
+      }
+    }
+  }
+
+  // Merge across segments, soonest-first.
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
+  );
+}
+
 // ── Ticketmaster response types (subset of what we actually read) ──────
 
 type TicketmasterEvent = {
@@ -192,18 +295,31 @@ type TicketmasterEvent = {
   }[];
   images?: { url: string; width?: number; height?: number; ratio?: string }[];
   priceRanges?: { min?: number; max?: number; currency?: string }[];
+  _embedded?: {
+    venues?: {
+      name?: string;
+      city?: { name?: string };
+      // Ticketmaster sometimes nests a more specific area under address.
+      address?: { line1?: string };
+    }[];
+  };
 };
 
 type TicketmasterEventsResponse = {
   _embedded?: { events?: TicketmasterEvent[] };
 };
 
-// Map Ticketmaster's segment → Fun London's EventCategory.
-// Our union is "Music" | "Food" | "Art" | "Comedy" | "Club". We mostly
-// see Music + Arts & Theatre + Sports at the venues in our catalog;
-// Sports gets remapped to Music as a safe fallback because we wouldn't
-// curate a sports venue anyway.
-function tmCategory(segment: string | undefined): string {
+// Map Ticketmaster's segment + genre → Fun London's EventCategory.
+// Our union is "Music" | "Food" | "Art" | "Comedy" | "Club". Comedy is a
+// GENRE under the "Arts & Theatre" segment (there's no top-level Comedy
+// segment), so we check genre first — otherwise stand-up shows would all
+// be mislabelled "Art". Sports / Film / Misc fall back to Music since we
+// wouldn't curate those venues anyway.
+function tmCategory(
+  segment: string | undefined,
+  genre: string | undefined,
+): string {
+  if (genre && genre.toLowerCase().includes("comedy")) return "Comedy";
   switch (segment) {
     case "Music":
       return "Music";
@@ -246,6 +362,7 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
   );
 
   const segment = e.classifications?.[0]?.segment?.name;
+  const genre = e.classifications?.[0]?.genre?.name;
   const soldOut =
     (e.dates?.status?.code ?? "").toLowerCase() === "cancelled" ||
     (e.dates?.status?.code ?? "").toLowerCase() === "offsale";
@@ -257,10 +374,24 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
     starts_at: startsAt,
     time_label: timeLabel,
     price,
-    category: tmCategory(segment),
+    category: tmCategory(segment, genre),
     img_url: img?.url ?? "",
     description: e.info ?? e.pleaseNote ?? null,
     sold_out: soldOut,
+  };
+}
+
+// Same mapping as tmToFetched, but also resolves the event's own venue
+// identity from the TM payload (for the London-wide discovery pull,
+// which isn't attributed to a curated venue row).
+function tmToFetchedWithVenue(e: TicketmasterEvent): FetchedEvent | null {
+  const base = tmToFetched(e);
+  if (!base) return null;
+  const v = e._embedded?.venues?.[0];
+  return {
+    ...base,
+    venue_name: v?.name ?? "London venue",
+    venue_area: v?.city?.name ?? "London",
   };
 }
 
@@ -465,22 +596,149 @@ async function processSubscription(sub: EventSubscription): Promise<{
   return { fetched: fetched.length, upserted, cancelled };
 }
 
+// ── London-wide discovery processor ─────────────────────────────────────
+//
+// Upserts the broad London pull. These rows have venue_id = null (not a
+// curated venue) and carry the venue identity Ticketmaster returned.
+// Idempotent via the same (source, source_id) constraint. Skips any
+// source_id already claimed by a curated subscription so we never write
+// the same TM event twice with conflicting venue attribution.
+async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
+  fetched: number;
+  upserted: number;
+  cancelled: number;
+}> {
+  console.log(`\n→ ticketmaster · LONDON-WIDE discovery`);
+
+  const all = await fetchLondonDiscovery();
+  const fetched = all.filter((e) => !excludeSourceIds.has(e.source_id));
+  console.log(
+    `  fetched ${all.length} London events (${fetched.length} after de-duping ` +
+      `against curated subscriptions)`,
+  );
+
+  if (fetched.length < LONDON_DISCOVERY_TARGET) {
+    console.log(
+      `  ⚠ only ${fetched.length} events available — below target of ` +
+        `${LONDON_DISCOVERY_TARGET}. Storing all we found.`,
+    );
+  }
+
+  if (DRY_RUN) {
+    console.log(
+      `  [dry-run] would upsert ${fetched.length} London events (venue_id=null)`,
+    );
+    for (const e of fetched.slice(0, LONDON_DISCOVERY_TARGET)) {
+      console.log(
+        `    · ${e.starts_at.slice(0, 10)} — ${e.name} @ ${e.venue_name} ` +
+          `(${e.category})`,
+      );
+    }
+    return { fetched: fetched.length, upserted: 0, cancelled: 0 };
+  }
+
+  if (!supabase) throw new Error("Supabase client not initialised");
+
+  const nowIso = new Date().toISOString();
+  const eventRows = fetched.map((e) => ({
+    name: e.name,
+    venue_name: e.venue_name ?? "London venue",
+    venue_id: null,
+    area: e.venue_area ?? "London",
+    date_label: dateLabelFor(new Date(e.starts_at)),
+    time_label: e.time_label,
+    starts_at: e.starts_at,
+    price: e.price,
+    category: e.category,
+    img_url: e.img_url || FALLBACK_IMG_URL,
+    source: "ticketmaster",
+    source_id: e.source_id,
+    source_url: e.source_url,
+    description: e.description,
+    last_synced_at: nowIso,
+    sold_out: e.sold_out,
+  }));
+
+  let upserted = 0;
+  if (eventRows.length > 0) {
+    const { error: upsertErr } = await supabase
+      .from("events")
+      .upsert(eventRows, { onConflict: "source,source_id" });
+    if (upsertErr) {
+      throw new Error(`London discovery upsert failed: ${upsertErr.message}`);
+    }
+    upserted = eventRows.length;
+    console.log(`  ✓ upserted ${upserted} London events`);
+  }
+
+  // Cancellation pass — scoped to venue_id IS NULL so it only touches
+  // discovery rows, never the curated subscription rows (which always
+  // have a venue_id). A future row no longer returned by the London
+  // search gets cancelled_at set.
+  let cancelled = 0;
+  if (fetched.length > 0) {
+    const { data: existing, error: existErr } = await supabase
+      .from("events")
+      .select("id, source_id")
+      .eq("source", "ticketmaster")
+      .is("venue_id", null)
+      .gte("starts_at", nowIso)
+      .is("cancelled_at", null);
+    if (existErr) {
+      throw new Error(
+        `London discovery cancellation lookup failed: ${existErr.message}`,
+      );
+    }
+    const fetchedIds = new Set(fetched.map((e) => e.source_id));
+    const toCancel = (existing ?? []).filter(
+      (e) => !fetchedIds.has(e.source_id),
+    );
+    if (toCancel.length > 0) {
+      const { error: cancelErr } = await supabase
+        .from("events")
+        .update({ cancelled_at: nowIso })
+        .in(
+          "id",
+          toCancel.map((e) => e.id),
+        );
+      if (cancelErr) {
+        throw new Error(
+          `London discovery cancellation update failed: ${cancelErr.message}`,
+        );
+      }
+      cancelled = toCancel.length;
+      console.log(`  ★ cancelled ${cancelled} events no longer listed`);
+    }
+  }
+
+  return { fetched: fetched.length, upserted, cancelled };
+}
+
 // ── Main ────────────────────────────────────────────────────────────────
 
 async function main() {
   console.log(
-    `Fun London — events ingestion · ${EVENT_SUBSCRIPTIONS.length} subscription(s) · ${DRY_RUN ? "DRY RUN" : "WRITING"}\n`,
+    `Fun London — events ingestion · ${EVENT_SUBSCRIPTIONS.length} subscription(s) ` +
+      `+ London discovery · ${DRY_RUN ? "DRY RUN" : "WRITING"}\n`,
   );
 
-  if (EVENT_SUBSCRIPTIONS.length === 0) {
-    console.log(
-      "No subscriptions registered yet. Add entries to scripts/events-seed.ts " +
-        "as you get API keys for each provider.",
-    );
-    return;
-  }
-
   const tally = { fetched: 0, upserted: 0, cancelled: 0 };
+
+  // ── Pass 1: curated per-venue subscriptions ──────────────────────────
+  // Collect every source_id we pulled here so the London-wide pass can
+  // skip duplicates (avoids two rows for the same TM event with
+  // conflicting venue attribution).
+  const subscriptionSourceIds = new Set<string>();
+
+  for (const sub of EVENT_SUBSCRIPTIONS) {
+    try {
+      const fetched = await dispatchFetch(sub);
+      for (const e of fetched) subscriptionSourceIds.add(e.source_id);
+    } catch {
+      // The per-subscription processor below logs its own failures; this
+      // pre-fetch is only to populate the de-dupe set. Ignore errors here.
+    }
+  }
 
   for (const sub of EVENT_SUBSCRIPTIONS) {
     try {
@@ -492,6 +750,17 @@ async function main() {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ✗ FAILED ${sub.source}/${sub.venueSlug}: ${msg}`);
     }
+  }
+
+  // ── Pass 2: London-wide discovery (keeps the tab stocked at ≥10) ─────
+  try {
+    const r = await processLondonDiscovery(subscriptionSourceIds);
+    tally.fetched += r.fetched;
+    tally.upserted += r.upserted;
+    tally.cancelled += r.cancelled;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`  ✗ FAILED ticketmaster/London-discovery: ${msg}`);
   }
 
   console.log("\n─────────── SUMMARY ───────────");
