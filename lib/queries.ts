@@ -189,6 +189,17 @@ export async function fetchEvents(): Promise<Event[]> {
   return (data as EventRow[]).map(mapEvent);
 }
 
+export async function fetchEventById(id: string): Promise<Event | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("events")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(`fetchEventById(${id}): ${error.message}`);
+  return data ? mapEvent(data as EventRow) : null;
+}
+
 /**
  * Returns the list of unique neighbourhoods present in `venues`.
  * Useful for an "Areas you love" preference UI; currently used by no
