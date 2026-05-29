@@ -122,43 +122,14 @@ insert into public.venues (slug, name, type, vibe, long_description, neighbourho
   );
 
 -- ── Events ───────────────────────────────────────────────────
--- venue_id resolved via slug subquery so the seed is deterministic
--- without hard-coded UUIDs. NULL venue_id is intentional for events
--- whose venue isn't a partner (Comedy Store, Fabric, 180 The Strand).
-
-insert into public.events (name, venue_name, venue_id, area, date_label, time_label, starts_at, price, category, img_url) values
-  (
-    'Jazz & Soul Night', $$Ronnie Scott's$$,
-    (select id from public.venues where slug = 'ronnie-scotts'),
-    'Soho', 'Tonight', '8:00 PM', '2026-05-12T20:00:00Z',
-    '£25', 'Music',
-    'https://images.unsplash.com/photo-1501612780327-45045538702b?w=900&q=80&auto=format&fit=crop'
-  ),
-  (
-    'Stand-Up Showcase', 'The Comedy Store', NULL,
-    'Soho', 'Tonight', '9:00 PM', '2026-05-12T21:00:00Z',
-    '£15', 'Comedy',
-    'https://images.unsplash.com/photo-1585699324551-f6c309eedeca?w=900&q=80&auto=format&fit=crop'
-  ),
-  (
-    'Street Food Festival', 'Camden Market',
-    (select id from public.venues where slug = 'camden-market'),
-    'Camden', 'This Weekend', '12:00 PM', '2026-05-16T12:00:00Z',
-    'Free', 'Food',
-    'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=900&q=80&auto=format&fit=crop'
-  ),
-  (
-    'Warehouse Techno', 'Fabric', NULL,
-    'Farringdon', 'This Weekend', '11:00 PM', '2026-05-16T23:00:00Z',
-    '£20', 'Club',
-    'https://images.unsplash.com/photo-1571266028243-e4733b0f0bb0?w=900&q=80&auto=format&fit=crop'
-  ),
-  (
-    'Immersive Art: Dreams', '180 The Strand', NULL,
-    'Aldwych', 'This Week', '10:00 AM', '2026-05-14T10:00:00Z',
-    '£18', 'Art',
-    'https://images.unsplash.com/photo-1561214115-f2f134cc4912?w=900&q=80&auto=format&fit=crop'
-  );
+-- Demo events removed 2026-05-29 once Phase 5 Tier 3 went live with
+-- real provider-ingested data. Fresh setups now start with an empty
+-- events table; events flow in from scripts/ingest-events.ts on a
+-- 4-hourly GitHub Actions cron (currently Ticketmaster, more
+-- providers to follow per project_pending_work). Demo events
+-- previously seeded: Jazz & Soul Night, Stand-Up Showcase, Street
+-- Food Festival, Warehouse Techno, Immersive Art: Dreams — none
+-- reachable in user-facing UI for >24h before being replaced.
 
 -- ── Sanity check (returns the seeded counts; cosmetic only) ─────
 select
