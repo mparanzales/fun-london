@@ -104,6 +104,33 @@ function dateLabelFor(
 const FALLBACK_IMG_URL =
   "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
 
+// Image hosts the Next.js <Image> optimizer is allowed to load — must
+// stay in sync with the remotePatterns allowlist in next.config.js.
+// Providers (especially the London-wide Ticketmaster discovery pull)
+// return poster URLs from a grab-bag of CDNs; anything not on this
+// list would render as a broken-image icon, so we drop it at ingest
+// time and let the FALLBACK_IMG_URL take over instead.
+const ALLOWED_IMG_HOSTS = [
+  "images.unsplash.com",
+  "places.googleapis.com",
+  "lh3.googleusercontent.com",
+  "images.universe.com",
+];
+
+// Returns the URL only if its host is one the app can actually render;
+// otherwise "" so the caller falls back to the venue image / placeholder.
+function safeImageUrl(url: string | undefined | null): string {
+  if (!url) return "";
+  try {
+    const host = new URL(url).hostname;
+    const ok =
+      ALLOWED_IMG_HOSTS.includes(host) || host.endsWith(".ticketm.net");
+    return ok ? url : "";
+  } catch {
+    return "";
+  }
+}
+
 // How far ahead each provider adapter looks. Two months gives the
 // `dateLabelFor` enough runway to flip events into "This Week" /
 // "This Weekend" as the cron ticks every 4 hours.
@@ -416,7 +443,7 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
     time_label: timeLabel,
     price,
     category: tmCategory(segment, genre),
-    img_url: img?.url ?? "",
+    img_url: safeImageUrl(img?.url),
     description: e.info ?? e.pleaseNote ?? null,
     sold_out: soldOut,
   };
@@ -726,19 +753,19 @@ async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
     console.log(`  ✓ kept ${upserted} London events`);
   }
 
-  // Rotation cleanup — DELETE (not cancel) future discovery rows that
-  // aren't in the new top-N. These are ephemeral wide-open listings, not
-  // events a user picked, so we trim them outright to keep the slice at
-  // ~target. Scoped to venue_id IS NULL so curated rows are never touched.
-  // No FK references point at public.events, so the delete is safe.
+  // Rotation cleanup — DELETE (not cancel) any discovery row that isn't
+  // in the new top-N, INCLUDING ones whose date has slipped into the
+  // past. These are ephemeral wide-open listings, not events a user
+  // picked, so we trim them outright to keep the slice at exactly the
+  // kept set. Scoped to venue_id IS NULL so curated rows are never
+  // touched. No FK references point at public.events, so delete is safe.
   let removed = 0;
   if (selected.length > 0) {
     const { data: existing, error: existErr } = await supabase
       .from("events")
       .select("id, source_id")
       .eq("source", "ticketmaster")
-      .is("venue_id", null)
-      .gte("starts_at", nowIso);
+      .is("venue_id", null);
     if (existErr) {
       throw new Error(
         `London discovery cleanup lookup failed: ${existErr.message}`,

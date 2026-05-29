@@ -17,6 +17,11 @@ const nextConfig = {
       // single-wildcard `*.ticketm.net` reliably matches s1 / s2 /
       // s3 / s4 regional shards.
       { protocol: "https", hostname: "*.ticketm.net" },
+      // Universe is a Ticketmaster-owned ticketing platform; many
+      // grassroots / comedy events surfaced by the London-wide
+      // discovery pull host their posters on images.universe.com
+      // rather than the s1.ticketm.net CDN.
+      { protocol: "https", hostname: "images.universe.com" },
     ],
   },
 };
