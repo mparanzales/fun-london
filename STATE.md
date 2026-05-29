@@ -64,7 +64,9 @@ and signing in via Google works.**
   `public.events` extended with `source`, `source_id`, `source_url`,
   `description`, `last_synced_at`, `sold_out`, `cancelled_at`, plus a
   unique (`source`, `source_id`) constraint for idempotent upserts.
-  Existing 5 demo events backfilled with `source='manual'`.
+  Original 5 demo events were `source='manual'` until 2026-05-29
+  when they were deleted from production + `supabase/seed.sql` (now
+  the events table is real-data-only).
   `scripts/events-seed.ts` defines the `EventSubscription` discriminated
   union (eventbrite / ticketmaster / skiddle / dice) — per-venue feed
   subscriptions, not individual events.
@@ -274,7 +276,7 @@ One font family across the entire consumer app.
 | Venues (11 real, post-ingestion) | Supabase `public.venues` filtered to `google_place_id IS NOT NULL` | `lib/queries.ts → fetchVenues / fetchVenueBySlug / fetchVenueById` |
 | Partner prospects (11 — internal BD overlay) | Supabase `public.partner_prospects` | RLS-locked, no anon access. Internal use only. |
 | Venue ingestion | `scripts/venues-seed.ts` (editorial overrides) + `scripts/ingest-venues.ts` (Google Places fetch + dual-write) | `pnpm ingest` (or `pnpm ingest:dry`). Idempotent on `google_place_id`. |
-| Events (5) | Supabase `public.events` | `lib/queries.ts → fetchEvents` |
+| Events (real-only, currently 2 via Ticketmaster) | Supabase `public.events`, ingested by `scripts/ingest-events.ts` on a 4-hourly cron | `lib/queries.ts → fetchEvents` |
 | Saved set | anon: localStorage `fl.saved.v1` · authed: `public.saved_venues` | `components/saved-context.tsx → useSaved()` |
 | Bookings | anon: localStorage `fl.bookings.v1` · authed: `public.bookings` | `components/bookings-context.tsx → useBookings()` |
 | Auth user | Supabase Auth cookies (HTTPOnly) | `lib/auth.ts → getAuthUser()` |
