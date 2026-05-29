@@ -23,12 +23,13 @@ name: events-ingest
 #       Refreshes only the hand-picked independent venues in
 #       EVENT_SUBSCRIPTIONS (e.g. Ronnie Scott's). On-brand, on-thesis.
 #   • 02:30 / 06:30 / 10:30 / 14:30 / 18:30 / 22:30 UTC → "discovery"
-#       Pulls the top ~10 London-wide events from Ticketmaster
-#       (balanced across Music / Theatre / Comedy), regardless of
-#       whether the venue is curated. Keeps the tab full between
-#       curated refreshes. These rows never clobber curated ones —
-#       see scripts/ingest-events.ts (curated rows carry a venue_id,
-#       discovery rows have venue_id IS NULL).
+#       "Best of London" — pulls upcoming events from a hand-picked
+#       allowlist of independent London venues (Jazz Cafe, KOKO,
+#       Hackney Empire, etc. — see LONDON_VENUES in
+#       scripts/ingest-events.ts), balanced across categories and
+#       trimmed to the top ~15. Local nights out, not tourist
+#       musicals. These rows never clobber curated ones — curated
+#       rows carry a venue_id, these have venue_id IS NULL.
 #
 # Net effect: something refreshes every 2 hours, alternating between
 # the curated slice and the London-wide slice.

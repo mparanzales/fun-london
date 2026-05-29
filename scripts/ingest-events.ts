@@ -136,22 +136,46 @@ function safeImageUrl(url: string | undefined | null): string {
 // "This Weekend" as the cron ticks every 4 hours.
 const EVENT_HORIZON_DAYS = 60;
 
-// ── London-wide discovery pull ──────────────────────────────────────────
+// ── "Best of London" pull ───────────────────────────────────────────────
 //
-// the maintainer's call (2026-05-29): the events tab should always feel alive, so
-// in addition to the curated per-venue subscriptions we run a broad
-// London-wide Ticketmaster search every cron tick and keep at least
-// LONDON_DISCOVERY_TARGET upcoming events stocked.
+// the maintainer's call (2026-05-29, refined): the events tab should always feel
+// alive AND feel like "things people who LIVE in London actually go to" —
+// not tourist West End musicals. So rather than a generic city-wide
+// Ticketmaster search (which surfaced Mamma Mia / Matilda / The Lion
+// King), we pull from a hand-picked allowlist of independent London
+// venues — Camden gig rooms, Hackney clubs, indie concert halls. Every
+// venue below was confirmed (2026-05-29) to have a real Ticketmaster
+// venue id AND upcoming events.
 //
-// PRODUCT NOTE — this is a deliberate exception to the "curated
-// independents only, no chains" thesis. These events are NOT tied to a
-// curated venue (venue_id stays null) and CAN include mainstream / chain
-// venues. We restrict to our content categories (Music / Art / Comedy)
-// and request soonest-first, but no independence vetting is applied here.
-// A future filter pass (chain blocklist + venue-size heuristic) could
-// tighten this without changing the pipeline shape.
-const LONDON_DISCOVERY_TARGET = 10; // how many we keep stocked (the "top 10")
-const LONDON_DISCOVERY_SIZE = 60; // how many to request per run (then trim to target)
+// These events are NOT tied to a curated catalogue venue (venue_id stays
+// null — they don't get their own venue page), but they carry the real
+// venue name + area so the card reads correctly. They're refreshed and
+// trimmed to LONDON_DISCOVERY_TARGET each run. To add coverage, drop a
+// new {name, area, tmVenueId} entry below — find the id via the
+// Discovery API venue search (see scripts/events-seed.ts notes).
+const LONDON_VENUES: { name: string; area: string; tmVenueId: string }[] = [
+  { name: "Jazz Cafe", area: "Camden", tmVenueId: "KovZpZAnaJaA" },
+  { name: "Electric Ballroom", area: "Camden", tmVenueId: "KovZ9177ARf" },
+  { name: "KOKO", area: "Camden", tmVenueId: "KovZ91777W7" },
+  { name: "Roundhouse", area: "Chalk Farm", tmVenueId: "KovZpZAn6k6A" },
+  { name: "Union Chapel", area: "Islington", tmVenueId: "KovZ9177ko0" },
+  {
+    name: "Islington Assembly Hall",
+    area: "Islington",
+    tmVenueId: "KovZ9177akf",
+  },
+  { name: "The Lexington", area: "Islington", tmVenueId: "KovZ9177xRf" },
+  { name: "Scala", area: "King's Cross", tmVenueId: "KovZ91776r0" },
+  { name: "Troxy", area: "Limehouse", tmVenueId: "KovZ917AV2_" },
+  { name: "100 Club", area: "Soho", tmVenueId: "KovZpZAnkn1A" },
+  { name: "Bush Hall", area: "Shepherd's Bush", tmVenueId: "KovZpZAn1AAA" },
+  { name: "Moth Club", area: "Hackney", tmVenueId: "KovZ91776m0" },
+  { name: "Village Underground", area: "Shoreditch", tmVenueId: "KovZ9177OP0" },
+  { name: "Hackney Empire", area: "Hackney", tmVenueId: "KovZ91770d7" },
+  { name: "Cadogan Hall", area: "Chelsea", tmVenueId: "KovZpZAnan6A" },
+];
+
+const LONDON_DISCOVERY_TARGET = 15; // how many we keep stocked in the feed
 
 // Pick a balanced top-N across categories: round-robin through the
 // categories present, taking the soonest event from each in turn. Keeps
@@ -178,14 +202,6 @@ function selectBalanced(events: FetchedEvent[], target: number): FetchedEvent[] 
   }
   return picked;
 }
-
-// Ticketmaster classification terms we query the London feed for. Note
-// these are passed as `classificationName` (the fuzzy matcher that hits
-// segment OR genre names) — NOT `segmentName`. Ticketmaster's top-level
-// segments are only Music / Sports / Arts & Theatre / Film / Misc, so
-// "Comedy" (a genre under Arts & Theatre) must be matched this way or it
-// returns nothing. Querying per-term gives category variety in the feed.
-const LONDON_DISCOVERY_TERMS = ["Music", "Theatre", "Comedy"];
 
 // ── Provider adapters — STUBS for now ───────────────────────────────────
 //
@@ -272,13 +288,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// London-wide discovery: not venue-scoped. Queries Ticketmaster once per
-// content segment (Music / Arts & Theatre / Comedy), soonest-first, then
-// merges + de-dupes. Per-segment querying (vs a single broad city query)
-// reliably clears the target count AND gives category variety instead of
-// the result being dominated by long-running West End theatre runs.
-// Each FetchedEvent carries its own venue_name + venue_area (read from
-// the TM payload) because there's no curated venue row to attribute it to.
+// "Best of London": walks the curated LONDON_VENUES allowlist, pulling
+// each independent venue's upcoming Ticketmaster events, then merges +
+// de-dupes soonest-first. Sourcing from a hand-picked set of local
+// venues (vs a generic city search) is what keeps the feed full of
+// things Londoners actually go to instead of tourist West End runs.
+// Each event is stamped with its venue's real name + area from the
+// allowlist (there's no curated catalogue row to attribute it to).
+// Events without a usable poster are dropped here — the maintainer's call: skip
+// them rather than show a generic placeholder.
 async function fetchLondonDiscovery(): Promise<FetchedEvent[]> {
   const apiKey = process.env.TICKETMASTER_API_KEY;
   if (!apiKey) {
@@ -292,50 +310,47 @@ async function fetchLondonDiscovery(): Promise<FetchedEvent[]> {
   const horizon = new Date(now);
   horizon.setDate(horizon.getDate() + EVENT_HORIZON_DAYS);
 
-  // Split the per-run budget across the terms so each contributes.
-  const perTerm = Math.ceil(
-    LONDON_DISCOVERY_SIZE / LONDON_DISCOVERY_TERMS.length,
-  );
-
   const byId = new Map<string, FetchedEvent>();
   let first = true;
-  for (const term of LONDON_DISCOVERY_TERMS) {
+  for (const venue of LONDON_VENUES) {
     // Ticketmaster enforces a 5-requests/second "spike arrest". We fire
-    // several queries per run (subscriptions + one per term), so pause
-    // between term queries to stay well under the cap — otherwise a
-    // term silently 429s and drops out of the pull.
-    if (!first) await sleep(300);
+    // one query per venue, so pause between them to stay under the cap —
+    // otherwise a venue silently 429s and drops out of the pull.
+    if (!first) await sleep(250);
     first = false;
 
     const params = new URLSearchParams({
-      city: "London",
-      countryCode: "GB",
-      classificationName: term,
+      venueId: venue.tmVenueId,
       startDateTime: isoNoMillis(now),
       endDateTime: isoNoMillis(horizon),
       sort: "date,asc",
-      size: String(perTerm),
+      size: "20",
       apikey: apiKey,
     });
     const url = `https://app.ticketmaster.com/discovery/v2/events.json?${params}`;
     const res = await fetch(url);
     if (!res.ok) {
-      // One term failing shouldn't sink the whole pull. Log + continue.
+      // One venue failing shouldn't sink the whole pull. Log + continue.
       console.error(
-        `  ! London "${term}" query ${res.status}: ${await res.text()}`,
+        `  ! "${venue.name}" query ${res.status}: ${await res.text()}`,
       );
       continue;
     }
     const json = (await res.json()) as TicketmasterEventsResponse;
     for (const e of json._embedded?.events ?? []) {
-      const mapped = tmToFetchedWithVenue(e);
-      if (mapped && !byId.has(mapped.source_id)) {
-        byId.set(mapped.source_id, mapped);
-      }
+      const base = tmToFetched(e);
+      if (!base) continue;
+      if (!base.img_url) continue; // drop poster-less events
+      if (byId.has(base.source_id)) continue;
+      byId.set(base.source_id, {
+        ...base,
+        venue_name: venue.name,
+        venue_area: venue.area,
+      });
     }
   }
 
-  // Merge across segments, soonest-first.
+  // Merge across venues, soonest-first.
   return Array.from(byId.values()).sort(
     (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
   );
@@ -446,20 +461,6 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
     img_url: safeImageUrl(img?.url),
     description: e.info ?? e.pleaseNote ?? null,
     sold_out: soldOut,
-  };
-}
-
-// Same mapping as tmToFetched, but also resolves the event's own venue
-// identity from the TM payload (for the London-wide discovery pull,
-// which isn't attributed to a curated venue row).
-function tmToFetchedWithVenue(e: TicketmasterEvent): FetchedEvent | null {
-  const base = tmToFetched(e);
-  if (!base) return null;
-  const v = e._embedded?.venues?.[0];
-  return {
-    ...base,
-    venue_name: v?.name ?? "London venue",
-    venue_area: v?.city?.name ?? "London",
   };
 }
 
@@ -676,7 +677,10 @@ async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
   upserted: number;
   removed: number;
 }> {
-  console.log(`\n→ ticketmaster · LONDON-WIDE discovery (top ${LONDON_DISCOVERY_TARGET})`);
+  console.log(
+    `\n→ ticketmaster · BEST OF LONDON — independent venues ` +
+      `(top ${LONDON_DISCOVERY_TARGET})`,
+  );
 
   // Never let discovery clobber a curated row sharing the same TM id.
   // Exclude both the ids freshly fetched by subscriptions this run AND
@@ -732,7 +736,9 @@ async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
     starts_at: e.starts_at,
     price: e.price,
     category: e.category,
-    img_url: e.img_url || FALLBACK_IMG_URL,
+    // Poster guaranteed non-empty — fetchLondonDiscovery drops events
+    // without a usable image, so no generic placeholder is ever stored.
+    img_url: e.img_url,
     source: "ticketmaster",
     source_id: e.source_id,
     source_url: e.source_url,
