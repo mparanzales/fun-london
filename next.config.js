@@ -12,9 +12,11 @@ const nextConfig = {
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
       // Ticketmaster CDN — event posters come back as
       // s1.ticketm.net/dam/a/... when Phase 5 Tier 3 ingests via the
-      // Discovery API. Ticketmaster also occasionally serves via s2-s4
-      // (regional shards) so we allow the whole TLD.
-      { protocol: "https", hostname: "**.ticketm.net" },
+      // Discovery API. The double-wildcard `**.ticketm.net` pattern
+      // didn't match `s1.ticketm.net` cleanly in our Next 14 setup;
+      // single-wildcard `*.ticketm.net` reliably matches s1 / s2 /
+      // s3 / s4 regional shards.
+      { protocol: "https", hostname: "*.ticketm.net" },
     ],
   },
 };
