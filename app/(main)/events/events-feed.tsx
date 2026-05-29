@@ -1,6 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  Sparkles,
+  Music,
+  UtensilsCrossed,
+  Palette,
+  Laugh,
+  type LucideIcon,
+} from "lucide-react";
 import { EventCard } from "@/components/event-card";
 import type { Event, EventCategory } from "@/lib/types";
 
@@ -9,28 +17,31 @@ import type { Event, EventCategory } from "@/lib/types";
 type QuickFilter = "all" | "today" | "this-week" | "this-month" | "custom";
 
 const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
-  { id: "all", label: "All upcoming" },
+  // Labels are intentionally short so all 5 chips fit on a single row
+  // at mobile widths without horizontal scroll.
+  { id: "all", label: "All" },
   { id: "today", label: "Today" },
   { id: "this-week", label: "This week" },
   { id: "this-month", label: "This month" },
-  { id: "custom", label: "Pick dates" },
+  { id: "custom", label: "Custom" },
 ];
 
 type CategoryFilter = "all" | EventCategory;
-const CATEGORY_FILTERS: { id: CategoryFilter; label: string; emoji: string }[] =
-  [
-    { id: "all", label: "All", emoji: "" },
-    { id: "Music", label: "Music", emoji: "🎵" },
-    { id: "Food", label: "Food", emoji: "🍽" },
-    { id: "Art", label: "Art", emoji: "🎨" },
-    { id: "Comedy", label: "Comedy", emoji: "😂" },
-  ];
+const CATEGORY_FILTERS: {
+  id: CategoryFilter;
+  label: string;
+  Icon: LucideIcon;
+}[] = [
+  { id: "all", label: "All", Icon: Sparkles },
+  { id: "Music", label: "Music", Icon: Music },
+  { id: "Food", label: "Food", Icon: UtensilsCrossed },
+  { id: "Art", label: "Art", Icon: Palette },
+  { id: "Comedy", label: "Comedy", Icon: Laugh },
+];
 
-// ── Date helpers (Europe/London logical "today") ────────────────────────
+// ── Date helpers ────────────────────────────────────────────────────────
 
 function startOfToday(): Date {
-  // Use local clock; for our use case Europe/London is the target
-  // audience and the server-rendered todayLabel uses the same tz.
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
@@ -44,8 +55,8 @@ function endOfToday(): Date {
 }
 
 function endOfThisWeek(): Date {
-  // "This week" = the next 7 days from now (rolling), so even on a
-  // Monday afternoon "this week" still includes the following Sunday.
+  // Rolling 7 days from now so "this week" stays usable any day of the
+  // week, not just early in it.
   const d = endOfToday();
   d.setDate(d.getDate() + 6);
   return d;
@@ -53,14 +64,13 @@ function endOfThisWeek(): Date {
 
 function endOfThisMonth(): Date {
   const d = startOfToday();
-  d.setMonth(d.getMonth() + 1, 0); // last day of this month
+  d.setMonth(d.getMonth() + 1, 0); // last day of current month
   d.setHours(23, 59, 59, 999);
   return d;
 }
 
 function parseDateInput(value: string): Date | null {
   if (!value) return null;
-  // <input type="date"> returns "YYYY-MM-DD". Pin to local midnight.
   const d = new Date(`${value}T00:00:00`);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -131,8 +141,9 @@ export function EventsFeed({
         <div className="text-xs text-muted-fg mt-0.5">{todayLabel}</div>
       </header>
 
-      {/* Quick date pills */}
-      <div className="px-5 pb-2.5 flex gap-1.5 overflow-x-auto no-scrollbar">
+      {/* Quick date pills — flex-wrap so they wrap to a second row if a
+          narrower phone can't fit all five. No horizontal scroll. */}
+      <div className="px-5 pb-2.5 flex flex-wrap gap-1.5">
         {QUICK_FILTERS.map((f) => {
           const on = quick === f.id;
           return (
@@ -140,7 +151,7 @@ export function EventsFeed({
               key={f.id}
               onClick={() => setQuick(f.id)}
               className={
-                "px-3.5 py-2.5 rounded-full text-[11px] font-extrabold uppercase tracking-[0.06em] whitespace-nowrap transition " +
+                "px-3 py-2.5 rounded-full text-[11px] font-extrabold uppercase tracking-[0.06em] whitespace-nowrap transition " +
                 (on ? "bg-primary text-primary-fg" : "bg-muted text-muted-fg")
               }
             >
@@ -150,7 +161,7 @@ export function EventsFeed({
         })}
       </div>
 
-      {/* Custom date range picker — only shown when "Pick dates" is selected */}
+      {/* Custom date range picker — only shown when "Custom" is selected */}
       {quick === "custom" && (
         <div className="px-5 pb-3 flex items-center gap-2">
           <label className="flex-1">
@@ -178,22 +189,29 @@ export function EventsFeed({
         </div>
       )}
 
-      {/* Category chips */}
-      <div className="px-5 pb-3.5 flex gap-1.5 overflow-x-auto no-scrollbar">
+      {/* Category row — matches the /explore page filter chips:
+          icon on top, label below, no per-chip background, color shift
+          on selection. Grid keeps all five columns equal-width and
+          guarantees no horizontal scroll. */}
+      <div className="px-5 pt-1 pb-4 grid grid-cols-5 gap-1">
         {CATEGORY_FILTERS.map((c) => {
           const on = category === c.id;
+          const iconClass =
+            "w-6 h-6 transition-colors duration-200 " +
+            (on ? "text-accent" : "text-muted-fg");
+          const labelClass =
+            "text-xs transition-colors duration-200 " +
+            (on ? "text-accent font-medium" : "text-muted-fg font-normal");
           return (
             <button
               key={c.id}
+              type="button"
               onClick={() => setCategory(c.id)}
-              className={
-                "px-3.5 py-3 rounded-full text-[11px] font-bold whitespace-nowrap border transition " +
-                (on
-                  ? "bg-accent/10 text-accent border-accent"
-                  : "bg-card text-fg border-border")
-              }
+              aria-pressed={on}
+              className="flex flex-col items-center gap-1 py-2"
             >
-              {c.emoji ? `${c.emoji} ${c.label}` : c.label}
+              <c.Icon className={iconClass} strokeWidth={on ? 2.4 : 2} />
+              <span className={labelClass}>{c.label}</span>
             </button>
           );
         })}
@@ -208,8 +226,8 @@ export function EventsFeed({
           <div className="rounded-2xl bg-card border border-border p-5 text-center">
             <div className="text-2xl mb-1">🌙</div>
             <p className="text-sm text-muted-fg leading-relaxed">
-              No events match that filter yet. Tier 3 ingests every 4 hours from
-              Ticketmaster — more sources coming soon.
+              No events match that filter yet. Tier 3 ingests every 4 hours —
+              more sources coming soon.
             </p>
           </div>
         )}

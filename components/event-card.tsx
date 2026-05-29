@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ExternalLink } from "lucide-react";
 import type { Event } from "@/lib/types";
 
 type Props = {
@@ -14,17 +13,17 @@ type Props = {
 };
 
 export function EventCard({ event, showCategoryTag = true }: Props) {
-  // Tap target priority:
-  //   1. event.sourceUrl   — ticket page (Ticketmaster, Eventbrite, etc.)
-  //                          opens in a new tab so the user keeps Fun London
-  //   2. /venue/[slug]     — when we have a linked venue but no source URL
-  //                          (kept for future manual-curation events)
-  //   3. no link           — should be rare; renders an unlinked card
-  const href = event.sourceUrl;
-  const isExternal = !!href && href.startsWith("http");
+  // Internal link to the immersive event detail. From there the user
+  // can read venue context, then tap the sticky Reserve CTA that opens
+  // the provider's ticket page in a new tab.
+  const href = `/event/${event.id}`;
 
-  const card = (
-    <>
+  return (
+    <Link
+      href={href}
+      aria-label={`View details for ${event.name}`}
+      className="relative block w-full"
+    >
       <div
         className="relative w-full rounded-2xl overflow-hidden shadow-card group"
         style={{ aspectRatio: "16/12" }}
@@ -42,15 +41,6 @@ export function EventCard({ event, showCategoryTag = true }: Props) {
         {showCategoryTag && (
           <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-white text-xs font-medium uppercase tracking-wider">
             {event.category}
-          </div>
-        )}
-
-        {isExternal && (
-          <div
-            aria-hidden
-            className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full bg-white/10 backdrop-blur-md border border-white/15"
-          >
-            <ExternalLink size={13} className="text-white" strokeWidth={2.25} />
           </div>
         )}
       </div>
@@ -72,22 +62,6 @@ export function EventCard({ event, showCategoryTag = true }: Props) {
           <span>{event.price}</span>
         </div>
       </div>
-    </>
-  );
-
-  if (!href) {
-    return <div className="relative block w-full">{card}</div>;
-  }
-
-  return (
-    <Link
-      href={href}
-      target={isExternal ? "_blank" : undefined}
-      rel={isExternal ? "noopener noreferrer" : undefined}
-      aria-label={`${event.name} — opens ticket page`}
-      className="relative block w-full"
-    >
-      {card}
     </Link>
   );
 }
