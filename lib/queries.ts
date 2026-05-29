@@ -184,6 +184,7 @@ export async function fetchEvents(): Promise<Event[]> {
   const { data, error } = await supabase
     .from("events")
     .select("*")
+    .is("cancelled_at", null) // hide events a provider has cancelled
     .order("starts_at", { ascending: true });
   if (error) throw new Error(`fetchEvents: ${error.message}`);
   return (data as EventRow[]).map(mapEvent);
