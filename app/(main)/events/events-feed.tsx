@@ -16,8 +16,18 @@ const CATEGORY_FILTERS: { id: CategoryFilter; label: string; emoji: string }[] =
     { id: "Comedy", label: "Comedy", emoji: "😂" },
   ];
 
-export function EventsFeed({ events }: { events: Event[] }) {
-  const [dateFilter, setDateFilter] = useState<DateLabel>("Tonight");
+export function EventsFeed({
+  events,
+  initialDateFilter,
+  todayLabel,
+}: {
+  events: Event[];
+  // Picked server-side as the first chip that actually has events.
+  initialDateFilter: DateLabel;
+  // "Friday 29 May", formatted server-side in Europe/London.
+  todayLabel: string;
+}) {
+  const [dateFilter, setDateFilter] = useState<DateLabel>(initialDateFilter);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
 
   const filtered = events
@@ -30,7 +40,7 @@ export function EventsFeed({ events }: { events: Event[] }) {
         <h1 className="text-[28px] font-extrabold tracking-tight text-primary">
           What&apos;s On
         </h1>
-        <div className="text-xs text-muted-fg mt-0.5">Tuesday 12 May</div>
+        <div className="text-xs text-muted-fg mt-0.5">{todayLabel}</div>
       </header>
 
       <div className="px-5 pb-2.5 flex gap-1.5">
