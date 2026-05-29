@@ -160,6 +160,10 @@ export type Event = {
   price: string;
   category: EventCategory;
   imgUrl: string;
+  // Outbound ticket / event-detail URL (Ticketmaster, Eventbrite, the
+  // venue's own site, etc.). Null for legacy manual demo rows.
+  // Used as the click target on the event card.
+  sourceUrl: string | null;
 };
 
 export type Booking = {

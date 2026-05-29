@@ -81,6 +81,7 @@ type EventRow = {
   price: string;
   category: string;
   img_url: string;
+  source_url: string | null;
 };
 
 // ── Mappers ─────────────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ function mapEvent(r: EventRow): Event {
     price: r.price,
     category: r.category as EventCategory,
     imgUrl: r.img_url,
+    sourceUrl: r.source_url,
   };
 }
 
