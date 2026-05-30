@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import type { Venue } from "@/lib/types";
 import type { Member, Room } from "@/lib/realtime/room";
-import { SWIPE_QUESTIONS } from "./swipe";
 
 // Plan Together — Step 3: Result (real-time).
 // Built from the actual broadcast votes: each step shows the venue + the
@@ -12,12 +11,16 @@ import { SWIPE_QUESTIONS } from "./swipe";
 const STEP_LABELS = ["Start", "Then", "Finish"] as const;
 const STEP_WORDS = ["dinner", "drinks", "a late one"] as const;
 
-export function Result({ room, venues }: { room: Room; venues: Venue[] }) {
+export function Result({
+  room,
+  questionVenues,
+}: {
+  room: Room;
+  questionVenues: Venue[];
+}) {
   const router = useRouter();
 
-  const stepVenues: Venue[] = SWIPE_QUESTIONS.map(
-    (q, i) => venues[q.venueIdx] ?? venues[i],
-  ).filter(Boolean);
+  const stepVenues: Venue[] = questionVenues;
 
   const memberById = new Map(room.members.map((m) => [m.id, m]));
   const yesVotersByQ: Member[][] = [0, 1, 2].map((q) =>

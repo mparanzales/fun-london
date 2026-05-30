@@ -11,12 +11,18 @@ import { Avatar } from "./avatar";
 // to the result.
 
 export const SWIPE_QUESTIONS = [
-  { label: "Dinner?", moodPill: "🍝 Mood", venueIdx: 0 },
-  { label: "Drinks?", moodPill: "🍸 Mood", venueIdx: 2 },
-  { label: "Late night?", moodPill: "🌙 Mood", venueIdx: 6 },
+  { label: "Dinner?", moodPill: "🍝 Mood" },
+  { label: "Drinks?", moodPill: "🍸 Mood" },
+  { label: "Late night?", moodPill: "🌙 Mood" },
 ] as const;
 
-export function Swipe({ room, venues }: { room: Room; venues: Venue[] }) {
+export function Swipe({
+  room,
+  questionVenues,
+}: {
+  room: Room;
+  questionVenues: Venue[];
+}) {
   const [qIdx, setQIdx] = useState(0);
   const [finished, setFinished] = useState(false);
   const advancedRef = useRef(false);
@@ -75,7 +81,7 @@ export function Swipe({ room, venues }: { room: Room; venues: Venue[] }) {
   }
 
   const q = SWIPE_QUESTIONS[qIdx];
-  const venue: Venue = venues[q.venueIdx] ?? venues[0];
+  const venue: Venue = questionVenues[qIdx] ?? questionVenues[0];
 
   return (
     <div className="px-5 pt-4 flex flex-col min-h-[calc(100vh-96px)]">
