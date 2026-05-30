@@ -1,44 +1,42 @@
 name: discover-venues
 
-# Tier 2 — automated venue discovery (auto-publish).
+# Tier 2 — autonomous venue discovery (strict, all-Google, free).
 #
-# Runs scripts/discover-venues.ts every 4 hours. Each run scans a rotating
-# slice of the London search grid (neighbourhood × category) on Google
-# Places, applies strict quality filters (operational · rating >= 4.4 ·
-# >= 400 reviews · has a website · not a chain · food/drink type), de-dupes
-# against the existing catalog, and AUTO-PUBLISHES up to 6 new passing
-# venues straight into public.venues (Maria's call — no human gate; the
-# strict filters are the quality guard).
+# Runs scripts/discover-venues.ts every 4 hours. Each run loops a rotating
+# slice of the London grid (neighbourhood × category) on Google Places until
+# it has up to 10 venues that pass EVERY gate:
+#   • operational · rating >= 4.4 · >= 400 reviews · has website · food/drink
+#   • NOT a chain (Google Places location count >= 6 = chain — by count, not
+#     a denylist)
+#   • verifiable in >= 2 trusted publications (Time Out / Infatuation / Eater
+#     / Square Meal / Hot Dinners / Harden's / Michelin / Good Food Guide /
+#     Condé Nast / Evening Standard / Guardian / Foodism / World's 50 Best),
+#     checked by Gemini 2.5 Flash with built-in Google Search
+# then Gemini writes the brand-voice editorial + Real Talk, and the venue is
+# AUTO-PUBLISHED to public.venues with its real editorial_sources (Maria's
+# call — no human gate; the strict 2-source gate is the guard).
+#
+# All-Google + free: Google Places + Gemini (one personal-account key does
+# both validation-by-search and editorial). No Custom Search / no 3rd party.
 #
 # Distinct from:
 #   • maintenance.yml (Tier 1) — keeps EXISTING venues fresh (daily).
 #   • events-ingest.yml (Tier 3) — keeps the Events tab fresh (4-hourly).
 #
-# Auto-discovered rows carry editorial_sources = [{publication: "Google
-# Places", …}], so they're distinguishable from hand-curated venues and
-# the Tier 1 maintenance cron keeps them in sync thereafter.
-#
 # Schedule offset to :15 past the odd-4h hours so it never queues with the
 # events cron (:30) or the daily maintenance cron (03:00).
 
 on:
-  # AUTO-PUBLISH PAUSED (2026-05-30). Maria chose strict 2-source
-  # validation over rating-based volume, so we no longer publish
-  # rating-only venues to the live catalog on a schedule. Discovery now
-  # feeds a review step: the cron finds candidates, then validation
-  # against 2+ publications + editorial happens AI-in-the-loop before a
-  # venue goes live (the autonomous RSS approach proved fragile — Time
-  # Out's feed 404s, Eater blocks fetches). Re-enable the schedule below
-  # only once discovery writes to the candidate queue instead of venues.
-  #   schedule:
-  #     - cron: "15 1,5,9,13,17,21 * * *"
+  schedule:
+    # https://crontab.guru/#15_1,5,9,13,17,21_*_*_*
+    - cron: "15 1,5,9,13,17,21 * * *"
   workflow_dispatch:
 
 jobs:
   discover-venues:
     name: discover + auto-publish venues
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,6 +61,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set -o pipefail
           pnpm exec tsx scripts/discover-venues.ts 2>&1 | tee discover-venues.log
