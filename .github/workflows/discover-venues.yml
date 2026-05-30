@@ -1,0 +1,76 @@
+name: discover-venues
+
+# Tier 2 — automated venue discovery (auto-publish).
+#
+# Runs scripts/discover-venues.ts every 4 hours. Each run scans a rotating
+# slice of the London search grid (neighbourhood × category) on Google
+# Places, applies strict quality filters (operational · rating >= 4.4 ·
+# >= 400 reviews · has a website · not a chain · food/drink type), de-dupes
+# against the existing catalog, and AUTO-PUBLISHES up to 6 new passing
+# venues straight into public.venues (Maria's call — no human gate; the
+# strict filters are the quality guard).
+#
+# Distinct from:
+#   • maintenance.yml (Tier 1) — keeps EXISTING venues fresh (daily).
+#   • events-ingest.yml (Tier 3) — keeps the Events tab fresh (4-hourly).
+#
+# Auto-discovered rows carry editorial_sources = [{publication: "Google
+# Places", …}], so they're distinguishable from hand-curated venues and
+# the Tier 1 maintenance cron keeps them in sync thereafter.
+#
+# Schedule offset to :15 past the odd-4h hours so it never queues with the
+# events cron (:30) or the daily maintenance cron (03:00).
+
+on:
+  schedule:
+    # https://crontab.guru/#15_1,5,9,13,17,21_*_*_*
+    - cron: "15 1,5,9,13,17,21 * * *"
+  workflow_dispatch:
+
+jobs:
+  discover-venues:
+    name: discover + auto-publish venues
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 override — same Supabase realtime / native-WebSocket
+          # reason as maintenance.yml and events-ingest.yml.
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run venue discovery + render summary
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+        run: |
+          set -o pipefail
+          pnpm exec tsx scripts/discover-venues.ts 2>&1 | tee discover-venues.log
+
+      - name: Render step summary
+        if: always()
+        run: |
+          {
+            echo "## Venue discovery summary"
+            echo ""
+            echo '```'
+            if grep -q "─── SUMMARY ───" discover-venues.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' discover-venues.log
+            else
+              tail -40 discover-venues.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
