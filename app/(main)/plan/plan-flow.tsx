@@ -1,75 +1,201 @@
 "use client";
 
-// Plan My Night — pixel-faithful port of PlanScreen from
-// components/screens.jsx (lines 220–311). Setup ↔ Result internal state.
-// No map, no why-it-works — the prototype's Plan My Night doesn't have them.
+// Plan My Night — real recommender (Epic B). The setup form feeds the
+// pure engine in lib/plan-engine.ts, which actually uses vibe + budget,
+// scores venues for fit, and computes real walk times from coordinates.
+//
+// Extras over the old prototype port:
+//   • "Try another combination" reshuffles within the same constraints.
+//   • Signed-in users can save a night to public.plans and re-open it.
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import {
+  computePlan,
+  planRationale,
+  type Plan,
+  type PlanBudget,
+  type PlanRole,
+  type PlanVibe,
+} from "@/lib/plan-engine";
 import type { Venue } from "@/lib/types";
 
-const AREAS = ["Soho", "Shoreditch", "Camden", "Fitzrovia"] as const;
-type Area = (typeof AREAS)[number];
-
-const VIBES = [
+const VIBES: { v: PlanVibe; e: string }[] = [
   { v: "Chill", e: "✨" },
   { v: "Lively", e: "🔥" },
   { v: "Fancy", e: "💎" },
   { v: "Unique", e: "🎭" },
-] as const;
-type Vibe = (typeof VIBES)[number]["v"];
+];
 
-const BUDGETS = ["£", "££", "Any"] as const;
-type Budget = (typeof BUDGETS)[number];
+const BUDGETS: PlanBudget[] = ["£", "££", "Any"];
 
-type PlanStep = Venue & { minutes: number };
+// A render-ready plan shared by freshly-computed and re-opened-saved plans.
+type DisplayPlan = {
+  title: string;
+  area: string;
+  totalMins: number;
+  steps: {
+    venue: Venue;
+    role: PlanRole;
+    dwellMins: number;
+    walkToNextMins: number | null;
+  }[];
+};
 
-// Step labels for the itinerary marker.
-const STEP_LABELS = ["Start", "Then", "Finish"] as const;
+type SavedPlanRow = {
+  id: string;
+  title: string;
+  neighbourhood: string;
+  steps: {
+    venueId: string;
+    role: PlanRole;
+    dwellMins: number;
+    walkToNextMins: number | null;
+  }[];
+};
 
-// Exact port of `computePlan` from screens.jsx. Venues come from the
-// page-level server fetch and are passed in as a prop so the same flow
-// can run as a client component.
-function computePlan(
-  venues: Venue[],
-  area: Area,
-  _vibe: Vibe,
-  _budget: Budget,
-): PlanStep[] {
-  const inArea = venues.filter((v) => v.neighbourhood === area);
-  const pool = inArea.length >= 3 ? inArea : venues;
-  const start = pool.find((v) => v.type === "Restaurant") ?? pool[0];
-  const middle =
-    pool.find(
-      (v) =>
-        v.id !== start.id &&
-        (v.type === "Wine Bar" ||
-          v.type === "Bar" ||
-          v.type === "Listening Bar"),
-    ) ?? pool[1];
-  const end =
-    pool.find(
-      (v) =>
-        v.id !== start.id &&
-        v.id !== middle.id &&
-        (v.type === "Live Music" || v.timeOfDay === "Night"),
-    ) ?? pool[2];
-  const minutes = [75, 60, 50];
-  return [start, middle, end]
-    .filter(Boolean)
-    .map((v, i) => ({ ...(v as Venue), minutes: minutes[i] }));
+function fmtHours(mins: number): string {
+  const h = mins / 60;
+  return `~${h.toFixed(1)} h total`;
 }
 
-export function PlanFlow({ venues }: { venues: Venue[] }) {
-  const [step, setStep] = useState<"setup" | "result">("setup");
-  const [area, setArea] = useState<Area>("Shoreditch");
-  const [vibe, setVibe] = useState<Vibe>("Chill");
-  const [budget, setBudget] = useState<Budget>("££");
+function toDisplay(plan: Plan): DisplayPlan {
+  return {
+    title: `${plan.vibe} Night in ${plan.area}`,
+    area: plan.area,
+    totalMins: plan.totalMins,
+    steps: plan.steps,
+  };
+}
 
-  const plan = useMemo(
-    () => computePlan(venues, area, vibe, budget),
-    [venues, area, vibe, budget],
+export function PlanFlow({
+  venues,
+  authUserId,
+}: {
+  venues: Venue[];
+  authUserId: string | null;
+}) {
+  // Area chips are derived from the catalog so every chip has venues —
+  // most-stocked neighbourhoods first.
+  const areas = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const v of venues)
+      counts.set(v.neighbourhood, (counts.get(v.neighbourhood) ?? 0) + 1);
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([n]) => n);
+  }, [venues]);
+
+  const [step, setStep] = useState<"setup" | "result">("setup");
+  const [area, setArea] = useState<string>(() => areas[0] ?? "");
+  const [vibe, setVibe] = useState<PlanVibe>("Chill");
+  const [budget, setBudget] = useState<PlanBudget>("££");
+  const [offset, setOffset] = useState(0);
+
+  // When set, the result view shows a re-opened saved plan instead of the
+  // live-computed one. Cleared whenever the user edits inputs / tries again.
+  const [openedSaved, setOpenedSaved] = useState<DisplayPlan | null>(null);
+  const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
+    "idle",
   );
 
+  const venueById = useMemo(() => {
+    const m = new Map<string, Venue>();
+    for (const v of venues) m.set(v.id, v);
+    return m;
+  }, [venues]);
+
+  const computed = useMemo(
+    () => computePlan(venues, { area, vibe, budget, offset }),
+    [venues, area, vibe, budget, offset],
+  );
+
+  const display: DisplayPlan = openedSaved ?? toDisplay(computed);
+
+  // ── Saved plans (signed-in only) ────────────────────────────────────
+  const loadSavedPlans = useCallback(async () => {
+    if (!authUserId) return;
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("plans")
+      .select("id,title,neighbourhood,steps")
+      .eq("user_id", authUserId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("[plans] load failed:", error);
+      return;
+    }
+    setSavedPlans((data as SavedPlanRow[]) ?? []);
+  }, [authUserId]);
+
+  useEffect(() => {
+    void loadSavedPlans();
+  }, [loadSavedPlans]);
+
+  const onSave = async () => {
+    if (!authUserId || saveState === "saving") return;
+    setSaveState("saving");
+    const supabase = createClient();
+    const { error } = await supabase.from("plans").insert({
+      user_id: authUserId,
+      title: toDisplay(computed).title,
+      neighbourhood: computed.area,
+      why_it_works: planRationale(computed),
+      steps: computed.steps.map((s) => ({
+        venueId: s.venue.id,
+        role: s.role,
+        dwellMins: s.dwellMins,
+        walkToNextMins: s.walkToNextMins,
+      })),
+    });
+    if (error) {
+      console.error("[plans] save failed:", error);
+      setSaveState("idle");
+      return;
+    }
+    setSaveState("saved");
+    void loadSavedPlans();
+  };
+
+  const openSaved = (row: SavedPlanRow) => {
+    const steps = row.steps
+      .map((s) => {
+        const venue = venueById.get(s.venueId);
+        return venue
+          ? {
+              venue,
+              role: s.role,
+              dwellMins: s.dwellMins,
+              walkToNextMins: s.walkToNextMins,
+            }
+          : null;
+      })
+      .filter((s): s is DisplayPlan["steps"][number] => s !== null);
+    if (steps.length === 0) return;
+    const totalMins = steps.reduce(
+      (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+      0,
+    );
+    setOpenedSaved({
+      title: row.title,
+      area: row.neighbourhood,
+      totalMins,
+      steps,
+    });
+    setStep("result");
+  };
+
+  // Editing any input invalidates a re-opened saved plan + the saved flag.
+  const editInputs = (fn: () => void) => {
+    setOpenedSaved(null);
+    setSaveState("idle");
+    fn();
+  };
+
+  // ── Setup screen ────────────────────────────────────────────────────
   if (step === "setup") {
     return (
       <div>
@@ -84,8 +210,12 @@ export function PlanFlow({ venues }: { venues: Venue[] }) {
 
         <Group label="Area">
           <div className="flex gap-2 flex-wrap">
-            {AREAS.map((a) => (
-              <Chip key={a} on={area === a} onClick={() => setArea(a)}>
+            {areas.map((a) => (
+              <Chip
+                key={a}
+                on={area === a}
+                onClick={() => editInputs(() => setArea(a))}
+              >
                 {a}
               </Chip>
             ))}
@@ -100,7 +230,7 @@ export function PlanFlow({ venues }: { venues: Venue[] }) {
                 <button
                   key={v.v}
                   type="button"
-                  onClick={() => setVibe(v.v)}
+                  onClick={() => editInputs(() => setVibe(v.v))}
                   className={
                     "px-3.5 py-3 rounded-[14px] border-[1.5px] text-fg text-left flex items-center gap-2 text-[13px] font-bold " +
                     (on
@@ -124,7 +254,7 @@ export function PlanFlow({ venues }: { venues: Venue[] }) {
                 <button
                   key={b}
                   type="button"
-                  onClick={() => setBudget(b)}
+                  onClick={() => editInputs(() => setBudget(b))}
                   className={
                     "h-11 rounded-xl border-[1.5px] text-fg font-extrabold text-[13px] " +
                     (on
@@ -142,7 +272,11 @@ export function PlanFlow({ venues }: { venues: Venue[] }) {
         <div className="px-5 pt-5">
           <button
             type="button"
-            onClick={() => setStep("result")}
+            onClick={() => {
+              setOffset(0);
+              setOpenedSaved(null);
+              setStep("result");
+            }}
             className="w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
             style={{
               background:
@@ -152,16 +286,36 @@ export function PlanFlow({ venues }: { venues: Venue[] }) {
             Make my plan ✨
           </button>
         </div>
+
+        {/* Saved nights — signed-in re-open */}
+        {savedPlans.length > 0 && (
+          <Group label="Your saved nights">
+            <div className="flex flex-col gap-2">
+              {savedPlans.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => openSaved(p)}
+                  className="text-left bg-card border border-border rounded-2xl px-4 py-3"
+                >
+                  <div className="text-[14px] font-extrabold text-heading">
+                    {p.title}
+                  </div>
+                  <div className="text-[11px] text-muted-fg mt-0.5">
+                    {p.steps.length} stops · tap to re-open
+                  </div>
+                </button>
+              ))}
+            </div>
+          </Group>
+        )}
       </div>
     );
   }
 
-  // ── Result screen ──────────────────────────────────────────────────────
+  // ── Result screen ───────────────────────────────────────────────────
   return (
     <div>
-      {/* Gradient strip header — primary→accent. Linear-gradient stays as
-          inline style because Tailwind doesn't express arbitrary
-          two-stop gradients between two CSS variables cleanly. */}
       <div
         className="px-5 pt-5 pb-5.5 text-white"
         style={{
@@ -176,56 +330,92 @@ export function PlanFlow({ venues }: { venues: Venue[] }) {
         >
           ← Edit
         </button>
-        <h2 className="text-[22px] font-extrabold m-0">
-          {vibe} Night in {area}
-        </h2>
+        <h2 className="text-[22px] font-extrabold m-0">{display.title}</h2>
         <div className="text-xs opacity-90 mt-1.5">
-          📍 {area} · 🕒 ~3.5 h total
+          📍 {display.area} · 🕒 {fmtHours(display.totalMins)}
         </div>
       </div>
 
       <div className="px-5 py-4 flex flex-col gap-2.5">
-        {plan.map((s, i) => (
-          <div key={`${s.id}-${i}`}>
+        {display.steps.map((s, i) => (
+          <div key={`${s.venue.id}-${i}`}>
             <div className="flex items-center gap-3 mb-1.5">
               <div className="w-[26px] h-[26px] rounded-full border-2 border-accent text-accent grid place-items-center text-xs font-extrabold">
                 {i + 1}
               </div>
               <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase">
-                {STEP_LABELS[i]}
+                {s.role}
               </div>
             </div>
             <div className="bg-card border border-border rounded-2xl overflow-hidden">
               <div
                 className="h-[120px]"
-                style={{ background: `url(${s.imgUrl}) center/cover` }}
+                style={{ background: `url(${s.venue.imgUrl}) center/cover` }}
               />
               <div className="p-3.5">
                 <div className="text-[15px] font-extrabold text-heading">
-                  {s.name}
+                  {s.venue.name}
                 </div>
-                <div className="text-[11px] text-muted-fg mt-1 flex items-center gap-1.5">
-                  <span className="text-accent font-bold">{s.type}</span>
+                <div className="text-[11px] text-muted-fg mt-1 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-accent font-bold">{s.venue.type}</span>
                   <span>·</span>
-                  <span>★ {s.rating}</span>
+                  <span>★ {s.venue.rating}</span>
                   <span>·</span>
-                  <span>{s.price}</span>
+                  <span>{s.venue.price}</span>
                   <span>·</span>
-                  <span>🕒 ~{s.minutes} min</span>
+                  <span>🕒 ~{s.dwellMins} min</span>
                 </div>
                 <div className="text-[11px] text-muted-fg italic mt-1">
-                  &quot;{s.vibe}&quot;
+                  &quot;{s.venue.vibe}&quot;
                 </div>
               </div>
             </div>
-            {i < plan.length - 1 && (
+            {s.walkToNextMins != null && (
               <div className="ml-3 text-[11px] text-muted-fg py-1.5 pl-3 border-l-2 border-dashed border-border">
-                🚶 ~{6 + i * 2} min walk
+                🚶 ~{s.walkToNextMins} min walk
               </div>
             )}
           </div>
         ))}
       </div>
+
+      {/* Actions — try another + save (live plans only, not re-opened) */}
+      {!openedSaved && (
+        <div className="px-5 pb-2 flex flex-col gap-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              setSaveState("idle");
+              setOffset((o) => o + 1);
+            }}
+            className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold"
+          >
+            Try another combination ↻
+          </button>
+
+          {authUserId ? (
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saveState !== "idle"}
+              className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold disabled:opacity-70"
+            >
+              {saveState === "saved"
+                ? "Saved to your nights ✓"
+                : saveState === "saving"
+                  ? "Saving…"
+                  : "Save this night"}
+            </button>
+          ) : (
+            <Link
+              href="/sign-in?return=/plan"
+              className="w-full h-12 rounded-2xl bg-muted text-muted-fg text-[14px] font-extrabold flex items-center justify-center"
+            >
+              Sign in to save this night
+            </Link>
+          )}
+        </div>
+      )}
     </div>
   );
 }
