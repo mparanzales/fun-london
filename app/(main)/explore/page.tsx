@@ -17,6 +17,11 @@ export default async function ExplorePage() {
   const greetingName =
     profile?.displayName ?? authUser?.email?.split("@")[0] ?? "there";
   return (
-    <ExploreFeed venues={venues} events={events} greetingName={greetingName} />
+    <ExploreFeed
+      venues={venues}
+      events={events}
+      greetingName={greetingName}
+      preferences={profile?.preferences ?? null}
+    />
   );
 }
