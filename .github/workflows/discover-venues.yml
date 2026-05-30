@@ -22,9 +22,16 @@ name: discover-venues
 # events cron (:30) or the daily maintenance cron (03:00).
 
 on:
-  schedule:
-    # https://crontab.guru/#15_1,5,9,13,17,21_*_*_*
-    - cron: "15 1,5,9,13,17,21 * * *"
+  # AUTO-PUBLISH PAUSED (2026-05-30). Maria chose strict 2-source
+  # validation over rating-based volume, so we no longer publish
+  # rating-only venues to the live catalog on a schedule. Discovery now
+  # feeds a review step: the cron finds candidates, then validation
+  # against 2+ publications + editorial happens AI-in-the-loop before a
+  # venue goes live (the autonomous RSS approach proved fragile — Time
+  # Out's feed 404s, Eater blocks fetches). Re-enable the schedule below
+  # only once discovery writes to the candidate queue instead of venues.
+  #   schedule:
+  #     - cron: "15 1,5,9,13,17,21 * * *"
   workflow_dispatch:
 
 jobs:
