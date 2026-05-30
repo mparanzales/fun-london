@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Flame,
   UtensilsCrossed,
@@ -15,7 +15,16 @@ import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
 import { CITY } from "@/lib/config";
-import type { Venue, Event, VenueType, EventCategory } from "@/lib/types";
+import { hasPrefs, scoreVenue, scoreEvent } from "@/lib/ranking";
+import type {
+  Venue,
+  Event,
+  VenueType,
+  EventCategory,
+  UserPreferences,
+} from "@/lib/types";
+
+const ONBOARDING_STORAGE_KEY = "fl.onboarding.v1";
 
 type FilterKey =
   | "for-you"
@@ -48,24 +57,63 @@ export function ExploreFeed({
   venues: allVenues,
   events: allEvents,
   greetingName,
+  preferences,
 }: {
   venues: Venue[];
   events: Event[];
   greetingName: string;
+  preferences: UserPreferences | null;
 }) {
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
   const [searchOpen, setSearchOpen] = useState(false);
   const eyebrow = getEyebrow();
 
+  // Preferences: server-provided (signed-in profile) win; otherwise hydrate
+  // from the anonymous onboarding payload in localStorage on mount.
+  const [prefs, setPrefs] = useState<UserPreferences | null>(preferences);
+  useEffect(() => {
+    if (preferences) {
+      setPrefs(preferences);
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
+      if (!raw) return;
+      const p = JSON.parse(raw) as Partial<UserPreferences>;
+      if (p && (p.moods?.length || p.vibes?.length)) {
+        setPrefs({
+          moods: p.moods ?? [],
+          vibes: p.vibes ?? [],
+          budget: p.budget ?? null,
+          areas: p.areas ?? [],
+        });
+      }
+    } catch {
+      // localStorage unavailable
+    }
+  }, [preferences]);
+
+  const personalized = hasPrefs(prefs);
+
   const items = useMemo<FeedItem[]>(() => {
     switch (selectedFilter) {
-      case "for-you":
-        // MVP: simple concat. Sorting/interleaving deferred until there's
-        // a real signal (time, distance, user history).
-        return [
+      case "for-you": {
+        const all: FeedItem[] = [
           ...allVenues.map<FeedItem>((v) => ({ kind: "venue", data: v })),
           ...allEvents.map<FeedItem>((e) => ({ kind: "event", data: e })),
         ];
+        // Rank by taste when we have prefs; otherwise keep the original
+        // order. Array.sort is stable, so equal-score items keep their
+        // relative order (venues before events).
+        if (prefs && personalized) {
+          const score = (it: FeedItem) =>
+            it.kind === "venue"
+              ? scoreVenue(it.data, prefs)
+              : scoreEvent(it.data, prefs);
+          return [...all].sort((a, b) => score(b) - score(a));
+        }
+        return all;
+      }
       case "restaurants":
         return allVenues
           .filter((v) => v.type === "Restaurant")
@@ -90,7 +138,7 @@ export function ExploreFeed({
       case "events":
         return allEvents.map<FeedItem>((e) => ({ kind: "event", data: e }));
     }
-  }, [selectedFilter, allVenues, allEvents]);
+  }, [selectedFilter, allVenues, allEvents, prefs, personalized]);
 
   // Smart category-tag visibility:
   //   For You / Music / Events → mixed sources or subtypes → show tags
@@ -137,6 +185,12 @@ export function ExploreFeed({
       </header>
 
       <FilterChipRow selected={selectedFilter} onSelect={setSelectedFilter} />
+
+      {selectedFilter === "for-you" && personalized && (
+        <div className="px-5 pt-1.5 text-[11px] font-semibold text-muted-fg">
+          ✨ Sorted around your taste
+        </div>
+      )}
 
       {items.length === 0 ? (
         <div className="px-5 pt-10 text-center text-sm text-muted-fg">
