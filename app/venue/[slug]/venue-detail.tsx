@@ -56,25 +56,13 @@ export function VenueDetail({ venue }: { venue: Venue }) {
     (!!venue.editorialSources && venue.editorialSources.length > 0) ||
     (!!venue.creatorCoverage && venue.creatorCoverage.length > 0);
 
-  // First pill: only prefix "Tonight " when nextSlotLabel is a TIME
-  // (e.g. "8:30 PM") — not a state phrase ("Open today", "Open till 6
-  // PM"). Heuristic: time labels include a digit AND don't start with
-  // "Open". Avoids the awkward "Tonight Open today" reading.
-  const slotIsTime =
-    /\d/.test(venue.nextSlotLabel) &&
-    !venue.nextSlotLabel.trim().toLowerCase().startsWith("open");
-  // "Tables free" pill is hidden for non-reservable venues AND hidden
-  // when the count is 0 (don't signal "fully booked" next to a working
-  // Reserve button).
-  const showTablesPill = isReservable && venue.tablesFree > 0;
-  const pills = [
-    isReservable && slotIsTime
-      ? `Tonight ${venue.nextSlotLabel}`
-      : venue.nextSlotLabel,
-    `${venue.walkingMins} min walk`,
-    ...(showTablesPill ? [`${venue.tablesFree} tables free`] : []),
-    venue.vibeTags.join(" · "),
-  ];
+  // Quick-fact pills. We deliberately do NOT surface "tables free",
+  // "next slot", or "X min walk": there's no live-availability feed and
+  // no user location, so those would be fabricated numbers — and a
+  // booking product can't afford fake signals. Only the editorial vibe
+  // tags (real, curated) are shown. (Real walk times return inside Plan
+  // My Night, computed step-to-step from venue coordinates.)
+  const pills = venue.vibeTags;
 
   return (
     // Mobile-shell constraint matches the (main) route group (max-w-md).
@@ -353,15 +341,35 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               ? "their site"
               : topBookingLink.platform}
           </a>
-        ) : isReservable ? (
-          // Legacy fallback for demo venues without bookingLinks.
-          <button
-            type="button"
-            onClick={() => router.push(`/booking/${venue.slug}/confirmed`)}
-            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm"
+        ) : isReservable && venue.websiteUrl ? (
+          // No structured booking link, but we have the venue's site —
+          // deep-link there. Honest: it goes to a real place to book,
+          // not a fabricated in-app confirmation.
+          <a
+            href={venue.websiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm text-center no-underline"
           >
-            Reserve · {venue.nextSlotLabel}
-          </button>
+            Reserve → their site
+          </a>
+        ) : isReservable && venue.phone ? (
+          // No online booking — the honest action is to call the venue.
+          <a
+            href={`tel:${venue.phone}`}
+            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm text-center no-underline"
+          >
+            Call to book
+          </a>
+        ) : isReservable ? (
+          // Reservable type but we hold no booking channel for it. Show
+          // an honest status instead of a fake confirmation flow.
+          <div
+            role="status"
+            className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium"
+          >
+            Booking via the venue
+          </div>
         ) : (
           // Static info element — non-interactive, occupies the same
           // space as the Reserve button but signals walk-in.

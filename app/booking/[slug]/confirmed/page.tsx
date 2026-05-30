@@ -3,29 +3,29 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Check, Calendar, Share2 } from "lucide-react";
 import { fetchVenueBySlug } from "@/lib/queries";
-import { getAuthUser } from "@/lib/auth";
-import { BookingRecorder } from "./booking-recorder";
 
 // Booking confirmation (Figma frame 3c).
 // Top-level route OUTSIDE the (main) group — no bottom nav, full-screen
-// immersive flow like /venue/[slug]. Reachable from the Reserve CTA on
-// the venue detail page.
+// immersive flow like /venue/[slug].
+//
+// NOTE (2026-05-30, Epic A): this screen no longer writes a booking to
+// the database. Fun London is a booking AGGREGATOR — reservations happen
+// on the venue's real platform (OpenTable / their site / phone), so the
+// app must never fabricate a confirmed booking the user didn't make.
+// The only real bookings are ones the user self-logs (Epic H). This
+// route is currently unreachable from the live catalog (every venue
+// deep-links out); it's kept as the celebratory shell that Epic H will
+// reattach to a genuine self-logged reservation.
 //
 // Booking ref format: first 3 chars of venue.slug, uppercase, suffixed
-// with "-4912" (the demo number from the original brief).
-// dishoom-shoreditch → DIS-4912, padella → PAD-4912, bao-soho → BAO-4912.
-// We derive from slug (not id) so the ref stays human-readable after
-// the move to uuid PKs in Supabase.
+// with "-4912". Derived from slug (not id) so it stays human-readable.
 
 export default async function BookingConfirmedPage({
   params,
 }: {
   params: { slug: string };
 }) {
-  const [venue, authUser] = await Promise.all([
-    fetchVenueBySlug(params.slug),
-    getAuthUser(),
-  ]);
+  const venue = await fetchVenueBySlug(params.slug);
   if (!venue) notFound();
 
   const bookingRef = `${venue.slug.slice(0, 3).toUpperCase()}-4912`;
@@ -35,14 +35,6 @@ export default async function BookingConfirmedPage({
     // Mobile-shell constraint matches the (main) route group (max-w-md).
     // Keeps visual width consistent across the reservation flow.
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
-      <BookingRecorder
-        id={bookingRef}
-        authUserId={authUser?.id ?? null}
-        venueId={venue.id}
-        venueSlug={venue.slug}
-        partySize={partySize}
-        slotLabel={venue.nextSlotLabel}
-      />
       {/* Top bar — back returns to the venue detail page */}
       <div className="px-5 pt-4">
         <Link
