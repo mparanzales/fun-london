@@ -82,7 +82,7 @@ export function VenueCard({
             <span>·</span>
             <span>{venue.price}</span>
           </div>
-          <div className="text-[11px] font-normal text-muted-fg/70 mt-0.5 truncate">
+          <div className="text-[11px] italic text-fg/75 mt-1 truncate">
             {venue.vibe}
           </div>
         </div>
