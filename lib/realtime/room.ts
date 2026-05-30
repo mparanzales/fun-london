@@ -2,15 +2,18 @@
 
 // Plan Together — real multiplayer over Supabase Realtime (Presence +
 // Broadcast). No DB tables: a room is an ephemeral channel keyed by a short
-// code. Presence = who's here (live). Broadcast = phase changes + votes.
+// code. Presence = who's here (live). Broadcast = phase, host settings,
+// votes, and stop-swaps.
 //
-// Everyone loads the same server-fetched venue list in the same order, so a
-// vote referencing "question N" lines up across devices without syncing the
-// catalog itself.
+// Late-join caveat: Broadcast has no replay, so a joiner who arrives after
+// the host set the plan would miss it. The host re-broadcasts settings +
+// swaps whenever someone joins, which converges everyone.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import type { PlanArea } from "@/lib/regions";
+import type { PlanBudget } from "@/lib/plan-engine";
 
 export type Member = {
   id: string;
@@ -19,19 +22,43 @@ export type Member = {
   emoji: string;
 };
 
-export type Phase = "lobby" | "swipe" | "result";
+export type Phase = "lobby" | "settings" | "swipe" | "result";
 export type Vote = { memberId: string; qIdx: number; value: boolean };
+
+// Host-set logistics. `when.at` is the resolved meeting time in ms (computed
+// on the host's clock) so every device builds the same plan.
+export type PlanWhen =
+  | { kind: "now"; at: number }
+  | {
+      kind: "scheduled";
+      at: number;
+      day: number;
+      timeOfDay: "Day" | "Evening" | "Night";
+    };
+
+export type RoomSettings = {
+  hostId: string;
+  when: PlanWhen;
+  area: PlanArea;
+  budget: PlanBudget;
+  groupSize: number;
+};
 
 export type Room = {
   code: string;
   me: Member;
+  isHost: boolean;
   members: Member[];
   phase: Phase;
+  settings: RoomSettings | null;
   votes: Vote[];
   doneIds: string[];
+  swaps: Record<number, number>; // stepIdx → active alternative index
   sendPhase: (p: Phase) => void;
+  sendSettings: (s: RoomSettings) => void;
   sendVote: (qIdx: number, value: boolean) => void;
   sendDone: () => void;
+  sendSwap: (stepIdx: number, altIdx: number) => void;
 };
 
 // ── Identity helpers ──────────────────────────────────────────────────────
@@ -93,12 +120,19 @@ export function randomRoomCode(): string {
 
 // ── The hook ──────────────────────────────────────────────────────────────
 
-export function useRoom(code: string, me: Member): Room {
+export function useRoom(code: string, me: Member, isHost: boolean): Room {
   const [members, setMembers] = useState<Member[]>([me]);
   const [phase, setPhase] = useState<Phase>("lobby");
+  const [settings, setSettings] = useState<RoomSettings | null>(null);
   const [votes, setVotes] = useState<Vote[]>([]);
   const [doneIds, setDoneIds] = useState<string[]>([]);
+  const [swaps, setSwaps] = useState<Record<number, number>>({});
   const channelRef = useRef<RealtimeChannel | null>(null);
+  // Refs so the presence-join replay handler reads the latest host state.
+  const settingsRef = useRef<RoomSettings | null>(null);
+  const swapsRef = useRef<Record<number, number>>({});
+  settingsRef.current = settings;
+  swapsRef.current = swaps;
 
   useEffect(() => {
     const supabase = createClient();
@@ -122,8 +156,31 @@ export function useRoom(code: string, me: Member): Room {
       if (list.length > 0) setMembers(list);
     });
 
+    // Late-join replay: when anyone joins, the host re-broadcasts the plan
+    // state so the newcomer catches up (Broadcast doesn't replay history).
+    channel.on("presence", { event: "join" }, () => {
+      if (!isHost) return;
+      if (settingsRef.current) {
+        channel.send({
+          type: "broadcast",
+          event: "settings",
+          payload: settingsRef.current,
+        });
+      }
+      if (Object.keys(swapsRef.current).length > 0) {
+        channel.send({
+          type: "broadcast",
+          event: "swaps",
+          payload: swapsRef.current,
+        });
+      }
+    });
+
     channel.on("broadcast", { event: "phase" }, ({ payload }) => {
       setPhase((payload as { phase: Phase }).phase);
+    });
+    channel.on("broadcast", { event: "settings" }, ({ payload }) => {
+      setSettings(payload as RoomSettings);
     });
     channel.on("broadcast", { event: "vote" }, ({ payload }) => {
       const v = payload as Vote;
@@ -138,6 +195,16 @@ export function useRoom(code: string, me: Member): Room {
       const id = (payload as { memberId: string }).memberId;
       setDoneIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     });
+    channel.on("broadcast", { event: "swap" }, ({ payload }) => {
+      const { stepIdx, altIdx } = payload as {
+        stepIdx: number;
+        altIdx: number;
+      };
+      setSwaps((prev) => ({ ...prev, [stepIdx]: altIdx }));
+    });
+    channel.on("broadcast", { event: "swaps" }, ({ payload }) => {
+      setSwaps(payload as Record<number, number>);
+    });
 
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") void channel.track(me);
@@ -148,13 +215,22 @@ export function useRoom(code: string, me: Member): Room {
       void supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [code, me]);
+  }, [code, me, isHost]);
 
   const sendPhase = useCallback((p: Phase) => {
     channelRef.current?.send({
       type: "broadcast",
       event: "phase",
       payload: { phase: p },
+    });
+  }, []);
+
+  const sendSettings = useCallback((s: RoomSettings) => {
+    setSettings(s); // optimistic for the host
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "settings",
+      payload: s,
     });
   }, []);
 
@@ -177,15 +253,28 @@ export function useRoom(code: string, me: Member): Room {
     });
   }, [me.id]);
 
+  const sendSwap = useCallback((stepIdx: number, altIdx: number) => {
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "swap",
+      payload: { stepIdx, altIdx },
+    });
+  }, []);
+
   return {
     code,
     me,
+    isHost,
     members,
     phase,
+    settings,
     votes,
     doneIds,
+    swaps,
     sendPhase,
+    sendSettings,
     sendVote,
     sendDone,
+    sendSwap,
   };
 }
