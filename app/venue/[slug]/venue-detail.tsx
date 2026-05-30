@@ -3,8 +3,16 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronDown, Heart, Star } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  Heart,
+  Star,
+  Share2,
+  Check,
+} from "lucide-react";
 import { useSaved } from "@/components/saved-context";
+import { shareOrCopy } from "@/lib/share";
 import type { Venue, VenueType } from "@/lib/types";
 
 // Only these venue types accept a table reservation / ticket booking.
@@ -39,6 +47,19 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
   const [whyOpen, setWhyOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  const onShare = async () => {
+    const result = await shareOrCopy({
+      title: venue.name,
+      text: `${venue.name} · ${venue.neighbourhood}, London`,
+      url: typeof window !== "undefined" ? window.location.href : "",
+    });
+    if (result === "copied") {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1800);
+    }
+  };
 
   const isReservable = RESERVABLE_TYPES.includes(venue.type);
 
@@ -92,6 +113,20 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           className="absolute top-4 left-4 w-10 h-10 rounded-full bg-white/90 backdrop-blur-md shadow flex items-center justify-center"
         >
           <ArrowLeft className="w-5 h-5 text-fg" strokeWidth={2} />
+        </button>
+
+        {/* Share button — overlays photo, top-right, left of the heart */}
+        <button
+          type="button"
+          onClick={onShare}
+          aria-label="Share"
+          className="absolute top-4 right-16 w-10 h-10 rounded-full bg-white/90 backdrop-blur-md shadow flex items-center justify-center"
+        >
+          {shareCopied ? (
+            <Check className="w-5 h-5 text-fg" strokeWidth={2} />
+          ) : (
+            <Share2 className="w-5 h-5 text-fg" strokeWidth={1.75} />
+          )}
         </button>
 
         {/* Heart button — overlays photo, top-right */}

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink, Calendar, Clock } from "lucide-react";
+import { EventActions } from "@/components/event-actions";
 import type { Event, Venue } from "@/lib/types";
 
 // Event detail — full-screen immersive layout, mirrors the venue
@@ -87,6 +88,9 @@ export function EventDetail({
             {event.price}
           </span>
         </div>
+
+        {/* Real secondary actions — add to calendar (.ics) + share */}
+        <EventActions event={event} />
 
         {/* ── Optional venue link card ──────────────────────────────
             Surfaces when the event has a linked venue we curate.

@@ -20,7 +20,11 @@ type Result =
 
 // 0 = name starts with query (best), 1 = name contains query,
 // 2 = some other field contains query (weakest). Lower sorts first.
-function scoreMatch(name: string, haystack: string[], q: string): number | null {
+function scoreMatch(
+  name: string,
+  haystack: string[],
+  q: string,
+): number | null {
   const n = name.toLowerCase();
   if (n.startsWith(q)) return 0;
   if (n.includes(q)) return 1;
@@ -65,11 +69,7 @@ export function SearchOverlay({
       if (score !== null) out.push({ kind: "venue", data: v, score });
     }
     for (const e of events) {
-      const score = scoreMatch(
-        e.name,
-        [e.venueName, e.area, e.category],
-        q,
-      );
+      const score = scoreMatch(e.name, [e.venueName, e.area, e.category], q);
       if (score !== null) out.push({ kind: "event", data: e, score });
     }
 
