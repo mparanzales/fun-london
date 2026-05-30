@@ -30,6 +30,14 @@ export function EventDetail({
 
   const longDateLabel = formatLongDate(event.startsAt);
   const isExternal = !!event.sourceUrl && event.sourceUrl.startsWith("http");
+  // Name the ticket provider from the outbound URL's host so the CTA is
+  // always accurate — today it's Ticketmaster, but Eventbrite / Skiddle /
+  // DICE / Universe links will label themselves correctly with no schema
+  // or type change the moment those sources come online.
+  const ticketProvider = providerFromUrl(event.sourceUrl);
+  const ticketCtaLabel = ticketProvider
+    ? `Get tickets → ${ticketProvider}`
+    : "Get tickets";
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
@@ -132,7 +140,7 @@ export function EventDetail({
                   "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
               }}
             >
-              Reserve → Ticketmaster
+              {ticketCtaLabel}
               {isExternal && (
                 <ExternalLink size={16} strokeWidth={2.25} aria-hidden />
               )}
@@ -146,6 +154,24 @@ export function EventDetail({
       </div>
     </div>
   );
+}
+
+// Map an outbound ticket URL to a human provider name. Returns null when
+// the host isn't one we recognise (CTA then reads a neutral "Get tickets").
+function providerFromUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    if (host.includes("ticketmaster") || host.endsWith("ticketm.net"))
+      return "Ticketmaster";
+    if (host.includes("eventbrite")) return "Eventbrite";
+    if (host.includes("skiddle")) return "Skiddle";
+    if (host.includes("dice.fm")) return "DICE";
+    if (host.includes("universe")) return "Universe";
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // "Friday 26 June" — long-form for the event detail eyebrow.
