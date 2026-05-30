@@ -31,6 +31,7 @@ import type {
   EditorialSource,
   CreatorCoverage,
   CriticalFlag,
+  OpeningHours,
 } from "./types";
 
 // ── Row shapes (raw DB) ─────────────────────────────────────────────────
@@ -66,6 +67,7 @@ type VenueRow = {
   // Phase 4.5 — creator coverage + Real Talk flags.
   creator_coverage: CreatorCoverage[] | null;
   critical_flags: CriticalFlag[] | null;
+  opening_hours: OpeningHours | null;
   created_at: string;
 };
 
@@ -116,6 +118,7 @@ function mapVenue(r: VenueRow): Venue {
     editorialSources: r.editorial_sources,
     creatorCoverage: r.creator_coverage,
     criticalFlags: r.critical_flags,
+    openingHours: r.opening_hours,
     createdAt: r.created_at,
   };
 }

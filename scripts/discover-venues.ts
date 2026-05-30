@@ -30,6 +30,10 @@ dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import type { BookingLink, Mood, VenueType } from "@/lib/types";
+import {
+  normalizeOpeningHours,
+  type GoogleOpeningHours,
+} from "@/lib/opening-hours";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
@@ -182,6 +186,7 @@ type Place = {
   priceLevel?: string;
   types?: string[];
   businessStatus?: string;
+  regularOpeningHours?: GoogleOpeningHours;
 };
 
 async function searchPlaces(query: string, fields: string): Promise<Place[]> {
@@ -213,6 +218,7 @@ const DISCOVERY_FIELDS = [
   "places.priceLevel",
   "places.types",
   "places.businessStatus",
+  "places.regularOpeningHours",
 ].join(",");
 
 // Count distinct London locations of a venue name → chain heuristic.
@@ -576,6 +582,7 @@ async function main() {
         })),
         creator_coverage: null,
         critical_flags: editorial.critical_flags,
+        opening_hours: normalizeOpeningHours(p.regularOpeningHours),
       };
 
       if (DRY_RUN) {

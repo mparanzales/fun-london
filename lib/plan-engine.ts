@@ -38,10 +38,40 @@ const PRICE_RANK: Record<string, number> = {
   "£££": 3,
 };
 
-function withinBudget(price: string, budget: PlanBudget): boolean {
+export function withinBudget(price: string, budget: PlanBudget): boolean {
   if (budget === "Any") return true;
   const cap = budget === "£" ? 1 : 2; // "£" → Free/£ · "££" → up to ££
   return (PRICE_RANK[price] ?? 2) <= cap;
+}
+
+// ── Opening hours ──────────────────────────────────────────────────────────
+
+const WEEK_MINS = 7 * 24 * 60;
+
+function minuteOfWeek(day: number, hour: number, minute: number): number {
+  return day * 24 * 60 + hour * 60 + minute;
+}
+
+// Is the venue open at `when`? Fail-OPEN when we have no hours yet (null) so
+// the plan doesn't empty out before the backfill cron has populated them.
+// Handles periods that wrap past midnight and across the week boundary.
+export function isOpenAt(v: Venue, when: Date): boolean {
+  const oh = v.openingHours;
+  if (!oh || !oh.periods || oh.periods.length === 0) return true;
+  const now = minuteOfWeek(when.getDay(), when.getHours(), when.getMinutes());
+  for (const p of oh.periods) {
+    if (p.close == null) return true; // open 24h
+    const open = minuteOfWeek(p.open.day, p.open.hour, p.open.minute);
+    let close = minuteOfWeek(p.close.day, p.close.hour, p.close.minute);
+    if (close <= open) close += WEEK_MINS; // wraps past midnight / week end
+    if (
+      (now >= open && now < close) ||
+      (now + WEEK_MINS >= open && now + WEEK_MINS < close)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ── Roles ────────────────────────────────────────────────────────────────
