@@ -98,7 +98,7 @@ export function VenueCard({
       >
         <Heart
           size={22}
-          strokeWidth={1.75}
+          strokeWidth={2}
           className={
             "drop-shadow-md " +
             (saved ? "fill-primary text-primary" : "fill-none text-white")

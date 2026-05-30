@@ -105,14 +105,22 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           className="object-cover"
         />
 
+        {/* Floating photo controls — bare icons (no circle), matching the
+            Explore / bottom-nav icon language. White + a drop shadow so
+            they read on any photo in both day and night themes (a themed
+            icon colour would vanish against a light photo at night). */}
+
         {/* Back button — overlays photo, top-left */}
         <button
           type="button"
           onClick={() => router.back()}
           aria-label="Back"
-          className="absolute top-4 left-4 w-10 h-10 rounded-full bg-white/90 backdrop-blur-md shadow flex items-center justify-center"
+          className="absolute top-4 left-4 w-10 h-10 flex items-center justify-center"
         >
-          <ArrowLeft className="w-5 h-5 text-fg" strokeWidth={2} />
+          <ArrowLeft
+            className="w-6 h-6 text-white drop-shadow-md"
+            strokeWidth={2}
+          />
         </button>
 
         {/* Share button — overlays photo, top-right, left of the heart */}
@@ -120,12 +128,18 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           type="button"
           onClick={onShare}
           aria-label="Share"
-          className="absolute top-4 right-16 w-10 h-10 rounded-full bg-white/90 backdrop-blur-md shadow flex items-center justify-center"
+          className="absolute top-4 right-14 w-10 h-10 flex items-center justify-center"
         >
           {shareCopied ? (
-            <Check className="w-5 h-5 text-fg" strokeWidth={2} />
+            <Check
+              className="w-6 h-6 text-white drop-shadow-md"
+              strokeWidth={2.25}
+            />
           ) : (
-            <Share2 className="w-5 h-5 text-fg" strokeWidth={1.75} />
+            <Share2
+              className="w-6 h-6 text-white drop-shadow-md"
+              strokeWidth={2}
+            />
           )}
         </button>
 
@@ -134,14 +148,14 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           type="button"
           onClick={() => toggleSaved(venue.slug)}
           aria-label={saved ? "Unsave" : "Save"}
-          className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 backdrop-blur-md shadow flex items-center justify-center"
+          className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center"
         >
           <Heart
             className={
-              "w-5 h-5 " +
-              (saved ? "fill-primary text-primary" : "fill-none text-fg")
+              "w-6 h-6 drop-shadow-md " +
+              (saved ? "fill-primary text-primary" : "fill-none text-white")
             }
-            strokeWidth={1.75}
+            strokeWidth={2}
           />
         </button>
       </div>

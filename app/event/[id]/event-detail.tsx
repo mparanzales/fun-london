@@ -53,12 +53,19 @@ export function EventDetail({
           className="object-cover"
         />
 
+        {/* Bare back icon (no circle) — matches the Explore icon language
+            and the venue detail hero. White + drop shadow for legibility
+            on any photo in both themes. */}
         <button
           onClick={() => router.back()}
           aria-label="Back"
-          className="absolute top-4 left-4 w-10 h-10 rounded-full bg-white/95 backdrop-blur-sm shadow-md flex items-center justify-center"
+          className="absolute top-4 left-4 w-10 h-10 flex items-center justify-center"
         >
-          <ArrowLeft size={20} className="text-fg" strokeWidth={2} />
+          <ArrowLeft
+            size={24}
+            className="text-white drop-shadow-md"
+            strokeWidth={2}
+          />
         </button>
       </div>
 
