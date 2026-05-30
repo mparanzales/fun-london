@@ -190,7 +190,7 @@ function haversineKm(a: Venue, b: Venue): number | null {
 
 // ~5 km/h walking → 12 min/km. Floor at 2 min so adjacent venues still read
 // as a short hop. Falls back to a flat ~8 min when coordinates are missing.
-function walkMins(a: Venue, b: Venue): number {
+export function walkMins(a: Venue, b: Venue): number {
   const km = haversineKm(a, b);
   if (km == null) return 8;
   return Math.max(2, Math.round(km * 12));

@@ -5,6 +5,7 @@ import type { Event, Venue } from "@/lib/types";
 import type { Member, Room } from "@/lib/realtime/room";
 import {
   computeWalkablePlan,
+  walkMins,
   type PlanRole,
   type WalkableSettings,
 } from "@/lib/plan-engine";
@@ -63,6 +64,26 @@ export function Result({
     (q) => room.votes.filter((v) => v.qIdx === q && v.value).length,
   );
 
+  // Apply any group swaps (deterministic alt index per step) and recompute
+  // walk times so the swapped venue's distances stay honest.
+  const swapped = plan.steps.map((s, i) => {
+    const alt = room.swaps[i];
+    const v = alt != null && alt >= 0 ? plan.alternatives[i]?.[alt] : undefined;
+    return { role: s.role, dwellMins: s.dwellMins, venue: v ?? s.venue };
+  });
+  const steps = swapped.map((s, i) => {
+    const next = swapped[i + 1]?.venue;
+    return { ...s, walkToNextMins: next ? walkMins(s.venue, next) : null };
+  });
+
+  const onSwap = (i: number) => {
+    const alts = plan.alternatives[i] ?? [];
+    if (alts.length === 0) return;
+    const cur = room.swaps[i];
+    const nextIdx = cur == null ? 0 : cur + 1;
+    room.sendSwap(i, nextIdx >= alts.length ? -1 : nextIdx); // -1 = back to base
+  };
+
   return (
     <div className="px-4 pt-4 pb-6">
       <h1 className="text-[22px] font-extrabold text-primary tracking-tight m-0">
@@ -84,7 +105,7 @@ export function Result({
       </div>
 
       <div className="mt-3.5 flex flex-col gap-3">
-        {plan.steps.map((s, i) => {
+        {steps.map((s, i) => {
           const voters = room.votes
             .filter((v) => v.qIdx === ROLE_Q[s.role] && v.value)
             .map((v) => memberById.get(v.memberId))
@@ -130,8 +151,19 @@ export function Result({
                     <span>·</span>
                     <span>{s.venue.price}</span>
                   </div>
-                  <div className="text-[10.5px] text-muted-fg italic mt-1">
-                    {attribution}
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="text-[10.5px] text-muted-fg italic">
+                      {attribution}
+                    </div>
+                    {(plan.alternatives[i]?.length ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => onSwap(i)}
+                        className="text-[11px] font-extrabold text-accent flex-shrink-0"
+                      >
+                        ↻ Swap
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
