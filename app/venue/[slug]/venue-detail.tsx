@@ -12,6 +12,7 @@ import {
   Check,
 } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
+import { BookingLogger } from "@/components/booking-logger";
 import { shareOrCopy } from "@/lib/share";
 import type { Venue, VenueType } from "@/lib/types";
 
@@ -349,6 +350,8 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             )}
           </div>
         )}
+        {/* Honest booking producer — log a real reservation you made */}
+        {isReservable && <BookingLogger venue={venue} />}
       </section>
 
       {/* ── Sticky CTA bar ────────────────────────────────────────── */}
