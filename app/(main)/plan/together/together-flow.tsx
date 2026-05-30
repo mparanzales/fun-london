@@ -6,7 +6,7 @@
 // local member identity on the client only, then mounts the realtime room.
 // Gating behind `ready` avoids SSR/hydration mismatches from random ids.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Venue } from "@/lib/types";
 import {
   makeMember,
@@ -61,14 +61,43 @@ function RoomFlow({
   venues: Venue[];
 }) {
   const room = useRoom(code, me);
+  const questionVenues = useMemo(() => pickQuestionVenues(venues), [venues]);
 
   return (
     <div className="pb-4">
       {room.phase === "lobby" && (
         <Lobby room={room} onStart={() => room.sendPhase("swipe")} />
       )}
-      {room.phase === "swipe" && <Swipe room={room} venues={venues} />}
-      {room.phase === "result" && <Result room={room} venues={venues} />}
+      {room.phase === "swipe" && (
+        <Swipe room={room} questionVenues={questionVenues} />
+      )}
+      {room.phase === "result" && (
+        <Result room={room} questionVenues={questionVenues} />
+      )}
     </div>
   );
+}
+
+// Pick one venue per swipe question, matched to the question's intent:
+// Dinner → a restaurant, Drinks → a bar/pub, Late night → live music / a
+// night spot. Distinct venues; graceful fallbacks for a thin catalog.
+function pickQuestionVenues(venues: Venue[]): Venue[] {
+  const used = new Set<string>();
+  const pick = (pred: (v: Venue) => boolean, fallbackIdx: number): Venue => {
+    const v =
+      venues.find((x) => !used.has(x.id) && pred(x)) ??
+      venues.find((x) => !used.has(x.id)) ??
+      venues[fallbackIdx] ??
+      venues[0];
+    if (v) used.add(v.id);
+    return v;
+  };
+  return [
+    pick((v) => v.type === "Restaurant", 0),
+    pick(
+      (v) => ["Bar", "Wine Bar", "Pub", "Listening Bar"].includes(v.type),
+      1,
+    ),
+    pick((v) => v.type === "Live Music" || v.timeOfDay === "Night", 2),
+  ];
 }
