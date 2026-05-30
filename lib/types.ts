@@ -80,6 +80,17 @@ export type CriticalFlag = {
   body: string; // "Borough Market location, weekend mornings 20+ min standard"
 };
 
+// Opening hours — normalized from Google Places `regularOpeningHours`.
+// day = 0 (Sunday) … 6 (Saturday), matching JS Date.getDay(). A null
+// `close` means the venue is open 24h that day. Periods can wrap past
+// midnight (close.day may be the next day).
+export type OpeningPoint = { day: number; hour: number; minute: number };
+export type OpeningPeriod = { open: OpeningPoint; close: OpeningPoint | null };
+export type OpeningHours = {
+  periods: OpeningPeriod[];
+  weekdayDescriptions?: string[]; // optional, for display
+};
+
 export type Venue = {
   id: string;
   slug: string;
@@ -113,6 +124,8 @@ export type Venue = {
   // Phase 4.5 — third-party creator coverage + Real Talk flags.
   creatorCoverage: CreatorCoverage[] | null;
   criticalFlags: CriticalFlag[] | null;
+  // Phase: real opening hours (Google Places), for "open when we meet".
+  openingHours: OpeningHours | null;
   createdAt: string;
 };
 

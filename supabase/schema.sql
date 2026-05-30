@@ -63,6 +63,9 @@ create table if not exists public.venues (
   -- scripts/refresh-venues.ts on a daily GitHub Actions cron.
   last_synced_at timestamptz,              -- last time Google Places re-pulled
   closed_at timestamptz,                   -- set when businessStatus == CLOSED_PERMANENTLY (alert flag, not a hide-from-catalog flag)
+  -- Plan Together v2 — real opening hours (normalized Google Places
+  -- regularOpeningHours): { periods: [{open:{day,hour,minute}, close:{...}|null}] }
+  opening_hours jsonb,
   created_at timestamptz not null default now()
 );
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
@@ -329,3 +332,7 @@ alter table public.partner_prospects enable row level security;
 -- No anon policies — locked to service-role only (internal BD pipeline).
 -- Drop any prior policies first for idempotency.
 drop policy if exists "partner_prospects no anon" on public.partner_prospects;
+
+-- 2026-05-31 · Plan Together v2 — real opening hours on venues ──────────────
+alter table public.venues
+  add column if not exists opening_hours jsonb;

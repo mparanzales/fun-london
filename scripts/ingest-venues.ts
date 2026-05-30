@@ -29,10 +29,11 @@ import {
   VENUE_SEEDS,
   type VenueSeed,
 } from "./venues-seed";
-import type {
-  BookingLink,
-  BookingPlatform,
-} from "@/lib/types";
+import type { BookingLink, BookingPlatform } from "@/lib/types";
+import {
+  normalizeOpeningHours,
+  type GoogleOpeningHours,
+} from "@/lib/opening-hours";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -108,6 +109,7 @@ type PlaceDetails = {
   types?: string[];
   reservable?: boolean;
   businessStatus?: string;
+  regularOpeningHours?: GoogleOpeningHours;
 };
 
 async function placesTextSearch(query: string): Promise<PlaceSearchResult> {
@@ -149,6 +151,7 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
     "types",
     "reservable",
     "businessStatus",
+    "regularOpeningHours",
   ].join(",");
   const res = await fetch(`${PLACES_BASE}/${placeId}`, {
     method: "GET",
@@ -257,6 +260,7 @@ function buildVenueRow(seed: VenueSeed, details: PlaceDetails) {
     editorial_sources: seed.editorialSources,
     creator_coverage: seed.creatorCoverage,
     critical_flags: seed.criticalFlags,
+    opening_hours: normalizeOpeningHours(details.regularOpeningHours),
   };
 }
 

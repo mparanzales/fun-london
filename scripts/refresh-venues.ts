@@ -26,6 +26,11 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import {
+  normalizeOpeningHours,
+  type GoogleOpeningHours,
+} from "@/lib/opening-hours";
+import type { OpeningHours } from "@/lib/types";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const SKIP_LINK_CHECK = process.argv.includes("--skip-link-check");
@@ -72,6 +77,7 @@ type PlaceDetails = {
   nationalPhoneNumber?: string;
   internationalPhoneNumber?: string;
   businessStatus?: string;
+  regularOpeningHours?: GoogleOpeningHours;
 };
 
 async function placeDetails(placeId: string): Promise<PlaceDetails> {
@@ -86,6 +92,7 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
     "nationalPhoneNumber",
     "internationalPhoneNumber",
     "businessStatus",
+    "regularOpeningHours",
   ].join(",");
   const res = await fetch(`${PLACES_BASE}/${placeId}`, {
     method: "GET",
@@ -120,6 +127,7 @@ type VenueRow = {
   img_url: string;
   google_place_id: string;
   closed_at: string | null;
+  opening_hours: OpeningHours | null;
   editorial_sources: { url?: string }[] | null;
   creator_coverage: { url?: string }[] | null;
 };
@@ -277,6 +285,14 @@ function diffRow(
       before: "OPEN",
       after: "CLOSED_PERMANENTLY",
     });
+  }
+
+  // Opening hours — backfill + keep fresh. Write whenever Google returns
+  // hours that differ from what's stored (also catches the initial null).
+  const newHours = normalizeOpeningHours(details.regularOpeningHours);
+  if (newHours && JSON.stringify(newHours) !== JSON.stringify(row.opening_hours)) {
+    update.opening_hours = newHours;
+    // No diff entry — hours JSON is noise in the summary.
   }
 
   return { update, diffs };
@@ -457,7 +473,7 @@ async function main() {
   const { data: rows, error } = await readClient
     .from("venues")
     .select(
-      "id, slug, name, rating, review_count, address, phone, website_url, img_url, google_place_id, closed_at, editorial_sources, creator_coverage",
+      "id, slug, name, rating, review_count, address, phone, website_url, img_url, google_place_id, closed_at, opening_hours, editorial_sources, creator_coverage",
     )
     .not("google_place_id", "is", null)
     .order("created_at", { ascending: true });
