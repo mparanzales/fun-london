@@ -1,38 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
-import { getParticipants } from "@/lib/mock-data";
+import { ArrowLeft, Check, Share2 } from "lucide-react";
+import { shareOrCopy } from "@/lib/share";
 import { Avatar } from "./avatar";
+import type { Room } from "@/lib/realtime/room";
 
-// Plan Together — Step 1: Lobby.
-// Participants trickle in via staggered setTimeout. "Start swiping" becomes
-// available once at least two are joined.
-const SHARE_LINK = "fun-london.app/p/AURORA-MIX-87";
+// Plan Together — Step 1: Lobby (real-time).
+// Real presence: `room.members` updates live as people open the link.
 
-export function Lobby({ onStart }: { onStart: () => void }) {
+export function Lobby({ room, onStart }: { room: Room; onStart: () => void }) {
   const router = useRouter();
-  const participants = getParticipants();
-  // You is in immediately; Maya, Tom, Alex on 1.5s / 3s / 4.5s timers.
-  const [joinedCount, setJoinedCount] = useState(1);
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    const timers = [
-      setTimeout(() => setJoinedCount(2), 1500),
-      setTimeout(() => setJoinedCount(3), 3000),
-      setTimeout(() => setJoinedCount(4), 4500),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, []);
+  const link =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/plan/together?room=${room.code}`
+      : "";
 
-  const joined = participants.slice(0, joinedCount);
-  const stillWaiting = joinedCount < participants.length;
+  const onShare = async () => {
+    const r = await shareOrCopy({
+      title: "Plan a night out — Fun London",
+      text: `Join my Fun London room (${room.code}) and let's pick a night.`,
+      url: link,
+    });
+    if (r === "copied") {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    }
+  };
+
+  const alone = room.members.length < 2;
 
   return (
     <div className="px-5 py-4 flex flex-col">
-      {/* Negative margin pulls visual position to original "‹" location
-          while the p-2.5 gives a real 44×44 tap target. */}
       <button
         type="button"
         onClick={() => router.push("/plan")}
@@ -49,37 +51,37 @@ export function Lobby({ onStart }: { onStart: () => void }) {
         Get the gang in
       </h1>
       <div className="text-[13px] text-muted-fg leading-relaxed mb-4">
-        Send the link. They tap, swipe, done.
+        Share the link or the room code. They open it, swipe, done.
       </div>
 
-      <div className="bg-muted rounded-xl pl-3 pr-1.5 py-1.5 flex items-center justify-between text-xs text-muted-fg mb-3">
-        <span className="truncate">{SHARE_LINK}</span>
-        <button
-          type="button"
-          className="bg-primary text-primary-fg rounded-lg h-9 px-4 text-[11px] font-extrabold flex-shrink-0"
-        >
-          Copy
-        </button>
+      {/* Room code */}
+      <div className="flex items-center justify-center gap-2 mb-3">
+        <span className="text-[11px] font-bold text-muted-fg uppercase tracking-wider">
+          Room
+        </span>
+        <span className="text-2xl font-extrabold tracking-[0.3em] text-primary">
+          {room.code}
+        </span>
       </div>
 
-      <div className="flex gap-2 mb-4">
-        {["WhatsApp", "Messages", "AirDrop"].map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="flex-1 h-11 rounded-full border border-border bg-card text-[11px] font-bold text-fg"
-          >
-            {s}
-          </button>
-        ))}
-      </div>
+      {/* Share */}
+      <button
+        type="button"
+        onClick={onShare}
+        className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-sm font-extrabold flex items-center justify-center gap-2 mb-4"
+      >
+        {copied ? (
+          <Check className="w-4 h-4" strokeWidth={2.5} />
+        ) : (
+          <Share2 className="w-4 h-4" strokeWidth={2} />
+        )}
+        {copied ? "Link copied" : "Share the link"}
+      </button>
 
       <div className="flex items-center justify-between mb-2.5">
         <div className="text-[13px] font-extrabold text-heading">
-          In the session · {joined.length}
+          In the session · {room.members.length}
         </div>
-        {/* The "● Live" green is intentionally a non-theme accent — it's a
-            status signal, like a router LED, not a brand surface. */}
         <span
           className="text-[10px] font-extrabold"
           style={{ color: "hsl(150 60% 40%)" }}
@@ -89,7 +91,7 @@ export function Lobby({ onStart }: { onStart: () => void }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        {joined.map((p) => (
+        {room.members.map((p) => (
           <div
             key={p.id}
             className="flex items-center gap-2.5 px-3 py-2.5 border border-border rounded-xl"
@@ -98,13 +100,15 @@ export function Lobby({ onStart }: { onStart: () => void }) {
             <div className="flex-1">
               <div className="text-[13px] font-extrabold text-heading">
                 {p.name}
+                {p.id === room.me.id && (
+                  <span className="text-muted-fg font-semibold"> (you)</span>
+                )}
               </div>
               <div className="text-[10.5px] text-muted-fg">Joined · ready</div>
             </div>
-            <span className="text-muted-fg">···</span>
           </div>
         ))}
-        {stillWaiting && (
+        {alone && (
           <div className="px-3 py-2.5 border border-dashed border-border rounded-xl text-[11px] text-muted-fg">
             Waiting for someone to join…
           </div>
@@ -114,11 +118,13 @@ export function Lobby({ onStart }: { onStart: () => void }) {
       <button
         type="button"
         onClick={onStart}
-        disabled={joined.length < 2}
-        className="mt-6 mb-4 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-sm font-extrabold disabled:opacity-50 disabled:cursor-not-allowed"
+        className="mt-6 mb-4 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-sm font-extrabold"
       >
-        Start swiping ({joined.length})
+        Start swiping ({room.members.length})
       </button>
+      <p className="text-[11px] text-muted-fg text-center -mt-2">
+        Anyone can start — everyone jumps to swiping together.
+      </p>
     </div>
   );
 }
