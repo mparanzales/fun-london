@@ -12,7 +12,8 @@ import {
   Check,
 } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
-import { BookingLogger } from "@/components/booking-logger";
+import { ReserveSheet } from "@/components/reserve-sheet";
+import { platformLabel, type ReserveTarget } from "@/lib/booking-link";
 import { shareOrCopy } from "@/lib/share";
 import type { Venue, VenueType } from "@/lib/types";
 
@@ -49,6 +50,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const saved = isSaved(venue.slug);
   const [whyOpen, setWhyOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [showReserve, setShowReserve] = useState(false);
 
   const onShare = async () => {
     const result = await shareOrCopy({
@@ -71,6 +73,15 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const topBookingLink =
     venue.bookingLinks && venue.bookingLinks.length > 0
       ? [...venue.bookingLinks].sort((a, b) => a.priority - b.priority)[0]
+      : null;
+
+  // Where "Reserve" sends them: the best booking platform if we have one,
+  // else the venue's own site. The picker sheet pre-fills date/time/party
+  // into this before opening it.
+  const reserveTarget: ReserveTarget | null = topBookingLink
+    ? { platform: topBookingLink.platform, url: topBookingLink.url }
+    : venue.websiteUrl
+      ? { platform: "website", url: venue.websiteUrl }
       : null;
 
   const hasRealTalk = !!venue.criticalFlags && venue.criticalFlags.length > 0;
@@ -350,8 +361,6 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             )}
           </div>
         )}
-        {/* Honest booking producer — log a real reservation you made */}
-        {isReservable && <BookingLogger venue={venue} />}
       </section>
 
       {/* ── Sticky CTA bar ────────────────────────────────────────── */}
@@ -378,33 +387,16 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           />
           Save
         </button>
-        {isReservable && topBookingLink ? (
-          // Agent thesis V1: deep-link to the venue's top-priority
-          // booking platform. Opens in a new tab so the user keeps the
-          // Fun London tab open and can come back.
-          <a
-            href={topBookingLink.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm text-center no-underline"
+        {isReservable && reserveTarget ? (
+          // Agent flow: open the picker (date/time/party), pre-fill the
+          // venue's booking platform, then land on the "Did you book?" page.
+          <button
+            type="button"
+            onClick={() => setShowReserve(true)}
+            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm"
           >
-            Reserve →{" "}
-            {topBookingLink.platform === "website"
-              ? "their site"
-              : topBookingLink.platform}
-          </a>
-        ) : isReservable && venue.websiteUrl ? (
-          // No structured booking link, but we have the venue's site —
-          // deep-link there. Honest: it goes to a real place to book,
-          // not a fabricated in-app confirmation.
-          <a
-            href={venue.websiteUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm text-center no-underline"
-          >
-            Reserve → their site
-          </a>
+            Reserve → {platformLabel(reserveTarget.platform)}
+          </button>
         ) : isReservable && venue.phone ? (
           // No online booking — the honest action is to call the venue.
           <a
@@ -433,6 +425,14 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           </div>
         )}
       </div>
+
+      {showReserve && reserveTarget && (
+        <ReserveSheet
+          venue={venue}
+          target={reserveTarget}
+          onClose={() => setShowReserve(false)}
+        />
+      )}
     </div>
   );
 }

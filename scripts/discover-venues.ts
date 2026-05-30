@@ -71,9 +71,22 @@ const MAX_SCAN_PER_RUN = 60; // bound API usage: stop after examining this many
 const REQUIRED_SOURCES = 2;
 
 const NEIGHBOURHOODS = [
-  "Soho", "Shoreditch", "Hackney", "Dalston", "Peckham", "Bermondsey",
-  "Clerkenwell", "Islington", "Borough", "Marylebone", "Fitzrovia", "Brixton",
-  "Stoke Newington", "Spitalfields", "London Fields", "Camberwell",
+  "Soho",
+  "Shoreditch",
+  "Hackney",
+  "Dalston",
+  "Peckham",
+  "Bermondsey",
+  "Clerkenwell",
+  "Islington",
+  "Borough",
+  "Marylebone",
+  "Fitzrovia",
+  "Brixton",
+  "Stoke Newington",
+  "Spitalfields",
+  "London Fields",
+  "Camberwell",
 ];
 
 type Category = {
@@ -84,27 +97,70 @@ type Category = {
 };
 
 const CATEGORIES: Category[] = [
-  { keyword: "independent restaurant", type: "Restaurant", moods: ["dinner"], timeOfDay: "Evening" },
-  { keyword: "natural wine bar", type: "Wine Bar", moods: ["drinks"], timeOfDay: "Evening" },
-  { keyword: "cocktail bar", type: "Bar", moods: ["drinks"], timeOfDay: "Night" },
-  { keyword: "speciality coffee shop", type: "Cafe", moods: [], timeOfDay: "Day" },
+  {
+    keyword: "independent restaurant",
+    type: "Restaurant",
+    moods: ["dinner"],
+    timeOfDay: "Evening",
+  },
+  {
+    keyword: "natural wine bar",
+    type: "Wine Bar",
+    moods: ["drinks"],
+    timeOfDay: "Evening",
+  },
+  {
+    keyword: "cocktail bar",
+    type: "Bar",
+    moods: ["drinks"],
+    timeOfDay: "Night",
+  },
+  {
+    keyword: "speciality coffee shop",
+    type: "Cafe",
+    moods: [],
+    timeOfDay: "Day",
+  },
   { keyword: "gastropub", type: "Pub", moods: ["drinks"], timeOfDay: "Night" },
 ];
 
 // The trusted publications that count toward the 2-source gate.
 const TRUSTED_PUBLICATIONS = [
-  "Time Out", "The Infatuation", "Eater London", "Square Meal", "Hot Dinners",
-  "Harden's", "Michelin", "The Good Food Guide", "Condé Nast Traveller",
-  "Evening Standard", "The Guardian", "Foodism", "World's 50 Best",
+  "Time Out",
+  "The Infatuation",
+  "Eater London",
+  "Square Meal",
+  "Hot Dinners",
+  "Harden's",
+  "Michelin",
+  "The Good Food Guide",
+  "Condé Nast Traveller",
+  "Evening Standard",
+  "The Guardian",
+  "Foodism",
+  "World's 50 Best",
 ];
 
 const ALLOWED_TYPES = new Set([
-  "restaurant", "bar", "cafe", "coffee_shop", "pub", "wine_bar",
-  "fine_dining_restaurant", "bakery", "brunch_restaurant",
+  "restaurant",
+  "bar",
+  "cafe",
+  "coffee_shop",
+  "pub",
+  "wine_bar",
+  "fine_dining_restaurant",
+  "bakery",
+  "brunch_restaurant",
 ]);
 const REJECT_TYPES = new Set([
-  "fast_food_restaurant", "meal_takeaway", "lodging", "supermarket",
-  "grocery_store", "shopping_mall", "night_club", "liquor_store",
+  "fast_food_restaurant",
+  "meal_takeaway",
+  "lodging",
+  "supermarket",
+  "grocery_store",
+  "shopping_mall",
+  "night_club",
+  "liquor_store",
 ]);
 
 // ── Google Places ────────────────────────────────────────────────────────
@@ -144,10 +200,18 @@ async function searchPlaces(query: string, fields: string): Promise<Place[]> {
 }
 
 const DISCOVERY_FIELDS = [
-  "places.id", "places.displayName", "places.formattedAddress",
-  "places.location", "places.rating", "places.userRatingCount",
-  "places.photos", "places.websiteUri", "places.nationalPhoneNumber",
-  "places.internationalPhoneNumber", "places.priceLevel", "places.types",
+  "places.id",
+  "places.displayName",
+  "places.formattedAddress",
+  "places.location",
+  "places.rating",
+  "places.userRatingCount",
+  "places.photos",
+  "places.websiteUri",
+  "places.nationalPhoneNumber",
+  "places.internationalPhoneNumber",
+  "places.priceLevel",
+  "places.types",
   "places.businessStatus",
 ].join(",");
 
@@ -277,6 +341,45 @@ async function writeEditorial(
   return parsed;
 }
 
+// Ask Gemini (with Google Search) for the venue's OpenTable / Resy /
+// SevenRooms reservation URL, so Reserve can pre-fill date/time/party.
+async function findBookingLink(
+  name: string,
+  area: string,
+): Promise<{ platform: BookingLink["platform"]; url: string } | null> {
+  const prompt =
+    `Using Google Search, find the direct online reservation page for the ` +
+    `London venue "${name}" in ${area} on OpenTable, Resy, or SevenRooms. ` +
+    `Reply ONLY with the single reservation URL, or "none".`;
+  try {
+    const res = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text =
+      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
+      "";
+    const m = text.match(/https?:\/\/[^\s"')]+/);
+    if (!m) return null;
+    const url = m[0].replace(/[.,)]+$/, "");
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (host.includes("opentable")) return { platform: "opentable", url };
+    if (host.includes("resy")) return { platform: "resy", url };
+    if (host.includes("sevenrooms")) return { platform: "sevenrooms", url };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function slugify(s: string): string {
@@ -315,7 +418,8 @@ function detectBookingLinks(websiteUri: string | undefined): BookingLink[] {
     { platform: "thefork", re: /thefork\.(com|co\.uk)/i },
   ];
   for (const { platform, re } of patterns) {
-    if (re.test(websiteUri)) return [{ platform, url: websiteUri, priority: 1 }];
+    if (re.test(websiteUri))
+      return [{ platform, url: websiteUri, priority: 1 }];
   }
   return [{ platform: "website", url: websiteUri, priority: 99 }];
 }
@@ -415,6 +519,23 @@ async function main() {
         console.log(`  ✗ ${name}: editorial generation failed`);
         continue;
       }
+
+      // Best booking link (OpenTable/Resy for pre-fill) + website fallback.
+      const found = await findBookingLink(name, area);
+      const bookingLinks: BookingLink[] = found
+        ? [
+            { platform: found.platform, url: found.url, priority: 1 },
+            ...(p.websiteUri
+              ? [
+                  {
+                    platform: "website" as const,
+                    url: p.websiteUri,
+                    priority: 99,
+                  },
+                ]
+              : []),
+          ]
+        : detectBookingLinks(p.websiteUri);
 
       // Unique slug.
       let slug = slugify(name);
