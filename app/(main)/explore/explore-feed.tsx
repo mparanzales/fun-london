@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
+import { SearchOverlay } from "@/components/search-overlay";
 import { CITY } from "@/lib/config";
 import type { Venue, Event, VenueType, EventCategory } from "@/lib/types";
 
@@ -53,6 +54,7 @@ export function ExploreFeed({
   greetingName: string;
 }) {
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
+  const [searchOpen, setSearchOpen] = useState(false);
   const eyebrow = getEyebrow();
 
   const items = useMemo<FeedItem[]>(() => {
@@ -126,11 +128,7 @@ export function ExploreFeed({
           <button
             type="button"
             aria-label="Search"
-            onClick={() => {
-              // Stub — feature scoped for after MVP.
-              // eslint-disable-next-line no-console
-              console.log("Search clicked");
-            }}
+            onClick={() => setSearchOpen(true)}
             className="p-2 -mr-2 text-fg"
           >
             <Search className="w-6 h-6" strokeWidth={2} />
@@ -163,6 +161,14 @@ export function ExploreFeed({
             ),
           )}
         </div>
+      )}
+
+      {searchOpen && (
+        <SearchOverlay
+          venues={allVenues}
+          events={allEvents}
+          onClose={() => setSearchOpen(false)}
+        />
       )}
     </div>
   );
