@@ -54,11 +54,13 @@ export type Room = {
   votes: Vote[];
   doneIds: string[];
   swaps: Record<number, number>; // stepIdx → active alternative index
+  variant: number; // which whole-plan alternative ("another mix")
   sendPhase: (p: Phase) => void;
   sendSettings: (s: RoomSettings) => void;
   sendVote: (qIdx: number, value: boolean) => void;
   sendDone: () => void;
   sendSwap: (stepIdx: number, altIdx: number) => void;
+  sendVariant: (n: number) => void;
 };
 
 // ── Identity helpers ──────────────────────────────────────────────────────
@@ -127,12 +129,15 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
   const [votes, setVotes] = useState<Vote[]>([]);
   const [doneIds, setDoneIds] = useState<string[]>([]);
   const [swaps, setSwaps] = useState<Record<number, number>>({});
+  const [variant, setVariant] = useState(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
   // Refs so the presence-join replay handler reads the latest host state.
   const settingsRef = useRef<RoomSettings | null>(null);
   const swapsRef = useRef<Record<number, number>>({});
+  const variantRef = useRef(0);
   settingsRef.current = settings;
   swapsRef.current = swaps;
+  variantRef.current = variant;
 
   useEffect(() => {
     const supabase = createClient();
@@ -174,6 +179,13 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
           payload: swapsRef.current,
         });
       }
+      if (variantRef.current > 0) {
+        channel.send({
+          type: "broadcast",
+          event: "variant",
+          payload: { variant: variantRef.current },
+        });
+      }
     });
 
     channel.on("broadcast", { event: "phase" }, ({ payload }) => {
@@ -204,6 +216,10 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     });
     channel.on("broadcast", { event: "swaps" }, ({ payload }) => {
       setSwaps(payload as Record<number, number>);
+    });
+    channel.on("broadcast", { event: "variant" }, ({ payload }) => {
+      setVariant((payload as { variant: number }).variant);
+      setSwaps({}); // a fresh mix clears per-stop swaps
     });
 
     channel.subscribe((status) => {
@@ -261,6 +277,16 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     });
   }, []);
 
+  const sendVariant = useCallback((n: number) => {
+    setVariant(n);
+    setSwaps({});
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "variant",
+      payload: { variant: n },
+    });
+  }, []);
+
   return {
     code,
     me,
@@ -271,10 +297,12 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     votes,
     doneIds,
     swaps,
+    variant,
     sendPhase,
     sendSettings,
     sendVote,
     sendDone,
     sendSwap,
+    sendVariant,
   };
 }

@@ -7,9 +7,9 @@
 
 import type { Venue } from "@/lib/types";
 
-export type Region = "Central" | "East" | "South" | "North";
+export type Region = "Central" | "North" | "East" | "South" | "West";
 
-export const REGIONS: Region[] = ["Central", "East", "South", "North"];
+export const REGIONS: Region[] = ["Central", "North", "East", "South", "West"];
 
 export type PlanArea =
   | { kind: "anywhere" }
@@ -26,8 +26,10 @@ export const REGION_OF: Record<string, Region> = {
   Smithfield: "Central",
   "Old Street": "Central",
   Fitzrovia: "Central",
-  Marylebone: "Central",
-  Chelsea: "Central",
+  // West
+  Marylebone: "West",
+  Chelsea: "West",
+  "Notting Hill": "West",
   // East
   Shoreditch: "East",
   Hackney: "East",

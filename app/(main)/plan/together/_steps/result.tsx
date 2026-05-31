@@ -53,9 +53,9 @@ export function Result({
   const roles = useMemo(() => includedRoles(room.votes), [room.votes]);
 
   const plan = useMemo(
-    () => computeWalkablePlan(venues, settings, roles, events),
+    () => computeWalkablePlan(venues, settings, roles, events, room.variant),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [venues, events, roles, room.settings, when],
+    [venues, events, roles, room.settings, when, room.variant],
   );
 
   const memberById = new Map(room.members.map((m) => [m.id, m]));
@@ -199,13 +199,22 @@ export function Result({
         </p>
       )}
 
-      <button
-        type="button"
-        onClick={() => room.sendPhase("settings")}
-        className="mt-5 w-full h-12 rounded-2xl border border-fg/15 text-fg text-sm font-semibold"
-      >
-        Tweak the plan
-      </button>
+      <div className="mt-5 flex flex-col gap-2.5">
+        <button
+          type="button"
+          onClick={() => room.sendVariant(room.variant + 1)}
+          className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-sm font-extrabold"
+        >
+          Try a different mix ↻
+        </button>
+        <button
+          type="button"
+          onClick={() => room.sendPhase("settings")}
+          className="w-full h-10 rounded-2xl text-muted-fg text-[13px] font-semibold"
+        >
+          Change when / where
+        </button>
+      </div>
     </div>
   );
 }
