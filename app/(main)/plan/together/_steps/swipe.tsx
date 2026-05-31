@@ -3,18 +3,28 @@
 import { useEffect, useRef, useState } from "react";
 import type { Venue } from "@/lib/types";
 import type { Room } from "@/lib/realtime/room";
+import {
+  DECKS,
+  deckTimeFromTimeOfDay,
+  type Mood,
+} from "@/lib/plan-together-moods";
 import { Avatar } from "./avatar";
 
 // Plan Together — Step 2: Group Swipe (real-time).
-// Each member answers the 3 questions; every vote is broadcast. When you're
-// done you wait on the group, and once everyone has finished the room jumps
-// to the result.
-
-export const SWIPE_QUESTIONS = [
-  { label: "Dinner?", moodPill: "🍝 Mood" },
-  { label: "Drinks?", moodPill: "🍸 Mood" },
-  { label: "Late night?", moodPill: "🌙 Mood" },
-] as const;
+// Each member swipes through the MOOD DECK for the meeting's time of day —
+// one mood card at a time, ♥ (yes) / ✕ (no). Every vote is broadcast keyed by
+// the card's index in the deck. When you're done you wait on the group, and
+// once everyone has finished the room jumps to the result.
+//
+// The deck is derived from the host's time-of-day so every device shows the
+// same cards in the same order → vote indices line up across the group.
+export function deckForRoom(room: Room): Mood[] {
+  const tod =
+    room.settings?.when.kind === "scheduled"
+      ? room.settings.when.timeOfDay
+      : undefined;
+  return DECKS[deckTimeFromTimeOfDay(tod)];
+}
 
 export function Swipe({
   room,
@@ -23,13 +33,14 @@ export function Swipe({
   room: Room;
   questionVenues: Venue[];
 }) {
+  const deck = deckForRoom(room);
   const [qIdx, setQIdx] = useState(0);
   const [finished, setFinished] = useState(false);
   const advancedRef = useRef(false);
 
   const vote = (value: boolean) => {
     room.sendVote(qIdx, value);
-    if (qIdx + 1 < SWIPE_QUESTIONS.length) {
+    if (qIdx + 1 < deck.length) {
       setQIdx(qIdx + 1);
     } else {
       room.sendDone();
@@ -80,13 +91,13 @@ export function Swipe({
     );
   }
 
-  const q = SWIPE_QUESTIONS[qIdx];
+  const mood = deck[qIdx];
   const venue: Venue = questionVenues[qIdx] ?? questionVenues[0];
 
   return (
     <div className="px-5 pt-4 flex flex-col min-h-[calc(100vh-96px)]">
       <div className="text-[11px] font-extrabold text-primary uppercase tracking-[0.12em] mb-2">
-        Question {qIdx + 1} of {SWIPE_QUESTIONS.length}
+        What&apos;s the vibe? · {qIdx + 1} of {deck.length}
       </div>
 
       <div
@@ -96,13 +107,15 @@ export function Swipe({
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/85" />
         <div className="absolute top-3.5 left-3.5">
           <span className="inline-block px-2.5 py-1 rounded-full bg-accent text-accent-fg text-[10px] font-extrabold uppercase tracking-[0.08em]">
-            {q.moodPill}
+            {mood.emoji} mood
           </span>
         </div>
         <div className="absolute left-4 right-4 bottom-4.5 text-white">
-          <h2 className="text-[32px] font-extrabold m-0 tracking-tight">
-            {q.label}
+          <span className="text-4xl">{mood.emoji}</span>
+          <h2 className="text-[32px] font-extrabold m-0 tracking-tight mt-1">
+            {mood.label}
           </h2>
+          <p className="text-sm text-white/80 mt-1">{mood.sub}</p>
         </div>
       </div>
 
