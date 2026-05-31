@@ -1,11 +1,39 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-28 (Google sign-in live + Phase 5 Tier 1 + Batch 2)
+**Last updated:** 2026-05-31 (PT v2 multiplayer + mood swipe-deck +
+autonomous discovery robot live; catalog at 27 venues)
 **Branch state:** Phases 1 + 2 + 3 + 3.5 + 4 + 4.5 + Stage 3 ingestion +
-Batch 2 (8 new venues) + Phase 5 Tier 1 (autonomous maintenance) +
-Google sign-in (OAuth, primary alongside magic-link) all merged to
-`main` and live in production. **The catalog is real, self-maintaining,
-and signing in via Google works.**
+Batch 2 + Phase 5 Tiers 1/2/3 + Google sign-in + **Plan Together v2
+(real multiplayer over Supabase Realtime)** + **mood swipe-deck** all
+merged to `main` (HEAD `e2da7a0`) and live. **The catalog is real
+(27 venues), self-maintaining, AND auto-growing via the discovery robot.**
+
+## What's new since 2026-05-28 (the 2026-05-30/31 work)
+
+- **Autonomous discovery robot LIVE** (`scripts/discover-venues.ts` +
+  `.github/workflows/discover-venues.yml`, every 4h, all-Google + free).
+  Google Places finds candidates → location-count chain filter → Gemini
+  2.5 Flash does BOTH 2-source validation (built-in Google Search) AND the
+  brat editorial → loops to 10 compliant → auto-publishes. Grew the catalog
+  19 → **27** (last batch: Bermondsey + Peckham). Confirmed green
+  2026-05-31. Google Custom Search was abandoned (org-policy/billing) — do
+  NOT go back to it; `GOOGLE_SEARCH_*` env vars are now unused.
+- **Plan Together v2 — real multiplayer** (`lib/realtime/room.ts`):
+  ephemeral Supabase Realtime room (Presence + Broadcast, no DB tables),
+  proximity-first **walkable** plan engine (`computeWalkablePlan`), host
+  settings (calendar date-picker + region chips incl. West/North), per-stop
+  Swap, and a "Try a different mix" whole-plan reshuffle.
+- **Mood swipe-deck** (`lib/plan-together-moods.ts`): the swipe step is now
+  a deck of *mood* cards that changes by time of day (Morning / Afternoon /
+  Night); each hearted mood feeds the planner a per-role venue-type intent
+  (`RoleIntent` / `roleMatchesIntent` in `lib/plan-engine.ts`) so the night
+  matches the mood (cosy wine → a wine bar). NIGHT deck is fully stocked.
+  **Phase C still pending:** the Morning/Afternoon decks lean on Culture /
+  Market / Outdoors venue types — catalog has ZERO of those today, so day
+  decks won't feel real until we ingest day-spots. Also relabel the
+  settings time-of-day chips Day/Evening/Night → Morning/Afternoon/Night.
+  Live browser swipe-through still to be done (gates pass; see
+  PLAN-mood-deck.md).
 
 • **Phase 1** — catalog reads from Supabase via Server Components in
   `lib/queries.ts`.
@@ -113,7 +141,10 @@ Codebase: strict TS, clean ESLint, Prettier-enforced. `MOCK_USER` /
 `getCurrentUser()` fully retired. `lib/mock-data.ts` has just
 `MOCK_SAVED_IDS` + `MOCK_PARTICIPANTS`.
 
-## The 19 real venues live in production
+## The 27 real venues live in production
+
+Manually curated (Batches 1–2) + auto-discovered by the robot (the
+Bermondsey/Peckham additions). All have `google_place_id IS NOT NULL`.
 
 | Slug | Name | Area | Type | ★ |
 |---|---|---|---|---|
@@ -136,19 +167,27 @@ Codebase: strict TS, clean ESLint, Prettier-enforced. `MOCK_USER` /
 | brawn | Brawn | Columbia Road | Wine Bar | 4.6 |
 | 40-maltby-street | 40 Maltby Street | Bermondsey | Wine Bar | 4.7 |
 | forza-wine-peckham | Forza Wine Peckham | Peckham | Wine Bar | 4.5 |
+| peckham-levels | Peckham Levels | Peckham | Bar | 4.4 |
+| old-nunshead | The Old Nun's Head | Peckham | Pub | 4.5 |
+| flour-and-grape | Flour & Grape | Bermondsey | Restaurant | 4.5 |
+| pique-nique | Pique-Nique | Bermondsey | Restaurant | 4.4 |
+| great-exhibition | Great Exhibition | Peckham | Pub | 4.5 |
+| the-victoria-inn | The Victoria Inn | Peckham | Pub | 4.4 |
+| casse-cro-te | Casse-Croûte | Bermondsey | Restaurant | 4.7 |
+| jos | José | Bermondsey | Restaurant | 4.4 |
 
-All 19 are also rows in `public.partner_prospects` (BD pipeline —
-they're all owner-managed without OpenTable/Resy, perfect partner
-targets). The original demo venues (Bao Soho, Dishoom, etc.) remain
-in the DB so saved/bookings FKs stay valid, but `fetchVenues()` now
-filters to `google_place_id IS NOT NULL` so they're hidden from the
-user-facing catalog.
+All 27 are also rows in `public.partner_prospects` (BD pipeline —
+owner-managed without OpenTable/Resy, perfect partner targets). The
+original demo venues (Bao Soho, Dishoom, etc.) remain in the DB so
+saved/bookings FKs stay valid, but `fetchVenues()` filters to
+`google_place_id IS NOT NULL` so they're hidden from the catalog.
 
-**Type / area distribution (Batch 2 closed the early gaps):**
-9 Restaurants · 3 Wine Bars · 2 Pubs · 2 Live Music · 2 Cafes · 1 Bar.
-14 venues are central (Soho / Shoreditch / Smithfield / Mayfair /
-Clerkenwell / Borough / Farringdon / Old Street). 5 are east+south
-(Hackney, Dalston x2, Columbia Road, Bermondsey, Peckham).
+**Type distribution (2026-05-31):**
+13 Restaurants · 5 Pubs · 3 Wine Bars · 2 Bars · 2 Live Music · 2 Cafes.
+**Zero Culture / Market / Outdoors** — the gap that blocks the mood-deck's
+Morning/Afternoon decks (Phase C ingest target). Geographic centre of
+gravity has shifted south-east (Bermondsey + Peckham) as the robot worked
+that grid slice.
 
 ## Real Talk UI
 
