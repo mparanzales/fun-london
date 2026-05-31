@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from "react";
 import type { Venue } from "@/lib/types";
-import { regionsWithVenues, type PlanArea, type Region } from "@/lib/regions";
+import { REGIONS, type PlanArea, type Region } from "@/lib/regions";
 import type { PlanBudget } from "@/lib/plan-engine";
 import type { PlanWhen, Room, RoomSettings } from "@/lib/realtime/room";
 
@@ -15,42 +15,19 @@ const TOD_HOUR: Record<"Day" | "Evening" | "Night", number> = {
   Night: 23,
 };
 
-function nextOccurrenceMs(dayOffset: number, hour: number): number {
-  const d = new Date();
-  d.setDate(d.getDate() + dayOffset);
-  d.setHours(hour, 0, 0, 0);
-  return d.getTime();
-}
-
 export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
-  const regions = useMemo(() => regionsWithVenues(venues), [venues]);
   const neighbourhoods = useMemo(
     () => Array.from(new Set(venues.map((v) => v.neighbourhood))).sort(),
     [venues],
   );
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   const [mode, setMode] = useState<"now" | "later">("now");
-  const [dayOffset, setDayOffset] = useState(0);
+  const [dateStr, setDateStr] = useState(todayStr);
   const [tod, setTod] = useState<"Day" | "Evening" | "Night">("Evening");
   const [area, setArea] = useState<PlanArea>({ kind: "anywhere" });
   const [budget, setBudget] = useState<PlanBudget>("Any");
   const [groupSize, setGroupSize] = useState(Math.max(2, room.members.length));
-
-  const dayChips = useMemo(
-    () =>
-      Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() + i);
-        const label =
-          i === 0
-            ? "Today"
-            : i === 1
-              ? "Tomorrow"
-              : d.toLocaleDateString("en-GB", { weekday: "short" });
-        return { offset: i, label, day: d.getDay() };
-      }),
-    [],
-  );
 
   // ── Joiner: read-only ──────────────────────────────────────────────────
   if (!room.isHost) {
@@ -79,8 +56,10 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
         ? { kind: "now", at: Date.now() }
         : {
             kind: "scheduled",
-            at: nextOccurrenceMs(dayOffset, TOD_HOUR[tod]),
-            day: dayChips[dayOffset].day,
+            at: new Date(
+              `${dateStr}T${String(TOD_HOUR[tod]).padStart(2, "0")}:00:00`,
+            ).getTime(),
+            day: new Date(`${dateStr}T00:00:00`).getDay(),
             timeOfDay: tod,
           };
     const settings: RoomSettings = {
@@ -114,18 +93,13 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
         </div>
         {mode === "later" && (
           <>
-            <div className="flex gap-1.5 flex-wrap mb-2">
-              {dayChips.map((d) => (
-                <Chip
-                  key={d.offset}
-                  on={dayOffset === d.offset}
-                  onClick={() => setDayOffset(d.offset)}
-                  small
-                >
-                  {d.label}
-                </Chip>
-              ))}
-            </div>
+            <input
+              type="date"
+              value={dateStr}
+              min={todayStr}
+              onChange={(e) => setDateStr(e.target.value)}
+              className="w-full h-11 rounded-xl bg-card border border-border px-3 text-fg text-[14px] mb-2"
+            />
             <div className="flex gap-1.5">
               {(["Day", "Evening", "Night"] as const).map((t) => (
                 <Chip key={t} on={tod === t} onClick={() => setTod(t)} small>
@@ -150,7 +124,7 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
           >
             Anywhere
           </Chip>
-          {regions.map((r: Region) => (
+          {REGIONS.map((r: Region) => (
             <Chip
               key={r}
               on={area.kind === "region" && area.region === r}

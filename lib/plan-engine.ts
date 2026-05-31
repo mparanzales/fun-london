@@ -435,6 +435,7 @@ export function computeWalkablePlan(
   settings: WalkableSettings,
   includedRoles: PlanRole[],
   events: Event[] = [],
+  variant = 0,
 ): WalkablePlan {
   const { area, budget, when } = settings;
   const open = (v: Venue) => isOpenAt(v, when);
@@ -464,18 +465,30 @@ export function computeWalkablePlan(
     seedCandidates = rankByScore(pool, []).slice(0, 10);
   }
 
-  let best: {
-    chosen: { venue: Venue; role: PlanRole; radiusKm: number }[];
-    unfilled: PlanRole[];
-    score: number;
-  } | null = null;
-  for (const seed of seedCandidates) {
-    const c = buildClusterFromSeed(pool, roles, seed);
-    const filled = roles.length - c.unfilled.length;
-    const quality = c.chosen.reduce((s, x) => s + baseScore(x.venue), 0);
-    const score = filled * 1000 + quality;
-    if (!best || score > best.score) best = { ...c, score };
+  const clusters = seedCandidates
+    .map((seed) => {
+      const c = buildClusterFromSeed(pool, roles, seed);
+      const filled = roles.length - c.unfilled.length;
+      const quality = c.chosen.reduce((s, x) => s + baseScore(x.venue), 0);
+      return { ...c, score: filled * 1000 + quality };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  // Keep only distinct clusters (by venue set) so "another mix" actually
+  // changes the plan; `variant` cycles through them.
+  const distinct: typeof clusters = [];
+  const seenKey = new Set<string>();
+  for (const c of clusters) {
+    const key = c.chosen
+      .map((x) => x.venue.id)
+      .sort()
+      .join(",");
+    if (!seenKey.has(key)) {
+      seenKey.add(key);
+      distinct.push(c);
+    }
   }
+  const best = distinct.length > 0 ? distinct[variant % distinct.length] : null;
 
   const chosen = best ? best.chosen : [];
   const unfilledRoles = best ? best.unfilled : roles;
