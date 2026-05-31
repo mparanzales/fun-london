@@ -93,6 +93,24 @@ function roleMatches(v: Venue, role: PlanRole): boolean {
   }
 }
 
+// Plan Together (mood-deck) matcher: when the group hearted moods for this
+// role, the allowed venue types are exactly the union of those moods' types
+// (RoleIntent). When a role has no hearted types, fall back to the default
+// role rule so the planner still behaves. See lib/plan-together-moods.ts.
+export type RoleIntent = Record<PlanRole, VenueType[]>;
+
+const EMPTY_INTENT: RoleIntent = { Start: [], Then: [], Finish: [] };
+
+function roleMatchesIntent(
+  v: Venue,
+  role: PlanRole,
+  intent: RoleIntent,
+): boolean {
+  const types = intent[role];
+  if (types && types.length > 0) return types.includes(v.type);
+  return roleMatches(v, role);
+}
+
 const DWELL: Record<PlanRole, number> = { Start: 75, Then: 60, Finish: 60 };
 
 // ── Vibe scoring ─────────────────────────────────────────────────────────
@@ -393,6 +411,7 @@ function buildClusterFromSeed(
   pool: Venue[],
   roles: PlanRole[],
   seed: Venue,
+  intent: RoleIntent = EMPTY_INTENT,
 ): {
   chosen: { venue: Venue; role: PlanRole; radiusKm: number }[];
   unfilled: PlanRole[];
@@ -409,7 +428,7 @@ function buildClusterFromSeed(
         pool.filter(
           (v) =>
             !used.has(v.id) &&
-            roleMatches(v, role) &&
+            roleMatchesIntent(v, role, intent) &&
             minKmToChosen(v, chosenVenues) <= R,
         ),
         chosenVenues,
@@ -436,6 +455,7 @@ export function computeWalkablePlan(
   includedRoles: PlanRole[],
   events: Event[] = [],
   variant = 0,
+  intent: RoleIntent = EMPTY_INTENT,
 ): WalkablePlan {
   const { area, budget, when } = settings;
   const open = (v: Venue) => isOpenAt(v, when);
@@ -458,7 +478,7 @@ export function computeWalkablePlan(
   // isolated top-rated venue and end up with a lonely 1-stop plan.
   const seedRole = roles[0];
   let seedCandidates = rankByScore(
-    pool.filter((v) => roleMatches(v, seedRole)),
+    pool.filter((v) => roleMatchesIntent(v, seedRole, intent)),
     [],
   ).slice(0, 10);
   if (seedCandidates.length === 0) {
@@ -467,7 +487,7 @@ export function computeWalkablePlan(
 
   const clusters = seedCandidates
     .map((seed) => {
-      const c = buildClusterFromSeed(pool, roles, seed);
+      const c = buildClusterFromSeed(pool, roles, seed, intent);
       const filled = roles.length - c.unfilled.length;
       const quality = c.chosen.reduce((s, x) => s + baseScore(x.venue), 0);
       return { ...c, score: filled * 1000 + quality };
@@ -514,7 +534,7 @@ export function computeWalkablePlan(
       pool.filter(
         (v) =>
           !used.has(v.id) &&
-          roleMatches(v, c.role) &&
+          roleMatchesIntent(v, c.role, intent) &&
           (others.length === 0 || minKmToChosen(v, others) <= c.radiusKm),
       ),
       others,

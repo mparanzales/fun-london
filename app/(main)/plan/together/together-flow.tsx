@@ -17,9 +17,10 @@ import {
 } from "@/lib/realtime/room";
 import { venueInArea } from "@/lib/regions";
 import { isOpenAt, withinBudget } from "@/lib/plan-engine";
+import type { Mood } from "@/lib/plan-together-moods";
 import { Lobby } from "./_steps/lobby";
 import { Settings } from "./_steps/settings";
-import { Swipe } from "./_steps/swipe";
+import { Swipe, deckForRoom } from "./_steps/swipe";
 import { Result } from "./_steps/result";
 
 export function TogetherFlow({
@@ -101,8 +102,12 @@ function RoomFlow({
 
   const questionVenues = useMemo(
     () =>
-      pickQuestionVenues(filteredVenues.length >= 3 ? filteredVenues : venues),
-    [filteredVenues, venues],
+      pickQuestionVenues(
+        filteredVenues.length >= 3 ? filteredVenues : venues,
+        deckForRoom(room),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredVenues, venues, room.settings],
   );
 
   return (
@@ -126,26 +131,19 @@ function RoomFlow({
   );
 }
 
-// Pick one venue per swipe question, matched to the question's intent:
-// Dinner → a restaurant, Drinks → a bar/pub, Late night → live music / a
-// night spot. Distinct venues; graceful fallbacks for a thin catalog.
-function pickQuestionVenues(venues: Venue[]): Venue[] {
+// One backdrop venue photo per mood card — a real venue of a type the mood
+// maps to, so the card behind "cosy wine" shows an actual wine bar. Distinct
+// where possible; graceful fallbacks for a thin catalog.
+function pickQuestionVenues(venues: Venue[], deck: Mood[]): Venue[] {
   const used = new Set<string>();
-  const pick = (pred: (v: Venue) => boolean, fallbackIdx: number): Venue => {
+  return deck.map((mood, i) => {
     const v =
-      venues.find((x) => !used.has(x.id) && pred(x)) ??
+      venues.find((x) => !used.has(x.id) && mood.types.includes(x.type)) ??
+      venues.find((x) => mood.types.includes(x.type)) ??
       venues.find((x) => !used.has(x.id)) ??
-      venues[fallbackIdx] ??
+      venues[i] ??
       venues[0];
     if (v) used.add(v.id);
     return v;
-  };
-  return [
-    pick((v) => v.type === "Restaurant", 0),
-    pick(
-      (v) => ["Bar", "Wine Bar", "Pub", "Listening Bar"].includes(v.type),
-      1,
-    ),
-    pick((v) => v.type === "Live Music" || v.timeOfDay === "Night", 2),
-  ];
+  });
 }

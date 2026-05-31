@@ -7,30 +7,41 @@ import {
   computeWalkablePlan,
   walkMins,
   type PlanRole,
+  type RoleIntent,
   type WalkableSettings,
 } from "@/lib/plan-engine";
+import {
+  deckTimeFromTimeOfDay,
+  intentFromHeartedMoods,
+  type Mood,
+} from "@/lib/plan-together-moods";
+import { DECKS } from "@/lib/plan-together-moods";
 
 // Plan Together — Step 4: Result (real-time, v2).
-// Builds a walkable plan from the host's settings + the group's votes (which
-// stop-types they wanted) and shows real attribution per step.
+// Builds a walkable plan from the host's settings + the group's MOOD votes.
+// Each hearted mood (yes ≥ no across the group) contributes its venue types to
+// its stop role; the union per role becomes the planner's RoleIntent, so the
+// night matches the mood (cosy wine → a wine bar, not just any bar).
 
 const STEP_LABELS: Record<PlanRole, string> = {
   Start: "Start",
   Then: "Then",
   Finish: "Finish",
 };
-const ROLE_Q: Record<PlanRole, number> = { Start: 0, Then: 1, Finish: 2 };
-const STEP_WORD = ["dinner", "drinks", "a late one"];
 
-function includedRoles(votes: Room["votes"]): PlanRole[] {
-  const roles: PlanRole[] = ["Start", "Then", "Finish"];
-  const out: PlanRole[] = [];
-  roles.forEach((role, q) => {
-    const yes = votes.filter((v) => v.qIdx === q && v.value).length;
-    const no = votes.filter((v) => v.qIdx === q && !v.value).length;
-    if (yes > 0 && yes >= no) out.push(role);
+// The moods the group hearted (group yes ≥ no, and at least one yes), in deck
+// order. `qIdx` indexes into the deck for the meeting's time of day.
+function heartedMoods(room: Room): Mood[] {
+  const tod =
+    room.settings?.when.kind === "scheduled"
+      ? room.settings.when.timeOfDay
+      : undefined;
+  const deck = DECKS[deckTimeFromTimeOfDay(tod)];
+  return deck.filter((_, q) => {
+    const yes = room.votes.filter((v) => v.qIdx === q && v.value).length;
+    const no = room.votes.filter((v) => v.qIdx === q && !v.value).length;
+    return yes > 0 && yes >= no;
   });
-  return out.length ? out : ["Start"];
 }
 
 export function Result({
@@ -50,19 +61,49 @@ export function Result({
     when,
     groupSize: room.settings?.groupSize ?? Math.max(1, room.members.length),
   };
-  const roles = useMemo(() => includedRoles(room.votes), [room.votes]);
+  const hearted = useMemo(() => heartedMoods(room), [room]);
+  const roles = useMemo<PlanRole[]>(() => {
+    const order: PlanRole[] = ["Start", "Then", "Finish"];
+    const out = order.filter((r) => hearted.some((m) => m.role === r));
+    return out.length ? out : ["Start"];
+  }, [hearted]);
+  const intent: RoleIntent = useMemo(
+    () => intentFromHeartedMoods(hearted),
+    [hearted],
+  );
+  // Which deck-index each role's moods came from — drives per-step vote
+  // attribution (a step is credited to everyone who hearted a mood for it).
+  const qIdxByRole = useMemo(() => {
+    const tod =
+      room.settings?.when.kind === "scheduled"
+        ? room.settings.when.timeOfDay
+        : undefined;
+    const deck = DECKS[deckTimeFromTimeOfDay(tod)];
+    const map: Record<PlanRole, number[]> = { Start: [], Then: [], Finish: [] };
+    deck.forEach((m, q) => map[m.role].push(q));
+    return map;
+  }, [room.settings]);
 
   const plan = useMemo(
-    () => computeWalkablePlan(venues, settings, roles, events, room.variant),
+    () =>
+      computeWalkablePlan(
+        venues,
+        settings,
+        roles,
+        events,
+        room.variant,
+        intent,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [venues, events, roles, room.settings, when, room.variant],
+    [venues, events, roles, intent, room.settings, when, room.variant],
   );
 
   const memberById = new Map(room.members.map((m) => [m.id, m]));
   const total = room.members.length;
-  const yesByQ = [0, 1, 2].map(
-    (q) => room.votes.filter((v) => v.qIdx === q && v.value).length,
-  );
+  const mixSummary =
+    hearted.length > 0
+      ? hearted.map((m) => `${m.emoji} ${m.label}`).join(" · ")
+      : "Closest matches nearby";
 
   // Apply any group swaps (deterministic alt index per step) and recompute
   // walk times so the swapped venue's distances stay honest.
@@ -99,16 +140,21 @@ export function Result({
           ✦ How we mixed it
         </div>
         <div className="text-[11.5px] text-fg mt-1 leading-snug">
-          {yesByQ[0]} of {total} wanted dinner, {yesByQ[1]} drinks, and{" "}
-          {yesByQ[2]} a late one — kept it all within walking distance.
+          The group&apos;s vibe: {mixSummary} — kept it all within walking
+          distance.
         </div>
       </div>
 
       <div className="mt-3.5 flex flex-col gap-3">
         {steps.map((s, i) => {
-          const voters = room.votes
-            .filter((v) => v.qIdx === ROLE_Q[s.role] && v.value)
-            .map((v) => memberById.get(v.memberId))
+          const roleQs = qIdxByRole[s.role] ?? [];
+          const voterIds = new Set(
+            room.votes
+              .filter((v) => roleQs.includes(v.qIdx) && v.value)
+              .map((v) => v.memberId),
+          );
+          const voters = [...voterIds]
+            .map((id) => memberById.get(id))
             .filter((m): m is Member => Boolean(m));
           const attribution =
             voters.length === 0
@@ -194,8 +240,8 @@ export function Result({
       {plan.unfilledRoles.length > 0 && (
         <p className="text-[11px] text-muted-fg mt-3 leading-snug">
           Couldn&apos;t find an open spot for{" "}
-          {plan.unfilledRoles.map((r) => STEP_WORD[ROLE_Q[r]]).join(" or ")}{" "}
-          within walking distance — try a different time or area.
+          {plan.unfilledRoles.map((r) => STEP_LABELS[r]).join(" or ")} within
+          walking distance — try a different time or area.
         </p>
       )}
 
