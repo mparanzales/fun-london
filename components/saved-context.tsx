@@ -77,10 +77,16 @@ export function SavedProvider({
     (async () => {
       const supabase = createClient();
 
-      // 1. slug → uuid map
+      // 1. slug → uuid map. Restrict to catalog-VISIBLE venues only
+      // (google_place_id IS NOT NULL) — the same filter fetchVenues() uses.
+      // This keeps the saved-set aligned with what the catalog/Saved list
+      // can actually render, so the count never disagrees with the list
+      // (e.g. saved demo rows like Dishoom/Borough Market that are hidden
+      // from the catalog used to inflate the count but show nothing).
       const { data: venues, error: venuesErr } = await supabase
         .from("venues")
-        .select("id,slug");
+        .select("id,slug")
+        .not("google_place_id", "is", null);
       if (cancelled) return;
       if (venuesErr) {
         console.error("[saved] venues map failed:", venuesErr);
@@ -133,11 +139,14 @@ export function SavedProvider({
       }
       // Supabase types FK joins as arrays even when it's a single FK;
       // runtime returns a single object. Cast via unknown.
+      // Keep only slugs that map to a catalog-visible venue (in `map`),
+      // so a saved row pointing at a hidden/demo venue doesn't inflate the
+      // count past what the Saved list can show.
       const slugs: string[] = [];
       for (const row of rows ?? []) {
         const v = (row as unknown as { venues: { slug: string } | null })
           .venues;
-        if (v?.slug) slugs.push(v.slug);
+        if (v?.slug && map.has(v.slug)) slugs.push(v.slug);
       }
       setSavedSet(new Set(slugs));
     })();
