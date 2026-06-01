@@ -192,12 +192,20 @@ original demo venues (Bao Soho, Dishoom, etc.) remain in the DB so
 saved/bookings FKs stay valid, but `fetchVenues()` filters to
 `google_place_id IS NOT NULL` so they're hidden from the catalog.
 
-**Type distribution (2026-05-31):**
-13 Restaurants · 5 Pubs · 3 Wine Bars · 2 Bars · 2 Live Music · 2 Cafes.
-**Zero Culture / Market / Outdoors** — the gap that blocks the mood-deck's
-Morning/Afternoon decks (Phase C ingest target). Geographic centre of
-gravity has shifted south-east (Bermondsey + Peckham) as the robot worked
-that grid slice.
+**Type distribution (2026-06-01, 29 venues):**
+13 Restaurants · 5 Pubs · 4 Culture · 3 Wine Bars · 3 Markets · 3 Outdoors ·
+2 Bars · 2 Live Music · 2 Cafes.
+**Day-spots seeded 2026-06-01** — 10 hand-curated, manually-validated
+(by Claude via web search, NOT Gemini) Culture/Market/Outdoors venues added
+via `scripts/venues-seed.ts` + `pnpm ingest` to fill the mood-deck's
+Morning/Afternoon decks: Sir John Soane's Museum, Dennis Severs' House,
+Whitechapel Gallery, Estorick Collection (Culture); Columbia Road Flower
+Market, Netil Market, Maltby Street Market (Market); Walthamstow Wetlands,
+Crossbones Garden, Brockwell Lido (Outdoors). All `skipProspect:true` (not
+booking-partner targets, so partner_prospects stays at the 19 food/drink
+venues). Afternoon deck verified live (long lunch → Whitechapel Gallery →
+Crossbones Garden). Day-spots are still sparse per-area, so walkable
+clustering is loose until the robot adds more.
 
 ## Real Talk UI
 

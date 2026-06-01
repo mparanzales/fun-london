@@ -25,10 +25,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import {
-  VENUE_SEEDS,
-  type VenueSeed,
-} from "./venues-seed";
+import { VENUE_SEEDS, type VenueSeed } from "./venues-seed";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 import {
   normalizeOpeningHours,
@@ -226,7 +223,10 @@ function photoUrl(photoName: string, maxWidth = 1600): string {
 
 function buildVenueRow(seed: VenueSeed, details: PlaceDetails) {
   const websiteUri = details.websiteUri ?? null;
-  const bookingLinks = detectBookingLinks(websiteUri ?? undefined, details.reservable);
+  const bookingLinks = detectBookingLinks(
+    websiteUri ?? undefined,
+    details.reservable,
+  );
   const photoName = details.photos?.[0]?.name;
 
   return {
@@ -266,7 +266,10 @@ function buildVenueRow(seed: VenueSeed, details: PlaceDetails) {
 
 function buildProspectRow(seed: VenueSeed, details: PlaceDetails) {
   const websiteUri = details.websiteUri ?? null;
-  const bookingLinks = detectBookingLinks(websiteUri ?? undefined, details.reservable);
+  const bookingLinks = detectBookingLinks(
+    websiteUri ?? undefined,
+    details.reservable,
+  );
   const currentBookingMethod = (() => {
     if (bookingLinks.length === 0) return "walk-in only";
     if (bookingLinks[0].platform === "website") return "own website only";
@@ -325,10 +328,14 @@ async function processVenue(seed: VenueSeed): Promise<{
 
   // Always upsert to venues — every venue that passes the curation
   // filters belongs in the public catalog. partner_prospects is an
-  // *overlay* for internal BD use, not a replacement.
+  // *overlay* for internal BD use, not a replacement. Day-spots
+  // (galleries/markets/parks) are catalog venues but not booking
+  // partners, so they opt out of the prospects overlay via skipProspect.
+  const wantsProspect = !hasMajor && !seed.skipProspect;
   if (DRY_RUN) {
     console.log(`  [dry-run] would upsert to venues`);
-    if (!hasMajor) console.log(`  [dry-run] would ALSO upsert to partner_prospects`);
+    if (wantsProspect)
+      console.log(`  [dry-run] would ALSO upsert to partner_prospects`);
   } else {
     if (!supabase) throw new Error("Supabase client not initialised");
 
@@ -343,7 +350,7 @@ async function processVenue(seed: VenueSeed): Promise<{
     }
     console.log(`  ✓ upserted to venues`);
 
-    if (!hasMajor) {
+    if (wantsProspect) {
       const prospectRow = buildProspectRow(seed, details);
       const { error: prospectErr } = await supabase
         .from("partner_prospects")
@@ -360,7 +367,7 @@ async function processVenue(seed: VenueSeed): Promise<{
   return {
     slug: seed.slug,
     inVenues: true,
-    inProspects: !hasMajor,
+    inProspects: wantsProspect,
     placeId: details.id,
     bookingPlatforms: platforms,
   };
