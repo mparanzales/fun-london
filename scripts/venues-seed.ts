@@ -43,6 +43,10 @@ export type VenueSeed = {
   editorialSources: EditorialSource[];
   creatorCoverage: CreatorCoverage[];
   criticalFlags: CriticalFlag[];
+
+  // Day-spots (Culture / Market / Outdoors) are catalog venues but NOT
+  // booking-partner prospects — skip the partner_prospects overlay for them.
+  skipProspect?: boolean;
 };
 
 export const VENUE_SEEDS: VenueSeed[] = [
@@ -1301,6 +1305,454 @@ export const VENUE_SEEDS: VenueSeed[] = [
         body: "The kitchen is small plates priced £4-18, designed for grazing with wine. Big appetites should order more than feels reasonable, or eat before.",
       },
     ],
+  },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // DAY-SPOTS (Culture / Market / Outdoors) — added 2026-06-01 to fill the
+  // mood-deck's Morning/Afternoon decks. Independent, non-mainstream,
+  // verified in 2+ publications. skipProspect: not booking-partner targets.
+  // ─────────────────────────────────────────────────────────────────────
+
+  // ── 20. Sir John Soane's Museum ──────────────────────────────────────
+  {
+    slug: "sir-john-soanes-museum",
+    searchQuery:
+      "Sir John Soane's Museum 13 Lincoln's Inn Fields Holborn London",
+    neighbourhood: "Holborn",
+    vibe: "An architect's house stuffed floor-to-ceiling with antiquity.",
+    longDescription:
+      "The home Sir John Soane left to the nation in 1837, frozen exactly as he arranged it — a labyrinth of mirrors, skylights and marbles wrapped around the sarcophagus of Seti I and Hogarth's full 'Rake's Progress'. Free, eccentric, and one of the strangest interiors in London.",
+    type: "Culture",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["culture"],
+    vibeTags: ["Free", "House museum", "Hidden gem", "No photos"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/museums/sir-john-soanes-museum",
+        title: "Sir John Soane's Museum — Time Out London",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/museums-and-galleries/sir-john-soane-s-museum",
+        title: "A Guide To Sir John Soane's Museum",
+      },
+      {
+        publication: "The Guardian",
+        url: "https://www.theguardian.com/artanddesign/2023/jan/13/sir-john-soanes-museum-london-review",
+        title: "Sir John Soane's Museum review",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Tiny, timed entry",
+        body: "The house is small and gets packed — book a free timed slot online, especially for weekends and the candlelit late openings.",
+      },
+      {
+        label: "No big bags, limited photography",
+        body: "Cloakroom for anything over A4, and photography rules are strict in places. It's a house, not a gallery — narrow stairs, low light.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 21. Dennis Severs' House ─────────────────────────────────────────
+  {
+    slug: "dennis-severs-house",
+    searchQuery: "Dennis Severs' House 18 Folgate Street Spitalfields London",
+    neighbourhood: "Spitalfields",
+    vibe: "A candlelit time-cappsule you move through in silence.",
+    longDescription:
+      "Ten rooms staged as a 'still-life drama' — the imagined home of a family of Huguenot silk-weavers, lit by candle and firelight, half-eaten food on the table as if they just left the room. You explore in total silence. Unlike anything else in the city.",
+    type: "Culture",
+    price: "££",
+    timeOfDay: "Day",
+    moodTags: ["culture"],
+    vibeTags: ["Immersive", "Silent", "Candlelit", "Booking only"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/things-to-do/dennis-severs-house",
+        title: "Dennis Severs' House — Time Out London",
+      },
+      {
+        publication: "Atlas Obscura",
+        url: "https://www.atlasobscura.com/places/dennis-severs-house",
+        title: "Dennis Severs' House — Atlas Obscura",
+      },
+      {
+        publication: "The Guardian",
+        url: "https://www.theguardian.com/travel/2016/oct/20/dennis-severs-house-spitalfields-london",
+        title: "Dennis Severs' House, London",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Silence is the rule",
+        body: "No talking, no phones — that's the entire point. Go with someone who'll commit to it, not a chatty group.",
+      },
+      {
+        label: "Book ahead, limited days",
+        body: "Open select days (Sun/Mon plus candlelit evenings). Pre-booked tickets only; it sells out — don't just turn up.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 22. Whitechapel Gallery ──────────────────────────────────────────
+  {
+    slug: "whitechapel-gallery",
+    searchQuery: "Whitechapel Gallery 77-82 Whitechapel High Street London",
+    neighbourhood: "Whitechapel",
+    vibe: "Free East End gallery that showed Guernica before you were born.",
+    longDescription:
+      "Founded 1901 to bring great art to the East End — it gave London its first sight of Picasso's 'Guernica' in 1939 and Pollock in the 50s. Still free, still ahead of the curve, with a good café and bookshop to round out a slow morning.",
+    type: "Culture",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["culture"],
+    vibeTags: ["Free", "Contemporary art", "Historic", "Café"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/art/whitechapel-gallery",
+        title: "Whitechapel Gallery — Time Out London",
+      },
+      {
+        publication: "The Guardian",
+        url: "https://www.theguardian.com/artanddesign/whitechapel-art-gallery",
+        title: "Whitechapel Gallery — Guardian coverage",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/art-and-photography/whitechapel-gallery",
+        title: "Whitechapel Gallery — Londonist",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Some shows are ticketed",
+        body: "The building is free, but the big headline exhibitions sometimes carry a charge. Check what's on before you make a special trip.",
+      },
+      {
+        label: "It's compact",
+        body: "A focused gallery, not a day-long national. Pair it with a Brick Lane / Spitalfields wander to fill the afternoon.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 23. Estorick Collection ──────────────────────────────────────────
+  {
+    slug: "estorick-collection",
+    searchQuery:
+      "Estorick Collection of Modern Italian Art 39a Canonbury Square Islington London",
+    neighbourhood: "Canonbury",
+    vibe: "Futurist Italian art in a quiet Georgian townhouse.",
+    longDescription:
+      "The UK's only gallery devoted to modern Italian art — Balla, Boccioni and the Futurists — tucked into a Georgian house on a leafy Canonbury square. Small, serene, with a lovely café and garden almost nobody knows about.",
+    type: "Culture",
+    price: "£",
+    timeOfDay: "Day",
+    moodTags: ["culture"],
+    vibeTags: ["Futurism", "Hidden gem", "Café & garden", "Small"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/art/estorick-collection-of-modern-italian-art",
+        title: "Estorick Collection — Time Out London",
+      },
+      {
+        publication: "Apollo Magazine",
+        url: "https://www.apollo-magazine.com/estorick-collection-modern-italian-art/",
+        title: "The Estorick Collection of Modern Italian Art",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/art-and-photography/estorick-collection",
+        title: "Estorick Collection — Londonist",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Limited opening days",
+        body: "Open Wed–Sun (closed Mon/Tue and between shows). Check it's open before trekking to Canonbury.",
+      },
+      {
+        label: "Niche by design",
+        body: "If Italian Futurism isn't your thing, it's a quick visit — but the café and garden make it a worthwhile slow stop.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 24. Columbia Road Flower Market ──────────────────────────────────
+  {
+    slug: "columbia-road-flower-market",
+    searchQuery: "Columbia Road Flower Market Bethnal Green London",
+    neighbourhood: "Columbia Road",
+    vibe: "Sunday-only flower riot, cockney barrow-boy soundtrack.",
+    longDescription:
+      "Every Sunday a narrow Victorian street erupts into a wall of blooms, with traders bellowing prices and the surrounding indie shops, cafés and a brass band doing the rest. Go early for calm, late for the knock-down armfuls of flowers.",
+    type: "Market",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Sunday only", "Flowers", "Free", "Indie shops"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/shopping/columbia-road-flower-market",
+        title: "Columbia Road Flower Market — Time Out London",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/markets/columbia-road-flower-market",
+        title: "Columbia Road Flower Market — Londonist",
+      },
+      {
+        publication: "Secret London",
+        url: "https://secretldn.com/columbia-road-flower-market/",
+        title: "Columbia Road Flower Market — Secret London",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Sundays only — that's it",
+        body: "The market runs Sunday roughly 8am–3pm and nothing else. Turn up any other day and it's just a (lovely) quiet street.",
+      },
+      {
+        label: "Go early or go late",
+        body: "Mid-morning it's shoulder-to-shoulder. Before 9am is calm; the last hour is when traders slash prices to clear stock.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 25. Netil Market ─────────────────────────────────────────────────
+  {
+    slug: "netil-market",
+    searchQuery: "Netil Market 13-23 Westgate Street London Fields London",
+    neighbourhood: "London Fields",
+    vibe: "Broadway Market's cooler, calmer little sibling.",
+    longDescription:
+      "A yard of indie traders, makers' studios and some of east London's best street food a minute from Broadway Market — but quieter, scrappier and more local. Home to The Dusty Knuckle's original container and a rooftop bar (Netil360) in season.",
+    type: "Market",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Makers", "Street food", "Saturdays", "Local"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/shopping/netil-market",
+        title: "Netil Market — Time Out London",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/food-and-drink/netil-market",
+        title: "Netil Market — Londonist",
+      },
+      {
+        publication: "Secret London",
+        url: "https://secretldn.com/netil-market-london-fields/",
+        title: "Netil Market, London Fields — Secret London",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Best on Saturdays",
+        body: "The full market — food stalls and most traders — peaks on Saturday. Weekdays are quieter with fewer stalls open.",
+      },
+      {
+        label: "Small and weather-exposed",
+        body: "It's a compact open yard. Brilliant in sun, less so in the rain — pair it with a Broadway Market loop.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 26. Maltby Street Market ─────────────────────────────────────────
+  {
+    slug: "maltby-street-market",
+    searchQuery: "Maltby Street Market Ropewalk Bermondsey London",
+    neighbourhood: "Bermondsey",
+    vibe: "Weekend food and drink under the Bermondsey railway arches.",
+    longDescription:
+      "The Ropewalk: a tight run of railway arches that fills at weekends with traders, natural-wine arches and some of the best street food south of the river — born as the low-key antidote to Borough Market's crowds. Eat, drink, repeat.",
+    type: "Market",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Weekends", "Street food", "Railway arches", "Natural wine"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/maltby-street-market",
+        title: "Maltby Street Market — Time Out London",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/food-and-drink/maltby-street-market",
+        title: "Maltby Street Market — Londonist",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/guides/best-restaurants-maltby-street-market",
+        title: "Where To Eat At Maltby Street Market",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Weekends only",
+        body: "Saturday and Sunday daytime is the market. Weekdays the arches are mostly shut (a few bars/producers aside).",
+      },
+      {
+        label: "Cash-lite, busy at lunch",
+        body: "Most traders are card now, but the arches get rammed 12–2pm. Go early or mid-afternoon for elbow room.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 27. Walthamstow Wetlands ─────────────────────────────────────────
+  {
+    slug: "walthamstow-wetlands",
+    searchQuery: "Walthamstow Wetlands 2 Forest Road Walthamstow London",
+    neighbourhood: "Walthamstow",
+    vibe: "Europe's largest urban wetland — herons, reservoirs, big skies.",
+    longDescription:
+      "Ten working reservoirs turned into a free nature reserve in 2017 — 211 hectares of water, reedbeds and birdlife (herons, kingfishers, cormorants) a few minutes from the Tube. A proper lungful of wild within Zone 3, with a café in the old Engine House.",
+    type: "Outdoors",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Free", "Nature reserve", "Birdwatching", "Big skies"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/things-to-do/walthamstow-wetlands",
+        title: "Walthamstow Wetlands — Time Out London",
+      },
+      {
+        publication: "The Guardian",
+        url: "https://www.theguardian.com/travel/2017/oct/20/walthamstow-wetlands-london-europe-largest-urban-wetland-nature-reserve",
+        title: "Walthamstow Wetlands: Europe's largest urban wetland opens",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/great-outdoors/walthamstow-wetlands",
+        title: "Walthamstow Wetlands — Londonist",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Free entry, paid parking",
+        body: "Entry and the reserve are free; the car park is not, and it's a working water site — stick to the paths and the posted closing time.",
+      },
+      {
+        label: "Exposed — dress for it",
+        body: "It's open water and reedbed with little shelter. Brilliant on a clear day, bleak in driving rain; bring layers.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 28. Crossbones Garden ────────────────────────────────────────────
+  {
+    slug: "crossbones-garden",
+    searchQuery: "Crossbones Garden Redcross Way Southwark London",
+    neighbourhood: "Borough",
+    vibe: "A volunteer-tended memorial garden on a medieval outcasts' graveyard.",
+    longDescription:
+      "A pocket of green on Redcross Way built over an unconsecrated burial ground for the 'Winchester Geese' — the medieval sex workers and paupers of Southwark. Ribbons on the gates, a shrine, and a quiet that feels nothing like the Borough bustle a block away.",
+    type: "Outdoors",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Free", "Memorial garden", "Hidden", "Volunteer-run"],
+    editorialSources: [
+      {
+        publication: "Atlas Obscura",
+        url: "https://www.atlasobscura.com/places/crossbones-graveyard",
+        title: "Crossbones Graveyard — Atlas Obscura",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/history/crossbones-graveyard",
+        title: "Crossbones Graveyard — Londonist",
+      },
+      {
+        publication: "The Guardian",
+        url: "https://www.theguardian.com/cities/2015/jul/15/crossbones-graveyard-london-outcasts-dead",
+        title: "Crossbones graveyard: a shrine to London's outcast dead",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Restricted opening hours",
+        body: "Run by volunteers (Bankside Open Spaces Trust) — open limited daytime hours, not always weekends. Check before you go or you'll only see the ribboned gates.",
+      },
+      {
+        label: "Small and reflective",
+        body: "It's a tiny memorial garden, a 10–15 minute stop, not a park to picnic in. Go for the atmosphere and the story.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 29. Brockwell Lido ───────────────────────────────────────────────
+  {
+    slug: "brockwell-lido",
+    searchQuery: "Brockwell Lido Dulwich Road Herne Hill London",
+    neighbourhood: "Herne Hill",
+    vibe: "1937 art-deco open-air pool on the edge of Brockwell Park.",
+    longDescription:
+      "A Grade II-listed art-deco lido ('Brixton Beach' to locals) on the edge of Brockwell Park — 50m of open-air water, a sun terrace and a proper café. Heated and open year-round for swimmers, with a gym and spa attached.",
+    type: "Outdoors",
+    price: "£",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Lido", "Art deco", "Open-air swim", "Brockwell Park"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/sport-and-fitness/brockwell-lido",
+        title: "Brockwell Lido — Time Out London",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/lidos/brockwell-lido",
+        title: "Brockwell Lido — Londonist",
+      },
+      {
+        publication: "Secret London",
+        url: "https://secretldn.com/brockwell-lido-herne-hill/",
+        title: "Brockwell Lido, Herne Hill — Secret London",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Booking + session times",
+        body: "Swimming runs in timed sessions you usually need to book ahead, and it gets busy in summer — check the schedule before you turn up with a towel.",
+      },
+      {
+        label: "It's a swim, not just a sit",
+        body: "The pool charges an entry fee; lounging on the terrace and the café are the free-ish bit. Bring kit if you actually want to get in.",
+      },
+    ],
+    skipProspect: true,
   },
 ];
 
