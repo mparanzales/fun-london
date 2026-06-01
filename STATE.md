@@ -1,7 +1,8 @@
 # Fun London — State Snapshot
 
-**Last updated:** 2026-05-31 (PT v2 multiplayer + mood swipe-deck +
-autonomous discovery robot live; catalog at 27 venues)
+**Last updated:** 2026-06-01 (mood-deck Phase A/B verified live in-browser;
+time-of-day relabelled Morning/Afternoon/Night; discovery robot now hunts
+day-spots; catalog at 27 venues)
 **Branch state:** Phases 1 + 2 + 3 + 3.5 + 4 + 4.5 + Stage 3 ingestion +
 Batch 2 + Phase 5 Tiers 1/2/3 + Google sign-in + **Plan Together v2
 (real multiplayer over Supabase Realtime)** + **mood swipe-deck** all
@@ -23,17 +24,26 @@ merged to `main` (HEAD `e2da7a0`) and live. **The catalog is real
   proximity-first **walkable** plan engine (`computeWalkablePlan`), host
   settings (calendar date-picker + region chips incl. West/North), per-stop
   Swap, and a "Try a different mix" whole-plan reshuffle.
-- **Mood swipe-deck** (`lib/plan-together-moods.ts`): the swipe step is now
-  a deck of *mood* cards that changes by time of day (Morning / Afternoon /
+- **Mood swipe-deck** (`lib/plan-together-moods.ts`): the swipe step is a
+  deck of *mood* cards that changes by time of day (Morning / Afternoon /
   Night); each hearted mood feeds the planner a per-role venue-type intent
   (`RoleIntent` / `roleMatchesIntent` in `lib/plan-engine.ts`) so the night
-  matches the mood (cosy wine → a wine bar). NIGHT deck is fully stocked.
-  **Phase C still pending:** the Morning/Afternoon decks lean on Culture /
-  Market / Outdoors venue types — catalog has ZERO of those today, so day
-  decks won't feel real until we ingest day-spots. Also relabel the
-  settings time-of-day chips Day/Evening/Night → Morning/Afternoon/Night.
-  Live browser swipe-through still to be done (gates pass; see
-  PLAN-mood-deck.md).
+  matches the mood (cosy wine → a wine bar). **Verified live end-to-end
+  (2026-06-01):** lobby → settings → swipe the Night deck → walkable 3-stop
+  result (Sabor → The French House → Ronnie Scott's) + "try a different mix".
+  **Done 2026-06-01 (closed out Phase C):**
+  (1) settings time-of-day chips relabelled Day/Evening/Night →
+  **Morning / Afternoon / Night** (hours 10/14/20; `deckTimeFromTimeOfDay`
+  now maps 1:1 with a Night default for "now" rooms; `PlanWhen.timeOfDay`
+  union updated in `room.ts`).
+  (2) discovery robot (`scripts/discover-venues.ts`) now also hunts
+  **Culture / Market / Outdoors** day-spots — lenient day-type gates (no
+  chain check, review bar 150, website optional, Outdoors needs 1 source
+  not 2, +Londonist / Secret London as trusted day-spot sources). The
+  Morning/Afternoon decks will fill as the 4-hourly cron publishes day-spots;
+  until then they show thin (graceful — `pickQuestionVenues` falls back).
+  Also fixed a **dev-only React StrictMode bug** in `together-flow.tsx` where
+  the room creator was misread as a guest (init now runs once via a guard).
 
 • **Phase 1** — catalog reads from Supabase via Server Components in
   `lib/queries.ts`.

@@ -9,10 +9,10 @@ import { REGIONS, type PlanArea, type Region } from "@/lib/regions";
 import type { PlanBudget } from "@/lib/plan-engine";
 import type { PlanWhen, Room, RoomSettings } from "@/lib/realtime/room";
 
-const TOD_HOUR: Record<"Day" | "Evening" | "Night", number> = {
-  Day: 14,
-  Evening: 19,
-  Night: 23,
+const TOD_HOUR: Record<"Morning" | "Afternoon" | "Night", number> = {
+  Morning: 10,
+  Afternoon: 14,
+  Night: 20,
 };
 
 export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
@@ -24,7 +24,7 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
 
   const [mode, setMode] = useState<"now" | "later">("now");
   const [dateStr, setDateStr] = useState(todayStr);
-  const [tod, setTod] = useState<"Day" | "Evening" | "Night">("Evening");
+  const [tod, setTod] = useState<"Morning" | "Afternoon" | "Night">("Night");
   const [area, setArea] = useState<PlanArea>({ kind: "anywhere" });
   const [budget, setBudget] = useState<PlanBudget>("Any");
   const [groupSize, setGroupSize] = useState(Math.max(2, room.members.length));
@@ -101,13 +101,9 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
               className="w-full h-11 rounded-xl bg-card border border-border px-3 text-fg text-[14px] mb-2"
             />
             <div className="flex gap-1.5">
-              {(["Day", "Evening", "Night"] as const).map((t) => (
+              {(["Morning", "Afternoon", "Night"] as const).map((t) => (
                 <Chip key={t} on={tod === t} onClick={() => setTod(t)} small>
-                  {t === "Day"
-                    ? "Daytime"
-                    : t === "Evening"
-                      ? "Evening"
-                      : "Late"}
+                  {t}
                 </Chip>
               ))}
             </div>

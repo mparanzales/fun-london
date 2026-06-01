@@ -33,7 +33,7 @@ export type PlanWhen =
       kind: "scheduled";
       at: number;
       day: number;
-      timeOfDay: "Day" | "Evening" | "Night";
+      timeOfDay: "Morning" | "Afternoon" | "Night";
     };
 
 export type RoomSettings = {
