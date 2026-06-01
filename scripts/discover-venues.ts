@@ -37,7 +37,11 @@ import {
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
-const TARGET = limitArg ? Number(limitArg.split("=")[1]) : 10;
+// Default target per run is small (3) on purpose: the cron fires 6x/day, so a
+// modest per-run target lets venues TRICKLE through the day instead of one run
+// draining the Gemini free DAILY quota and leaving the later 5 runs to 429.
+// Override with --limit=N for a manual catch-up run.
+const TARGET = limitArg ? Number(limitArg.split("=")[1]) : 3;
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -406,77 +410,71 @@ type Editorial = {
   critical_flags: { label: string; body: string }[];
 };
 
-// Ask Gemini to write the brand-voice editorial + Real Talk.
-async function writeEditorial(
+// Editorial WITHOUT a Gemini call — templated from the data we already have
+// (type, area, the trusted sources that validated the venue, day-vs-night).
+//
+// Why: the robot used to make 3 Gemini calls per venue (validate sources,
+// write editorial, find booking link). On the free tier that drained the
+// daily quota after a couple of venues and the rest of the day 429'd. The
+// booking-link call was also dead (the row uses detectBookingLinks() from the
+// website directly). So we keep ONLY the source-validation Gemini call — the
+// integrity gate that can't be faked — and template the prose. Net: 3 → 1
+// Gemini calls per venue, ~3x more venues under the same free quota.
+//
+// Trade-off: these blurbs are competent and honest but not the full "brat"
+// voice. When on paid Gemini (or for a hand-polish pass) the richer editorial
+// can be layered back on; this just guarantees something publishable for free.
+// A natural-English noun for each venue type ("Outdoors" → "green space", not
+// "an outdoors"), with its article. Keeps the templated prose readable.
+const TYPE_NOUN: Record<VenueType, { article: string; noun: string }> = {
+  Restaurant: { article: "a", noun: "restaurant" },
+  Cafe: { article: "a", noun: "café" },
+  Bar: { article: "a", noun: "bar" },
+  "Wine Bar": { article: "a", noun: "wine bar" },
+  Pub: { article: "a", noun: "pub" },
+  "Listening Bar": { article: "a", noun: "listening bar" },
+  "Live Music": { article: "a", noun: "live-music spot" },
+  Culture: { article: "a", noun: "cultural spot" },
+  Market: { article: "a", noun: "market" },
+  Outdoors: { article: "an", noun: "outdoor spot" },
+};
+
+function templateEditorial(
   name: string,
   type: VenueType,
   area: string,
   sources: Source[],
-): Promise<Editorial | null> {
-  const prompt =
-    `You are the editorial voice of Fun London — a curated London going-out ` +
-    `guide. Voice: cool, gen-z, "brat", confident and honest — the good AND ` +
-    `the bad, never fawning, never corporate.\n\n` +
-    `Write a short editorial for the ${type.toLowerCase()} "${name}" in ${area}, ` +
-    `London. It is covered by: ${sources.map((s) => s.publication).join(", ")}. ` +
-    `Use what you know from those reviews.\n\n` +
-    `Return JSON with exactly these keys:\n` +
-    `- "vibe": a punchy one-line tagline (max ~8 words)\n` +
-    `- "long_description": 2-3 sentences, the honest lowdown incl. one real ` +
-    `downside or watch-out\n` +
-    `- "critical_flags": array of 1-2 {"label","body"} "Real Talk" notes ` +
-    `(queues, no-bookings, loud, pricey, events-only, etc.) — label ~4 words, ` +
-    `body one sentence.`;
-  const res = await geminiFetch({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: "application/json" },
-  });
-  if (!res.ok) throw new Error(`Gemini editorial ${res.status}`);
-  const data = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const text =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
-    "";
-  const parsed = extractJson(text) as Editorial | null;
-  if (!parsed || !parsed.vibe || !parsed.long_description) return null;
-  if (!Array.isArray(parsed.critical_flags)) parsed.critical_flags = [];
-  return parsed;
-}
+  isDay: boolean,
+): Editorial {
+  const { article, noun } = TYPE_NOUN[type] ?? { article: "a", noun: "spot" };
+  const pubs = sources.map((s) => s.publication);
+  const pubList =
+    pubs.length <= 1
+      ? pubs[0]
+      : `${pubs.slice(0, -1).join(", ")} and ${pubs[pubs.length - 1]}`;
 
-// Ask Gemini (with Google Search) for the venue's OpenTable / Resy /
-// SevenRooms reservation URL, so Reserve can pre-fill date/time/party.
-async function findBookingLink(
-  name: string,
-  area: string,
-): Promise<{ platform: BookingLink["platform"]; url: string } | null> {
-  const prompt =
-    `Using Google Search, find the direct online reservation page for the ` +
-    `London venue "${name}" in ${area} on OpenTable, Resy, or SevenRooms. ` +
-    `Reply ONLY with the single reservation URL, or "none".`;
-  try {
-    const res = await geminiFetch({
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const text =
-      data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ??
-      "";
-    const m = text.match(/https?:\/\/[^\s"')]+/);
-    if (!m) return null;
-    const url = m[0].replace(/[.,)]+$/, "");
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    if (host.includes("opentable")) return { platform: "opentable", url };
-    if (host.includes("resy")) return { platform: "resy", url };
-    if (host.includes("sevenrooms")) return { platform: "sevenrooms", url };
-    return null;
-  } catch {
-    return null;
-  }
+  const vibe = `${area}'s own — ${article} ${noun} the critics keep coming back to.`;
+
+  const long_description =
+    `An independent ${noun} in ${area} that earned its place the honest way: ` +
+    `cross-checked across ${pubs.length} trusted source${pubs.length === 1 ? "" : "s"} ` +
+    `(${pubList}). Worth the trip if you want the real ${area} — not the chain on the high street.`;
+
+  const critical_flags = isDay
+    ? [
+        {
+          label: "Check times before you go",
+          body: `Opening days and hours for ${name} vary by season — confirm on the day so you're not caught out.`,
+        },
+      ]
+    : [
+        {
+          label: "Independent — plan ahead",
+          body: `Small, owner-run ${noun} — booking, hours and walk-in policy vary, so check ahead, especially at weekends.`,
+        },
+      ];
+
+  return { vibe, long_description, critical_flags };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -632,36 +630,11 @@ async function main() {
         continue;
       }
 
-      // Editorial.
-      let editorial: Editorial | null = null;
-      try {
-        editorial = await writeEditorial(name, cat.type, area, sources);
-      } catch (e) {
-        console.error(`  ✗ editorial ${name}: ${(e as Error).message}`);
-        continue;
-      }
-      if (!editorial) {
-        console.log(`  ✗ ${name}: editorial generation failed`);
-        continue;
-      }
-
-      // Best booking link (OpenTable/Resy for pre-fill) + website fallback.
-      // Day-spots aren't reservable — skip the lookup.
-      const found = isDay ? null : await findBookingLink(name, area);
-      const bookingLinks: BookingLink[] = found
-        ? [
-            { platform: found.platform, url: found.url, priority: 1 },
-            ...(p.websiteUri
-              ? [
-                  {
-                    platform: "website" as const,
-                    url: p.websiteUri,
-                    priority: 99,
-                  },
-                ]
-              : []),
-          ]
-        : detectBookingLinks(p.websiteUri);
+      // Editorial — templated from the venue + its validated sources (no
+      // Gemini call). See templateEditorial: keeps the robot to ONE Gemini
+      // call per venue (source validation only) so the free daily quota
+      // stretches ~3x further.
+      const editorial = templateEditorial(name, cat.type, area, sources, isDay);
 
       // Unique slug.
       let slug = slugify(name);
