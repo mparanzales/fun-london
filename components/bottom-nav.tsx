@@ -22,15 +22,37 @@ export function BottomNav() {
             <Link
               key={tab.href}
               href={tab.href}
+              aria-current={active ? "page" : undefined}
               className={cn(
-                "flex flex-col items-center gap-0.5 py-1.5 rounded-xl transition",
-                active ? "text-accent" : "text-muted-fg",
+                // Tactile press: a quick scale-down on tap (active:) gives the
+                // tab a physical, button-like response. Colour + transform ease
+                // with the shared editorial curve.
+                "group relative flex flex-col items-center gap-0.5 py-1.5 rounded-xl",
+                "transition-[color,transform] duration-200 ease-out active:scale-90",
+                active ? "text-accent" : "text-muted-fg hover:text-fg",
               )}
             >
-              <Icon name={tab.icon} active={active} />
+              {/* Soft active pill — fades/scales in behind the active tab. */}
+              <span
+                aria-hidden
+                className={cn(
+                  "pointer-events-none absolute inset-x-2 inset-y-0.5 -z-10 rounded-xl bg-accent/10",
+                  "transition-[opacity,transform] duration-300 ease-out",
+                  active ? "opacity-100 scale-100" : "opacity-0 scale-90",
+                )}
+              />
+              {/* Icon lifts slightly when active for a confident, settled feel. */}
               <span
                 className={cn(
-                  "text-[10px] font-semibold",
+                  "transition-transform duration-300 ease-out",
+                  active ? "-translate-y-0.5 scale-110" : "scale-100",
+                )}
+              >
+                <Icon name={tab.icon} active={active} />
+              </span>
+              <span
+                className={cn(
+                  "text-[10px] font-semibold transition-[font-weight]",
                   active && "font-bold",
                 )}
               >
