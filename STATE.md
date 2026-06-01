@@ -2,12 +2,13 @@
 
 **Last updated:** 2026-06-01 (mood-deck Phase A/B verified live in-browser;
 time-of-day relabelled Morning/Afternoon/Night; discovery robot now hunts
-day-spots; catalog at 27 venues)
+day-spots + tuned for the free tier; chain detection fixed; catalog at
+39 venues)
 **Branch state:** Phases 1 + 2 + 3 + 3.5 + 4 + 4.5 + Stage 3 ingestion +
 Batch 2 + Phase 5 Tiers 1/2/3 + Google sign-in + **Plan Together v2
 (real multiplayer over Supabase Realtime)** + **mood swipe-deck** all
 merged to `main` (HEAD `e2da7a0`) and live. **The catalog is real
-(27 venues), self-maintaining, AND auto-growing via the discovery robot.**
+(39 venues), self-maintaining, AND auto-growing via the discovery robot.**
 
 ## What's new since 2026-05-28 (the 2026-05-30/31 work)
 
@@ -192,9 +193,10 @@ original demo venues (Bao Soho, Dishoom, etc.) remain in the DB so
 saved/bookings FKs stay valid, but `fetchVenues()` filters to
 `google_place_id IS NOT NULL` so they're hidden from the catalog.
 
-**Type distribution (2026-06-01, 29 venues):**
-13 Restaurants · 5 Pubs · 4 Culture · 3 Wine Bars · 3 Markets · 3 Outdoors ·
-2 Bars · 2 Live Music · 2 Cafes.
+**Type distribution (2026-06-01, 39 venues live):**
+13 Restaurants · 5 Pubs · 4 Culture · 4 Bars · 3 Wine Bars · 3 Markets ·
+3 Outdoors · 2 Live Music · 2 Cafes. (Count is the live DB, not the seed
+file — the robot adds beyond the 29-row seed.)
 **Day-spots seeded 2026-06-01** — 10 hand-curated, manually-validated
 (by Claude via web search, NOT Gemini) Culture/Market/Outdoors venues added
 via `scripts/venues-seed.ts` + `pnpm ingest` to fill the mood-deck's
@@ -206,6 +208,29 @@ booking-partner targets, so partner_prospects stays at the 19 food/drink
 venues). Afternoon deck verified live (long lunch → Whitechapel Gallery →
 Crossbones Garden). Day-spots are still sparse per-area, so walkable
 clustering is loose until the robot adds more.
+
+**Discovery robot — chain fix + free-tier tuning (2026-06-01).** Three
+changes after Maria caught a chain in the catalog and asked why the robot
+only banks a handful/day:
+- **Chain detection fixed** (`londonLocationCount`): it searched the venue's
+  FULL Google name ("Be At One - Farringdon London") which returns only that
+  one outlet, so 15-branch chains read as 1-location indies. Now strips the
+  branch suffix to the BRAND ("be at one"), searches that, counts branches;
+  threshold 6 → 4. Verified live: "be at one" → 15 (rejected); Brawn/40
+  Maltby/Dishoom/Soane's all stay clean. The already-published **Be At One
+  Farringdon row was deleted from the DB** (catalog 40 → 39).
+- **Gemini calls 3 → 1 per venue:** editorial is now TEMPLATED from the
+  venue + its validated sources (no AI call); the dead booking-link AI call
+  was removed; only the 2-source validation call remains. Templated blurbs
+  are honest-but-plain — richer "brat" editorial can layer back on with paid
+  Gemini or a hand pass.
+- **Per-run target 10 → 3** + **throttle (≥4.5s gap) & retry on 429/503**
+  (`geminiFetch`). The cron fires 6×/4h; small target + pacing lets venues
+  trickle through the day instead of one run draining the free DAILY quota
+  and the rest 429ing (root cause of "only 3 all day"). NOTE: the free
+  *daily* cap is the real ceiling — the genuine throughput unlock is
+  pay-as-you-go Gemini **Flash** (cents, NOT Pro), deferred until launch per
+  Maria. Verify tomorrow's first cron run on fresh quota.
 
 ## Real Talk UI
 
