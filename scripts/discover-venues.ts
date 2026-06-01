@@ -70,7 +70,7 @@ const supabase =
 
 const MIN_RATING = 4.4;
 const MIN_REVIEWS = 400;
-const CHAIN_LOCATIONS = 6; // >= this many London locations of the name = chain
+const CHAIN_LOCATIONS = 4; // >= this many London outlets of the BRAND = chain
 const MAX_SCAN_PER_RUN = 60; // bound API usage: stop after examining this many
 const REQUIRED_SOURCES = 2;
 const MIN_REVIEWS_DAY = 150; // galleries/markets draw fewer reviews than food
@@ -259,16 +259,39 @@ const DISCOVERY_FIELDS = [
   "places.regularOpeningHours",
 ].join(",");
 
-// Count distinct London locations of a venue name → chain heuristic.
+// Normalise a place name to lowercase alphanumerics (single-spaced).
+function normName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// The BRAND part of a venue name — strip any branch/location suffix that
+// follows a separator ("Be At One - Farringdon" → "be at one", "Dishoom |
+// Shoreditch" → "dishoom", "Forza Wine (Peckham)" → "forza wine"). Searching
+// the brand (not the branch-specific name) is what makes the chain count
+// honest: the old code searched the full "…- Farringdon London" string, which
+// only returned that single outlet, so big chains read as 1-location indies.
+function brandKey(name: string): string {
+  const base = name.split(/\s[-–—|@:]\s|\s\(/)[0];
+  return normName(base);
+}
+
+// Count London outlets that share a venue's brand → chain heuristic. Searches
+// the brand and counts results whose name starts with that brand, so all of a
+// chain's branches collapse together. Capped at the API's 20-result page, which
+// is plenty above the CHAIN_LOCATIONS threshold.
 async function londonLocationCount(name: string): Promise<number> {
   try {
+    const brand = brandKey(name);
+    if (!brand) return 1;
     const places = await searchPlaces(
-      `${name} London`,
+      `${brand} London`,
       "places.id,places.displayName",
     );
-    const firstWord = name.toLowerCase().split(" ")[0];
     const matches = places.filter((p) =>
-      (p.displayName?.text ?? "").toLowerCase().includes(firstWord),
+      normName(p.displayName?.text ?? "").startsWith(brand),
     );
     return matches.length;
   } catch {
