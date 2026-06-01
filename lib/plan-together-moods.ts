@@ -14,9 +14,8 @@
 import type { PlanRole } from "@/lib/plan-engine";
 import type { VenueType } from "@/lib/types";
 
-// The group's meeting window. the maintainer's mental model is Morning / Afternoon /
-// Night (the current engine/settings still uses Day / Evening / Night — Phase C
-// relabels those; `deckTimeFromTimeOfDay` bridges the two until then).
+// The group's meeting window — Morning / Afternoon / Night, set by the host on
+// the settings step. Drives which deck the group swipes.
 export type DeckTime = "Morning" | "Afternoon" | "Night";
 
 export interface Mood {
@@ -172,20 +171,10 @@ export const DECKS: Record<DeckTime, Mood[]> = {
   ],
 };
 
-// Bridge the engine's current TimeOfDay ("Day" | "Evening" | "Night") to a
-// deck until Phase C relabels the settings step to Morning / Afternoon / Night.
-export function deckTimeFromTimeOfDay(
-  tod: "Day" | "Evening" | "Night" | undefined,
-): DeckTime {
-  switch (tod) {
-    case "Day":
-      return "Afternoon";
-    case "Night":
-      return "Night";
-    default:
-      // "Evening" (the default) leans to the night deck.
-      return "Night";
-  }
+// The deck for a meeting window. "now" rooms carry no time-of-day, so default
+// to the (best-stocked) Night deck.
+export function deckTimeFromTimeOfDay(tod: DeckTime | undefined): DeckTime {
+  return tod ?? "Night";
 }
 
 // Roles, in walking order — re-exported so the swipe/result steps don't have to

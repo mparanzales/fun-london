@@ -73,6 +73,7 @@ const MIN_REVIEWS = 400;
 const CHAIN_LOCATIONS = 6; // >= this many London locations of the name = chain
 const MAX_SCAN_PER_RUN = 60; // bound API usage: stop after examining this many
 const REQUIRED_SOURCES = 2;
+const MIN_REVIEWS_DAY = 150; // galleries/markets draw fewer reviews than food
 
 const NEIGHBOURHOODS = [
   "Soho",
@@ -98,6 +99,9 @@ type Category = {
   type: VenueType;
   moods: Mood[];
   timeOfDay: "Day" | "Evening" | "Night";
+  // Day-spots (Culture / Market / Outdoors): not reservable, often no website,
+  // not franchise chains. Relaxes the food/drink-tuned gates below.
+  dayType?: boolean;
 };
 
 const CATEGORIES: Category[] = [
@@ -126,6 +130,29 @@ const CATEGORIES: Category[] = [
     timeOfDay: "Day",
   },
   { keyword: "gastropub", type: "Pub", moods: ["drinks"], timeOfDay: "Night" },
+  // Day-spots — fill the Morning/Afternoon mood decks (Culture/Market/Outdoors,
+  // which the catalog currently has zero of).
+  {
+    keyword: "independent art gallery",
+    type: "Culture",
+    moods: ["culture"],
+    timeOfDay: "Day",
+    dayType: true,
+  },
+  {
+    keyword: "food market",
+    type: "Market",
+    moods: ["activity"],
+    timeOfDay: "Day",
+    dayType: true,
+  },
+  {
+    keyword: "park",
+    type: "Outdoors",
+    moods: ["activity"],
+    timeOfDay: "Day",
+    dayType: true,
+  },
 ];
 
 // The trusted publications that count toward the 2-source gate.
@@ -143,6 +170,9 @@ const TRUSTED_PUBLICATIONS = [
   "The Guardian",
   "Foodism",
   "World's 50 Best",
+  // Strong on day-spots (galleries, markets, parks).
+  "Londonist",
+  "Secret London",
 ];
 
 const ALLOWED_TYPES = new Set([
@@ -155,6 +185,14 @@ const ALLOWED_TYPES = new Set([
   "fine_dining_restaurant",
   "bakery",
   "brunch_restaurant",
+  // Day-spots (used leniently — see typesOk).
+  "art_gallery",
+  "museum",
+  "tourist_attraction",
+  "market",
+  "park",
+  "national_park",
+  "garden",
 ]);
 const REJECT_TYPES = new Set([
   "fast_food_restaurant",
@@ -409,9 +447,23 @@ function priceFromLevel(level: string | undefined): "£" | "££" | "£££" {
   }
 }
 
-function typesOk(types: string[] | undefined): boolean {
+function typesOk(types: string[] | undefined, venueType?: VenueType): boolean {
   if (!types) return false;
-  if (types.some((t) => REJECT_TYPES.has(t))) return false;
+  const isDay =
+    venueType === "Culture" ||
+    venueType === "Market" ||
+    venueType === "Outdoors";
+  // Markets frequently tag as shopping_mall — don't reject that when hunting
+  // markets specifically.
+  const reject =
+    venueType === "Market"
+      ? new Set([...REJECT_TYPES].filter((t) => t !== "shopping_mall"))
+      : REJECT_TYPES;
+  if (types.some((t) => reject.has(t))) return false;
+  // Day-spots: Places types for galleries/markets/parks are inconsistent and
+  // the keyword search already targets the right kind, so accept anything not
+  // explicitly rejected. Food/drink still must match an allowed type.
+  if (isDay) return true;
   return types.some((t) => ALLOWED_TYPES.has(t));
 }
 
@@ -479,28 +531,37 @@ async function main() {
       if (!name || !p.id || seen.has(p.id) || existingPlaceIds.has(p.id))
         continue;
 
-      // Cheap pre-filter before any expensive calls.
+      // Cheap pre-filter before any expensive calls. Day-spots (galleries,
+      // markets, parks) get a lower review bar and may have no website.
+      const isDay = cat.dayType === true;
+      const minReviews = isDay ? MIN_REVIEWS_DAY : MIN_REVIEWS;
       if (
         p.businessStatus !== "OPERATIONAL" ||
         (p.rating ?? 0) < MIN_RATING ||
-        (p.userRatingCount ?? 0) < MIN_REVIEWS ||
-        !p.websiteUri ||
-        !typesOk(p.types)
+        (p.userRatingCount ?? 0) < minReviews ||
+        (!isDay && !p.websiteUri) ||
+        !typesOk(p.types, cat.type)
       ) {
         continue;
       }
       seen.add(p.id);
       scanned++;
 
-      // Chain check (location count).
-      const locations = await londonLocationCount(name);
-      if (locations >= CHAIN_LOCATIONS) {
-        console.log(`  ⊘ chain (${locations} locations): ${name}`);
-        continue;
+      // Chain check (location count) — skip for day-spots: parks/markets/
+      // galleries aren't franchise chains, and name-word counting false-flags
+      // generically-named ones (e.g. "Victoria Park").
+      if (!isDay) {
+        const locations = await londonLocationCount(name);
+        if (locations >= CHAIN_LOCATIONS) {
+          console.log(`  ⊘ chain (${locations} locations): ${name}`);
+          continue;
+        }
+        await sleep(150);
       }
-      await sleep(150);
 
-      // 2-source validation via Gemini + Google Search.
+      // Source validation via Gemini + Google Search. Outdoors (parks/lidos)
+      // rarely get formal reviews, so 1 trusted listing is enough there;
+      // food, drink, culture and markets still need 2.
       let sources: Source[] = [];
       try {
         sources = await validateSources(name, area);
@@ -508,8 +569,11 @@ async function main() {
         console.error(`  ✗ validate ${name}: ${(e as Error).message}`);
         continue;
       }
-      if (sources.length < REQUIRED_SOURCES) {
-        console.log(`  ✗ ${name}: only ${sources.length} source(s)`);
+      const requiredSources = cat.type === "Outdoors" ? 1 : REQUIRED_SOURCES;
+      if (sources.length < requiredSources) {
+        console.log(
+          `  ✗ ${name}: only ${sources.length}/${requiredSources} source(s)`,
+        );
         continue;
       }
 
@@ -527,7 +591,8 @@ async function main() {
       }
 
       // Best booking link (OpenTable/Resy for pre-fill) + website fallback.
-      const found = await findBookingLink(name, area);
+      // Day-spots aren't reservable — skip the lookup.
+      const found = isDay ? null : await findBookingLink(name, area);
       const bookingLinks: BookingLink[] = found
         ? [
             { platform: found.platform, url: found.url, priority: 1 },
@@ -559,7 +624,7 @@ async function main() {
         address: p.formattedAddress ?? `${area}, London`,
         lat: p.location?.latitude ?? null,
         lng: p.location?.longitude ?? null,
-        price: priceFromLevel(p.priceLevel),
+        price: isDay && !p.priceLevel ? "Free" : priceFromLevel(p.priceLevel),
         time_of_day: cat.timeOfDay,
         rating: p.rating ?? MIN_RATING,
         review_count: p.userRatingCount ?? 0,

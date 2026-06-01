@@ -36,8 +36,16 @@ export function TogetherFlow({
   const codeRef = useRef<string>("");
   const meRef = useRef<Member | null>(null);
   const isHostRef = useRef(false);
+  const initedRef = useRef(false);
 
   useEffect(() => {
+    // Resolve identity + host flag exactly once. React StrictMode (dev)
+    // double-invokes this effect; on the second pass the room code is already
+    // in the URL, which would otherwise read `existing` as set and flip the
+    // creator from host → guest. The guard keeps the first decision stable
+    // (and makes us resilient to any later remount).
+    if (initedRef.current) return;
+    initedRef.current = true;
     const existing = new URLSearchParams(window.location.search).get("room");
     const code = existing ?? randomRoomCode();
     if (!existing) {
