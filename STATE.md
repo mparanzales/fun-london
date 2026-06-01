@@ -25,9 +25,19 @@
      fallback that works without this.
   3. **Vercel Deployment Protection** — confirm OFF for the custom domain so
      testers reach it without an SSO wall (www currently loads fine, so likely OK).
-- **Supabase Security Advisor (2026-06-01): 3 warnings** to harden before launch —
-  2× SECURITY DEFINER on `public.pending_candidates_touch()` (Claude can fix in DB)
-  + "Leaked Password Protection disabled" (one toggle in Auth settings).
+- **Supabase Security Advisor (2026-06-01): 4 of 5 FIXED.**
+  ✅ Revoked anon/authenticated EXECUTE on SECURITY DEFINER
+  `public.pending_candidates_touch()` (migration `lock_down_pending_candidates_touch`)
+  — trigger still fires; just closed the public RPC hole.
+  ✅ Added explicit deny-all RLS policies + table comments on
+  `partner_prospects` + `pending_candidates` (migration
+  `document_internal_table_rls_lockdown`) — silences the "RLS enabled no
+  policy" INFO items; they were already deny-all-by-default, now explicit.
+  🔲 **LAST ONE — only a dashboard toggle (Maria must click):** "Leaked
+  Password Protection Disabled" → Supabase Dashboard → Authentication →
+  Policies/Settings → enable "Leaked password protection" (checks new
+  passwords against HaveIBeenPwned). Low priority — only affects
+  email/password signups; your users sign in with Google/magic-link.
 
 **Last updated:** 2026-06-01 (mood-deck Phase A/B verified live in-browser;
 time-of-day relabelled Morning/Afternoon/Night; discovery robot now hunts
