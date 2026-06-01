@@ -60,3 +60,57 @@ html, body {
 /* Scrollable rails — hide scrollbar */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+
+/* ── Motion ────────────────────────────────────────────────────────────
+   "Editorial & smooth": a single, fast, ease-OUT fade-and-rise applied to
+   page content as each route settles in. Premium motion is quick (≈320ms)
+   with a soft landing — never slow, never linear. One shared easing token
+   keeps every animation feeling like the same hand drew it. */
+:root {
+  --fl-ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* gentle, confident settle */
+  --fl-dur: 320ms;
+}
+
+@keyframes fl-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Page-content entrance. Keyed on the route (see PageTransition) so it
+   replays on every navigation. */
+.fl-page {
+  animation: fl-rise var(--fl-dur) var(--fl-ease-out) both;
+}
+
+/* Optional per-item stagger for feed/list children: add `fl-stagger` to a
+   container and items rise in sequence. Capped so long lists don't crawl. */
+.fl-stagger > * {
+  animation: fl-rise var(--fl-dur) var(--fl-ease-out) both;
+}
+.fl-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.fl-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.fl-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.fl-stagger > *:nth-child(4) { animation-delay: 120ms; }
+.fl-stagger > *:nth-child(5) { animation-delay: 160ms; }
+.fl-stagger > *:nth-child(6) { animation-delay: 200ms; }
+.fl-stagger > *:nth-child(n + 7) { animation-delay: 240ms; }
+
+/* Accessibility: anyone with "Reduce Motion" set gets instant, still pages.
+   This is a hallmark of a properly-built premium app — motion is a treat,
+   never a barrier. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
