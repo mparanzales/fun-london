@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { SavedProvider } from "@/components/saved-context";
 import { BookingsProvider } from "@/components/bookings-context";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -67,6 +68,7 @@ export default async function RootLayout({
           </BookingsProvider>
         </SavedProvider>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
