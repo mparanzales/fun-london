@@ -1,5 +1,30 @@
 # Fun London — State Snapshot
 
+## ⏳ Custom domain + sign-in — IN PROGRESS (2026-06-01 eve), pick up here
+- **`www.funldn.com` is LIVE** ✅ — serves the full app, no login wall (verified
+  via WebFetch). **This is the address to share.** Domain bought via iCloud+,
+  registered through **Cloudflare Registrar** (account `Mp.aranzales10@uniandes.edu.co`),
+  pointed at Vercel project `fun-london`.
+- **Supabase auth URLs updated** to `https://www.funldn.com` (Site URL +
+  `…/auth/callback` redirect) — per Maria; not machine-verifiable from here.
+- **TODO (laptop, low priority):**
+  1. **Bare `funldn.com` (no-www) → still shows Cloudflare parking page.** The
+     `@` slot is occupied by a Registrar-generated CNAME → `default-page.registrar.cloudflare.com`.
+     To fix: Cloudflare → **Domains/Registrar → funldn.com → disable Parking Page**,
+     then DNS → add `A @ 76.76.21.21` with **Proxy = DNS only (grey, NOT orange)**,
+     then Vercel → Refresh the bare-domain row. PURE COSMETIC — www works fine.
+  2. **"Continue with Google" sign-in NEVER finished.** Needs the 3-console job:
+     Google Cloud (OAuth consent screen → Publish or add test emails; create OAuth
+     Web client with redirect `https://fxfuzabrivuianfwdopc.supabase.co/auth/v1/callback`)
+     → paste Client ID/Secret into Supabase → Auth → Providers → Google → enable.
+     DB shows 0 google-provider users → flow is unproven. Magic-link is the
+     fallback that works without this.
+  3. **Vercel Deployment Protection** — confirm OFF for the custom domain so
+     testers reach it without an SSO wall (www currently loads fine, so likely OK).
+- **Supabase Security Advisor (2026-06-01): 3 warnings** to harden before launch —
+  2× SECURITY DEFINER on `public.pending_candidates_touch()` (Claude can fix in DB)
+  + "Leaked Password Protection disabled" (one toggle in Auth settings).
+
 **Last updated:** 2026-06-01 (mood-deck Phase A/B verified live in-browser;
 time-of-day relabelled Morning/Afternoon/Night; discovery robot now hunts
 day-spots + tuned for the free tier; chain detection fixed; catalog at
