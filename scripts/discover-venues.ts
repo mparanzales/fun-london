@@ -307,6 +307,50 @@ function photoUrl(photoName: string, maxWidth = 1600): string {
 
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
+// Free-tier pacing. Gemini's free tier caps requests-per-minute (and per day),
+// and the old code fired calls back-to-back — so most runs got HTTP 429'd and
+// published ~nothing. These two knobs keep us under the limit instead:
+//   • GEMINI_MIN_GAP_MS — minimum spacing between any two Gemini calls.
+//   • GEMINI_MAX_RETRIES — on a 429/503, wait (honouring Retry-After, else
+//     exponential backoff) and try again rather than abandoning the venue.
+const GEMINI_MIN_GAP_MS = 4500; // ~13 calls/min ceiling
+const GEMINI_MAX_RETRIES = 4;
+let lastGeminiAt = 0;
+
+// Single choke-point for every Gemini call: paces, then retries on rate-limit /
+// transient errors. Returns the final Response (callers keep their own res.ok
+// handling); only the network layer can throw, exactly as a bare fetch would.
+async function geminiFetch(body: unknown): Promise<Response> {
+  let attempt = 0;
+  for (;;) {
+    const since = Date.now() - lastGeminiAt;
+    if (since < GEMINI_MIN_GAP_MS) await sleep(GEMINI_MIN_GAP_MS - since);
+    lastGeminiAt = Date.now();
+
+    const res = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    // 429 = rate-limited, 503 = transient overload. Back off and retry.
+    if ((res.status === 429 || res.status === 503) && attempt < GEMINI_MAX_RETRIES) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const backoff =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : GEMINI_MIN_GAP_MS * Math.pow(2, attempt); // 4.5s, 9s, 18s, 36s
+      console.log(
+        `    ⏳ Gemini ${res.status} — backing off ${Math.round(backoff / 1000)}s (retry ${attempt + 1}/${GEMINI_MAX_RETRIES})`,
+      );
+      await sleep(backoff);
+      attempt++;
+      continue;
+    }
+    return res;
+  }
+}
+
 function extractJson(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const raw = (fenced ? fenced[1] : text).trim();
@@ -329,13 +373,9 @@ async function validateSources(name: string, area: string): Promise<Source[]> {
     `${TRUSTED_PUBLICATIONS.join(", ")}. ` +
     `Only include a publication if you actually find its page for THIS venue. ` +
     `Reply ONLY with a JSON array of {"publication","url"} — no prose.`;
-  const res = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-    }),
+  const res = await geminiFetch({
+    contents: [{ parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
   });
   if (!res.ok) throw new Error(`Gemini validate ${res.status}`);
   const data = (await res.json()) as {
@@ -387,13 +427,9 @@ async function writeEditorial(
     `- "critical_flags": array of 1-2 {"label","body"} "Real Talk" notes ` +
     `(queues, no-bookings, loud, pricey, events-only, etc.) — label ~4 words, ` +
     `body one sentence.`;
-  const res = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json" },
-    }),
+  const res = await geminiFetch({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: "application/json" },
   });
   if (!res.ok) throw new Error(`Gemini editorial ${res.status}`);
   const data = (await res.json()) as {
@@ -419,13 +455,9 @@ async function findBookingLink(
     `London venue "${name}" in ${area} on OpenTable, Resy, or SevenRooms. ` +
     `Reply ONLY with the single reservation URL, or "none".`;
   try {
-    const res = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-      }),
+    const res = await geminiFetch({
+      contents: [{ parts: [{ text: prompt }] }],
+      tools: [{ google_search: {} }],
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {
