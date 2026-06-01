@@ -1,18 +1,22 @@
 # Fun London — State Snapshot
 
-## ⏳ Custom domain + sign-in — IN PROGRESS (2026-06-01 eve), pick up here
-- **`www.funldn.com` is LIVE** ✅ — serves the full app, no login wall (verified
-  via WebFetch). **This is the address to share.** Domain bought via iCloud+,
-  registered through **Cloudflare Registrar** (account `Mp.aranzales10@uniandes.edu.co`),
-  pointed at Vercel project `fun-london`.
+## ✅ Custom domain DONE (2026-06-01 eve) — both addresses live
+- **`www.funldn.com`** ✅ serves the full app (verified). **The address to share.**
+- **`funldn.com`** (bare) ✅ now **301-redirects → www.funldn.com** (verified via
+  curl: 301 → location www → 200). Fixed with a Cloudflare **Redirect Rule**
+  ("Redirect from root to WWW" template) — the Registrar Parking Page CNAME is
+  locked/un-editable, so the redirect rule was the way around it. If the bare
+  domain ever reverts to the parking placeholder, the rule is under Cloudflare →
+  funldn.com → Rules → Redirect Rules.
+- Domain bought via iCloud+, registered through **Cloudflare Registrar**
+  (account `Mp.aranzales10@uniandes.edu.co`), pointed at Vercel project `fun-london`.
+  iCloud email MX/DKIM records live in Cloudflare DNS — DO NOT TOUCH them.
 - **Supabase auth URLs updated** to `https://www.funldn.com` (Site URL +
   `…/auth/callback` redirect) — per Maria; not machine-verifiable from here.
-- **TODO (laptop, low priority):**
-  1. **Bare `funldn.com` (no-www) → still shows Cloudflare parking page.** The
-     `@` slot is occupied by a Registrar-generated CNAME → `default-page.registrar.cloudflare.com`.
-     To fix: Cloudflare → **Domains/Registrar → funldn.com → disable Parking Page**,
-     then DNS → add `A @ 76.76.21.21` with **Proxy = DNS only (grey, NOT orange)**,
-     then Vercel → Refresh the bare-domain row. PURE COSMETIC — www works fine.
+
+## ⏳ Still TODO (laptop, low priority)
+  0. **Domain auto-renew is OFF** — turn ON in Cloudflare → Domains →
+     Registrations → funldn.com (expires Jun 1 2027) so it doesn't lapse.
   2. **"Continue with Google" sign-in NEVER finished.** Needs the 3-console job:
      Google Cloud (OAuth consent screen → Publish or add test emails; create OAuth
      Web client with redirect `https://fxfuzabrivuianfwdopc.supabase.co/auth/v1/callback`)
