@@ -136,6 +136,9 @@ merged to `main` (HEAD `e2da7a0`) and live. **The catalog is real
   **Events pipeline.** First real adapter (Ticketmaster Discovery API)
   wired end-to-end, first real subscription (Ronnie Scott's, venue id
   `KovZ9177Jn0`) registered, and 2 real events live in `public.events`.
+  **(Update 2026-06-02: now 17 live upcoming Ticketmaster events, last
+  cron sync 2026-06-01 21:51 — the 4-hourly job has been running
+  autonomously and growing the feed. Pipeline confirmed healthy.)**
   Cron now runs every 4 hours autonomously and produces output that
   flows directly to the Events page. First CI run with the real
   adapter: success.
@@ -397,7 +400,7 @@ One font family across the entire consumer app.
 | Venues (11 real, post-ingestion) | Supabase `public.venues` filtered to `google_place_id IS NOT NULL` | `lib/queries.ts → fetchVenues / fetchVenueBySlug / fetchVenueById` |
 | Partner prospects (11 — internal BD overlay) | Supabase `public.partner_prospects` | RLS-locked, no anon access. Internal use only. |
 | Venue ingestion | `scripts/venues-seed.ts` (editorial overrides) + `scripts/ingest-venues.ts` (Google Places fetch + dual-write) | `pnpm ingest` (or `pnpm ingest:dry`). Idempotent on `google_place_id`. |
-| Events (real-only, currently 2 via Ticketmaster) | Supabase `public.events`, ingested by `scripts/ingest-events.ts` on a 4-hourly cron | `lib/queries.ts → fetchEvents` |
+| Events (real-only, 17 live upcoming via Ticketmaster as of 2026-06-02; auto-growing) | Supabase `public.events`, ingested by `scripts/ingest-events.ts` on a 4-hourly cron | `lib/queries.ts → fetchEvents` |
 | Saved set | anon: localStorage `fl.saved.v1` · authed: `public.saved_venues` | `components/saved-context.tsx → useSaved()` |
 | Bookings | anon: localStorage `fl.bookings.v1` · authed: `public.bookings` | `components/bookings-context.tsx → useBookings()` |
 | Auth user | Supabase Auth cookies (HTTPOnly) | `lib/auth.ts → getAuthUser()` |
