@@ -10,6 +10,10 @@ const nextConfig = {
       // for Next.js Image optimization to work.
       { protocol: "https", hostname: "places.googleapis.com" },
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
+      // Supabase Storage — venue photos are mirrored here (keyless public
+      // URLs) by scripts/photo-storage.ts + scripts/backfill-photos.ts, so the
+      // Google Places API key no longer appears in any public image URL.
+      { protocol: "https", hostname: "*.supabase.co" },
       // Ticketmaster CDN — event posters come back as
       // s1.ticketm.net/dam/a/... when Phase 5 Tier 3 ingests via the
       // Discovery API. The double-wildcard `**.ticketm.net` pattern

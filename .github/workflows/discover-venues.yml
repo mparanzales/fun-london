@@ -62,6 +62,9 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Mirror new venue photos to Storage (keyless public URLs) instead
+          # of embedding the Places key. Bucket name, not a secret.
+          FL_PHOTO_BUCKET: venue-photos
         run: |
           set -o pipefail
           pnpm exec tsx scripts/discover-venues.ts 2>&1 | tee discover-venues.log

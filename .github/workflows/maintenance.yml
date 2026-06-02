@@ -62,6 +62,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          # Keep refreshed photos keyless (see scripts/photo-storage.ts).
+          FL_PHOTO_BUCKET: venue-photos
         run: |
           set -o pipefail
           # Run the refresh and tee output both to stdout (live logs) and
