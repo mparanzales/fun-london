@@ -15,6 +15,7 @@ import { useSaved } from "@/components/saved-context";
 import { ReserveSheet } from "@/components/reserve-sheet";
 import { platformLabel, type ReserveTarget } from "@/lib/booking-link";
 import { shareOrCopy } from "@/lib/share";
+import { track } from "@/lib/analytics";
 import type { Venue, VenueType } from "@/lib/types";
 
 // Only these venue types accept a table reservation / ticket booking.
@@ -53,6 +54,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const [showReserve, setShowReserve] = useState(false);
 
   const onShare = async () => {
+    track("share", { kind: "venue", venue: venue.slug });
     const result = await shareOrCopy({
       title: venue.name,
       text: `${venue.name} · ${venue.neighbourhood}, London`,
@@ -85,8 +87,9 @@ export function VenueDetail({ venue }: { venue: Venue }) {
       : null;
 
   const hasRealTalk = !!venue.criticalFlags && venue.criticalFlags.length > 0;
+  const sourceCount = venue.editorialSources?.length ?? 0;
   const hasWhy =
-    (!!venue.editorialSources && venue.editorialSources.length > 0) ||
+    sourceCount > 0 ||
     (!!venue.creatorCoverage && venue.creatorCoverage.length > 0);
 
   // Quick-fact pills. We deliberately do NOT surface "tables free",
@@ -192,6 +195,25 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           <span>{venue.rating}</span>
           <span aria-hidden>·</span>
           <span>{venue.reviewCount.toLocaleString()} reviews</span>
+        </div>
+
+        {/* Trust badge — the differentiating thesis, made visible up-front
+            (not buried in the collapsed "Why this is here"). Source count is
+            shown honestly: only claims "N sources" when we actually hold ≥2. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3 text-[11px] font-bold text-accent">
+          <span>Independent</span>
+          <span aria-hidden className="text-muted-fg/50">
+            ·
+          </span>
+          <span>No chains</span>
+          {sourceCount >= 2 && (
+            <>
+              <span aria-hidden className="text-muted-fg/50">
+                ·
+              </span>
+              <span>Checked in {sourceCount} sources</span>
+            </>
+          )}
         </div>
 
         <p className="text-base leading-relaxed text-fg mt-5">

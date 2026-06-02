@@ -44,7 +44,12 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       await maybeBackfillDisplayName(supabase);
-      return NextResponse.redirect(`${origin}${returnTo}`);
+      // Mark the redirect so the client can fire a one-off sign_in_complete
+      // analytics event on landing (then strips the param). Safe even if
+      // returnTo already carries a query string.
+      const dest = new URL(`${origin}${returnTo}`);
+      dest.searchParams.set("signedin", "1");
+      return NextResponse.redirect(dest.toString());
     }
     console.error(`[callback] exchangeCodeForSession failed: ${error.message}`);
   }

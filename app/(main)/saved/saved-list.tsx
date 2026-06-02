@@ -61,7 +61,7 @@ export function SavedList({ allVenues }: { allVenues: Venue[] }) {
                       {b.dateLabel} · {b.slotLabel} · Party of {b.partySize}
                     </div>
                     <div className="text-[10px] text-muted-fg/70 mt-0.5 font-medium">
-                      Ref {b.id}
+                      Self-added — not a venue confirmation
                     </div>
                   </div>
                 </Link>
@@ -103,8 +103,7 @@ export function SavedList({ allVenues }: { allVenues: Venue[] }) {
 
 function summary(bookings: number, saved: number): string {
   const parts: string[] = [];
-  if (bookings > 0)
-    parts.push(`${bookings} booking${bookings === 1 ? "" : "s"}`);
+  if (bookings > 0) parts.push(`${bookings} planned`);
   if (saved > 0) parts.push(`${saved} saved`);
   return parts.join(" · ");
 }

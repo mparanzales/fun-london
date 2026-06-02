@@ -25,7 +25,15 @@ export type Vibe = "chill" | "lively" | "fancy" | "unique";
 export type DateLabel = "Tonight" | "This Weekend" | "This Week";
 export type EventCategory = "Music" | "Food" | "Art" | "Comedy" | "Club";
 
-export type BookingStatus = "pending" | "confirmed" | "cancelled" | "completed";
+// "self_added" = the user told us (via the post-handoff "Did you book?" prompt)
+// that they reserved at the venue's own platform. Fun London did NOT make or
+// verify this booking, so it must never be presented as "confirmed".
+export type BookingStatus =
+  | "pending"
+  | "confirmed"
+  | "cancelled"
+  | "completed"
+  | "self_added";
 
 // ── Core entities ────────────────────────────────────────────────────────
 

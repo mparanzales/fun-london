@@ -1,5 +1,7 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchVenueBySlug } from "@/lib/queries";
+import { SITE_URL } from "@/lib/config";
 import { VenueDetail } from "./venue-detail";
 
 // Top-level route OUTSIDE the (main) route group on purpose — that means
@@ -10,6 +12,34 @@ import { VenueDetail } from "./venue-detail";
 // Server Component: fetches the venue from Supabase and hands it to
 // the (client) VenueDetail. notFound() triggers app/not-found.tsx.
 
+// Per-page metadata so a shared /venue/[slug] link renders a rich preview
+// (name, neighbourhood, description, OG image) instead of the generic site
+// card — and so Google can index each venue page distinctly.
+export async function generateMetadata({
+  params,
+}: {
+  params: { slug: string };
+}): Promise<Metadata> {
+  const venue = await fetchVenueBySlug(params.slug);
+  if (!venue) return { title: "Venue not found" };
+
+  const title = `${venue.name} — ${venue.neighbourhood}, London`;
+  const description =
+    venue.longDescription?.slice(0, 200) ||
+    `${venue.name} in ${venue.neighbourhood}. Independent London, checked in 2+ trusted sources.`;
+  const url = `${SITE_URL}/venue/${venue.slug}`;
+
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    // OG/Twitter images are auto-wired by the opengraph-image.tsx file
+    // convention in this folder — no need to list them here.
+    openGraph: { type: "article", url, title, description },
+    twitter: { card: "summary_large_image", title, description },
+  };
+}
+
 export default async function VenuePage({
   params,
 }: {
@@ -17,5 +47,50 @@ export default async function VenuePage({
 }) {
   const venue = await fetchVenueBySlug(params.slug);
   if (!venue) notFound();
-  return <VenueDetail venue={venue} />;
+
+  // Structured data → rich results in Google (rating stars, price, area).
+  // Only assert aggregateRating when we actually hold a rating + count.
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Restaurant",
+    name: venue.name,
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: venue.address,
+      addressLocality: venue.neighbourhood,
+      addressRegion: "London",
+      addressCountry: "GB",
+    },
+    image: venue.imgUrl,
+    url: `${SITE_URL}/venue/${venue.slug}`,
+    priceRange: venue.price,
+    ...(venue.lat && venue.lng
+      ? {
+          geo: {
+            "@type": "GeoCoordinates",
+            latitude: venue.lat,
+            longitude: venue.lng,
+          },
+        }
+      : {}),
+    ...(venue.rating && venue.reviewCount
+      ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: venue.rating,
+            reviewCount: venue.reviewCount,
+          },
+        }
+      : {}),
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <VenueDetail venue={venue} />
+    </>
+  );
 }

@@ -17,6 +17,7 @@ import {
 } from "@/lib/realtime/room";
 import { venueInArea } from "@/lib/regions";
 import { isOpenAt, withinBudget } from "@/lib/plan-engine";
+import { track } from "@/lib/analytics";
 import type { Mood } from "@/lib/plan-together-moods";
 import { Lobby } from "./_steps/lobby";
 import { Settings } from "./_steps/settings";
@@ -54,6 +55,9 @@ export function TogetherFlow({
     codeRef.current = code;
     isHostRef.current = !existing; // the room's creator is the host
     meRef.current = makeMember(myName);
+    // Viral-loop signal: a created room is a potential invite; a joined room
+    // is the K-factor payoff (someone followed a shared link in).
+    track(existing ? "together_room_join" : "together_room_create");
     setReady(true);
   }, [myName]);
 

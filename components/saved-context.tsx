@@ -28,6 +28,7 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MOCK_SAVED_IDS } from "@/lib/mock-data";
+import { track } from "@/lib/analytics";
 
 const STORAGE_KEY = "fl.saved.v1";
 
@@ -176,6 +177,8 @@ export function SavedProvider({
         const wasSaved = next.has(venueSlug);
         if (wasSaved) next.delete(venueSlug);
         else next.add(venueSlug);
+
+        track(wasSaved ? "venue_unsave" : "venue_save", { venue: venueSlug });
 
         if (authUserId) {
           // Fire-and-forget DB write. UI is optimistic; an error logs

@@ -1,11 +1,14 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
-import { Analytics } from "@vercel/analytics/react";
+import { AnalyticsGate } from "@/components/analytics-gate";
+import { ConsentBanner } from "@/components/consent-banner";
+import { SignInTracker } from "@/components/signin-tracker";
 import { SavedProvider } from "@/components/saved-context";
 import { BookingsProvider } from "@/components/bookings-context";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ProfilePrefsMigration } from "@/components/profile-prefs-migration";
 import { getAuthUser } from "@/lib/auth";
+import { SITE_URL } from "@/lib/config";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -17,9 +20,31 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Fun London",
-  description: "Your curated guide to London's best hidden gems.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "Fun London — independent London, no chains",
+    template: "%s · Fun London",
+  },
+  description:
+    "Independent London only. No chains — every spot checked in at least two trusted sources. Curated bars, restaurants and what's on tonight.",
   manifest: "/manifest.json",
+  applicationName: "Fun London",
+  // Site-wide sharing defaults; venue/event pages override with their own.
+  openGraph: {
+    type: "website",
+    siteName: "Fun London",
+    locale: "en_GB",
+    url: SITE_URL,
+    title: "Fun London — independent London, no chains",
+    description:
+      "Curated independent London. No chains — every spot checked in at least two trusted sources.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Fun London — independent London, no chains",
+    description:
+      "Curated independent London. No chains — every spot checked in at least two trusted sources.",
+  },
 };
 
 export const viewport: Viewport = {
@@ -66,7 +91,9 @@ export default async function RootLayout({
             {children}
           </BookingsProvider>
         </SavedProvider>
-        <Analytics />
+        <ConsentBanner />
+        <SignInTracker />
+        <AnalyticsGate />
       </body>
     </html>
   );

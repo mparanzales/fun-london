@@ -26,6 +26,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { photoStorageEnabled } from "./photo-storage";
 import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
@@ -264,8 +265,15 @@ function diffRow(
   // Photo refresh — Google's photo names rotate. Only update if there's a
   // fresh photo AND the current img_url is still a Google Places URL
   // (don't clobber a manually-set img_url).
+  // When Storage mirroring is enabled, photos are owned by the ingest/discover
+  // pipeline (which writes keyless Storage URLs); refreshing here would re-add
+  // a keyed Google URL, so skip. When disabled (today), behaviour is unchanged.
   const photoName = details.photos?.[0]?.name;
-  if (photoName && row.img_url.startsWith("https://places.googleapis.com/")) {
+  if (
+    photoName &&
+    !photoStorageEnabled() &&
+    row.img_url.startsWith("https://places.googleapis.com/")
+  ) {
     const newImg = photoUrl(photoName);
     if (newImg !== row.img_url) {
       update.img_url = newImg;

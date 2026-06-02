@@ -29,6 +29,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { mirrorPhotoToStorage } from "./photo-storage";
 import type { BookingLink, Mood, VenueType } from "@/lib/types";
 import {
   normalizeOpeningHours,
@@ -289,7 +290,9 @@ function brandKey(name: string): string {
 async function londonLocationCount(name: string): Promise<number> {
   try {
     const brand = brandKey(name);
-    if (!brand) return 1;
+    // Can't determine the brand → can't prove it's an independent. Fail CLOSED:
+    // treat as a chain so an unverifiable name is rejected, not admitted.
+    if (!brand) return Infinity;
     const places = await searchPlaces(
       `${brand} London`,
       "places.id,places.displayName",
@@ -299,7 +302,12 @@ async function londonLocationCount(name: string): Promise<number> {
     );
     return matches.length;
   } catch {
-    return 1; // on error, don't falsely flag as chain
+    // On any Places error (429/503/network), we CANNOT confirm this is an
+    // independent. Returning a low count here would let chains auto-publish
+    // into a "no chains" catalogue on a transient blip. Fail CLOSED: return
+    // Infinity so the venue is skipped this run and retried on the next cron,
+    // mirroring the fail-closed `continue` used for source validation below.
+    return Infinity;
   }
 }
 
@@ -606,7 +614,10 @@ async function main() {
       if (!isDay) {
         const locations = await londonLocationCount(name);
         if (locations >= CHAIN_LOCATIONS) {
-          console.log(`  ⊘ chain (${locations} locations): ${name}`);
+          const reason = Number.isFinite(locations)
+            ? `chain (${locations} locations)`
+            : `unverifiable (Places error/blank brand) — skipped, will retry next run`;
+          console.log(`  ⊘ ${reason}: ${name}`);
           continue;
         }
         await sleep(150);
@@ -642,6 +653,15 @@ async function main() {
       while (usedSlugs.has(slug)) slug = `${slugify(name)}-${n++}`;
       usedSlugs.add(slug);
 
+      // Resolve the photo: mirror to Supabase Storage (keyless) when enabled,
+      // else the keyed Google URL. Skip the upload on dry runs.
+      const photoName = p.photos?.[0]?.name;
+      const imgUrl = photoName
+        ? (supabase && !DRY_RUN
+            ? await mirrorPhotoToStorage(photoName, slug, supabase)
+            : null) ?? photoUrl(photoName)
+        : "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
+
       const row = {
         slug,
         name,
@@ -659,9 +679,7 @@ async function main() {
         walking_mins: 12,
         tables_free: 4,
         next_slot_label: "Open today",
-        img_url: p.photos?.[0]?.name
-          ? photoUrl(p.photos[0].name)
-          : "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80",
+        img_url: imgUrl,
         mood_tags: cat.moods,
         vibe_tags: ["Independent"],
         google_place_id: p.id,

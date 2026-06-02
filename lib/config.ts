@@ -4,3 +4,10 @@
 // the rename is a one-line change.
 
 export const CITY = "London";
+
+// Absolute base URL of the production site. Used for canonical/OG URLs,
+// sitemap and robots. Reads NEXT_PUBLIC_SITE_URL (set on Vercel + in
+// .env.local) and falls back to the live domain.
+export const SITE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.funldn.com"
+).replace(/\/$/, "");

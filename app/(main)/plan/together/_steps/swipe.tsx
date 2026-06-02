@@ -8,6 +8,7 @@ import {
   deckTimeFromTimeOfDay,
   type Mood,
 } from "@/lib/plan-together-moods";
+import { track } from "@/lib/analytics";
 import { Avatar } from "./avatar";
 
 // Plan Together — Step 2: Group Swipe (real-time).
@@ -39,6 +40,7 @@ export function Swipe({
   const advancedRef = useRef(false);
 
   const vote = (value: boolean) => {
+    track("together_swipe", { mood: deck[qIdx]?.label ?? "", liked: value });
     room.sendVote(qIdx, value);
     if (qIdx + 1 < deck.length) {
       setQIdx(qIdx + 1);

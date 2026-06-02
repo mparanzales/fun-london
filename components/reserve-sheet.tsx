@@ -12,6 +12,7 @@ import {
   platformLabel,
   type ReserveTarget,
 } from "@/lib/booking-link";
+import { track } from "@/lib/analytics";
 import type { Venue } from "@/lib/types";
 
 export function ReserveSheet({
@@ -31,6 +32,12 @@ export function ReserveSheet({
 
   const onContinue = () => {
     const url = buildReserveUrl(target, { date, time, party });
+    // Outbound revenue signal: the click that affiliate commission is earned on.
+    track("venue_reserve_click", {
+      venue: venue.slug,
+      platform: target.platform,
+      party,
+    });
     // Open the booking site in a new tab on the user gesture (not blocked).
     if (typeof window !== "undefined") {
       window.open(url, "_blank", "noopener,noreferrer");

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase/client";
+import { track } from "@/lib/analytics";
 import type { Mood, Vibe } from "@/lib/types";
 
 const ONBOARDING_STORAGE_KEY = "fl.onboarding.v1";
@@ -25,7 +26,9 @@ const VIBE_OPTIONS: VibeOption[] = [
   { value: "unique", emoji: "🎭", label: "Unique" },
 ];
 
-const TOTAL_STEPS = 4; // progress bar matches the prototype (1/4, 2/4, …)
+// There are exactly two real steps (mood, vibe). The bar must tell the truth
+// (was 4 — a hangover from the prototype that showed "1/4" for a 2-step flow).
+const TOTAL_STEPS = 2;
 
 export function OnboardingFlow({ authUserId }: { authUserId: string | null }) {
   const router = useRouter();
@@ -80,6 +83,10 @@ export function OnboardingFlow({ authUserId }: { authUserId: string | null }) {
       }
     }
 
+    track("onboarding_complete", {
+      mood: mood ?? "skipped",
+      vibe: vibe ?? "skipped",
+    });
     router.push("/explore");
   };
 
@@ -93,8 +100,12 @@ export function OnboardingFlow({ authUserId }: { authUserId: string | null }) {
   return (
     <div className="min-h-screen flex flex-col bg-bg pt-4 pb-8">
       {step === 0 && (
-        <div className="px-5 pt-2 pb-6 flex justify-center">
+        <div className="px-5 pt-2 pb-6 flex flex-col items-center gap-3 text-center">
           <Logo variant="gradient" size="lg" />
+          <p className="text-[13px] font-semibold text-muted-fg max-w-[16rem] leading-snug">
+            Independent London only. No chains — every spot checked in at least
+            two trusted sources.
+          </p>
         </div>
       )}
       <div className="px-5 flex items-center gap-2.5 mb-5">
