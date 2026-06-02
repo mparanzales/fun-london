@@ -7,7 +7,10 @@
   --fl-fg: #2a2419;
   --fl-heading: #1a1409;
   --fl-muted: #e6e2db;
-  --fl-muted-fg: #756c5d;
+  /* Darkened from #756c5d so muted text clears WCAG AA (4.5:1) on every light
+     surface — incl. the muted chip bg (#e6e2db), where the old value was ~4.1.
+     Same warm grey-brown hue, just a touch deeper. */
+  --fl-muted-fg: #645c50;
   --fl-card: #ffffff;
   --fl-border: #e3ddd2;
   /* Brand colors are theme-stable. Surfaces (bg/fg/card/muted/border)

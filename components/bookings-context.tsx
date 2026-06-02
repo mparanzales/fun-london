@@ -72,6 +72,15 @@ export function BookingsProvider({
 }) {
   const [bookings, setBookings] = useState<StoredBooking[]>([]);
   const slugToUuidRef = useRef<Map<string, string>>(new Map());
+  // Gate the anon persist effect until the first hydrate read (same race the
+  // saved-context had: an empty initial write would clobber stored bookings on
+  // a hard reload).
+  const [hydrated, setHydrated] = useState(false);
+  // Mirror of live bookings so add/remove can revert precisely on DB error.
+  const bookingsRef = useRef(bookings);
+  useEffect(() => {
+    bookingsRef.current = bookings;
+  }, [bookings]);
 
   // ── Hydrate (and migrate if newly signed in) ────────────────────────
   useEffect(() => {
@@ -83,20 +92,23 @@ export function BookingsProvider({
       // addBooking would otherwise be overwritten).
       try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        const arr = JSON.parse(raw) as StoredBooking[];
-        if (!Array.isArray(arr)) return;
-        setBookings((prev) => {
-          const map = new Map<string, StoredBooking>();
-          for (const b of arr) map.set(b.id, b);
-          for (const b of prev) map.set(b.id, b);
-          return [...map.values()].sort((a, b) =>
-            b.createdAt.localeCompare(a.createdAt),
-          );
-        });
+        if (raw) {
+          const arr = JSON.parse(raw) as StoredBooking[];
+          if (Array.isArray(arr)) {
+            setBookings((prev) => {
+              const map = new Map<string, StoredBooking>();
+              for (const b of arr) map.set(b.id, b);
+              for (const b of prev) map.set(b.id, b);
+              return [...map.values()].sort((a, b) =>
+                b.createdAt.localeCompare(a.createdAt),
+              );
+            });
+          }
+        }
       } catch {
         // localStorage unavailable
       }
+      setHydrated(true);
       return;
     }
 
@@ -211,17 +223,20 @@ export function BookingsProvider({
   }, [authUserId]);
 
   // ── Persist (anon only) ─────────────────────────────────────────────
+  // Gated on `hydrated` so the empty initial state can't clobber stored
+  // bookings before the hydrate read above runs.
   useEffect(() => {
-    if (authUserId) return;
+    if (authUserId || !hydrated) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(bookings));
     } catch {
       // ignore quota / privacy mode
     }
-  }, [bookings, authUserId]);
+  }, [bookings, authUserId, hydrated]);
 
   const addBooking = useCallback(
     (b: StoredBooking) => {
+      const alreadyThere = bookingsRef.current.some((x) => x.id === b.id);
       setBookings((prev) => {
         if (prev.some((x) => x.id === b.id)) return prev;
         return [b, ...prev];
@@ -245,7 +260,13 @@ export function BookingsProvider({
             { onConflict: "id" },
           )
           .then(({ error }) => {
-            if (error) console.error("[bookings] insert failed:", error);
+            if (error) {
+              console.error("[bookings] insert failed, reverting:", error);
+              // Only undo the row WE just added (don't drop a pre-existing one).
+              if (!alreadyThere) {
+                setBookings((prev) => prev.filter((x) => x.id !== b.id));
+              }
+            }
           });
       }
     },
@@ -254,6 +275,7 @@ export function BookingsProvider({
 
   const removeBooking = useCallback(
     (id: string) => {
+      const removed = bookingsRef.current.find((b) => b.id === id);
       setBookings((prev) => prev.filter((b) => b.id !== id));
       if (authUserId) {
         const supabase = createClient();
@@ -263,7 +285,19 @@ export function BookingsProvider({
           .eq("user_id", authUserId)
           .eq("id", id)
           .then(({ error }) => {
-            if (error) console.error("[bookings] delete failed:", error);
+            if (error) {
+              console.error("[bookings] delete failed, reverting:", error);
+              // Put the removed booking back so the UI matches the DB.
+              if (removed) {
+                setBookings((prev) =>
+                  prev.some((x) => x.id === id)
+                    ? prev
+                    : [removed, ...prev].sort((a, b) =>
+                        b.createdAt.localeCompare(a.createdAt),
+                      ),
+                );
+              }
+            }
           });
       }
     },
