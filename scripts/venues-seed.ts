@@ -1754,6 +1754,848 @@ export const VENUE_SEEDS: VenueSeed[] = [
     ],
     skipProspect: true,
   },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // BATCH 3 — UCL/AA-focus expansion (added 2026-06-02). Researched +
+  // cross-checked in 2+ real sources per the thesis. Group-operated pubs
+  // (Greene King / Young's / Sam Smith's / Cubitt House) from the maintainer's list
+  // were held back for partner review and are NOT in this batch.
+  // ─────────────────────────────────────────────────────────────────────
+
+  // ── 30. The Jago ─────────────────────────────────────────────────────
+  {
+    slug: "the-jago-dalston",
+    searchQuery: "The Jago 440 Kingsland Road Dalston London E8",
+    neighbourhood: "Dalston",
+    vibe: "Grassroots music hub where Passing Clouds never really left.",
+    longDescription:
+      "A 300-capacity community live-music space and hub on Kingsland Road, born from the ashes of the beloved Passing Clouds and designated an Asset of Community Value. World, Afrobeat, reggae, funk and swing nights, with a food bank by day and sofas like your eccentric friend's living room.",
+    type: "Live Music",
+    price: "£",
+    timeOfDay: "Night",
+    moodTags: ["culture", "drinks"],
+    vibeTags: ["Community", "World music", "Grassroots", "DJ nights"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/music/the-jago-dalston",
+        title: "The Jago Dalston, Music in Dalston, London",
+        date: "2025-07-10",
+      },
+      {
+        publication: "Vice",
+        url: "https://www.vice.com/en/article/jago-passing-clouds-london-live-venues-reopen/",
+        title: "When Beloved Live Music Venues Come Back from the Dead",
+        date: "2019-04-01",
+      },
+      {
+        publication: "Resident Advisor",
+        url: "https://ra.co/clubs/164341",
+        title: "The Jago, London, club profile",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Check the night before you go",
+        body: "Programming swings wildly by night, from Afrobeat to swing to club sets. Look up who is playing so the vibe matches what you want.",
+      },
+      {
+        label: "Small room, popular shows sell out",
+        body: "300-cap main room plus an upstairs lounge. Headline nights go in advance, so book rather than chance the door.",
+      },
+    ],
+  },
+
+  // ── 31. Strongroom Bar ───────────────────────────────────────────────
+  {
+    slug: "strongroom-bar-shoreditch",
+    searchQuery: "Strongroom Bar 120-124 Curtain Road Shoreditch London EC2A",
+    neighbourhood: "Shoreditch",
+    vibe: "Studio bar with one of Shoreditch's biggest fairy-lit courtyards.",
+    longDescription:
+      "Attached to the Strongroom recording studios that hosted Radiohead, Bjork and The Prodigy sessions, this fiercely independent bar has anchored Shoreditch's creative scene since 1997. Two floors of music-memorabilia warehouse open onto a huge, atmospheric beer garden.",
+    type: "Bar",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["drinks", "culture"],
+    vibeTags: ["Courtyard", "Live music", "Indie", "Studio"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/news/back-then-there-was-nothing-how-strongroom-transformed-shoreditch-110918",
+        title:
+          "Back then, there was nothing: how Strongroom transformed Shoreditch",
+        date: "2018-11-09",
+      },
+      {
+        publication: "Vice",
+        url: "https://www.vice.com/en/article/save-strongroom-studios-bar-campaign-interviews/",
+        title: "The Fight to Save Strongroom Studios Is Bigger Than a UK Story",
+        date: "2018-07-24",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Gets very packed",
+        body: "The courtyard draws huge Friday and Saturday crowds and the bar queue grows with it. Arrive before 7pm for a decent spot.",
+      },
+      {
+        label: "Shoreditch pricing",
+        body: "Drinks sit at the premium end for an independent bar, roughly £6 to £9 a pint.",
+      },
+    ],
+  },
+
+  // ── 32. Night Tales ──────────────────────────────────────────────────
+  {
+    slug: "night-tales-hackney",
+    searchQuery: "Night Tales 14 Bohemia Place Mare Street Hackney London E8",
+    neighbourhood: "Hackney",
+    vibe: "Railway arches, a jungle-lit terrace and a Funktion-One system.",
+    longDescription:
+      "Three railway arches plus one of East London's largest covered terraces make this a versatile late-night Hackney venue. Days are chilled, with pizza and cocktails under foliage and fairy lights; nights shift into house, techno, jungle and garage.",
+    type: "Bar",
+    price: "££",
+    timeOfDay: "Night",
+    moodTags: ["drinks", "activity"],
+    vibeTags: ["Dance", "Late night", "Terrace", "DJ nights"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/nightlife/night-tales-1",
+        title: "Night Tales, Nightlife in Hackney, London",
+        date: "2025-07-14",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/night-tales",
+        title: "Night Tales",
+        date: "2024-12-06",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Gastroblog/Latest-news/night-tales-bohemia-place-hackney-central-arches-alfresco-club",
+        title: "Night Tales comes to Hackney with Night Tales Bohemia Place",
+        date: "2018-06-25",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Check it is open to the public",
+        body: "Big chunks of the week go to private hire. On a weekday, check the events calendar first or you may find the doors shut to walk-ins.",
+      },
+      {
+        label: "Come for the room, not the food",
+        body: "The NY-style pizza is fine but not a dining destination. Eat first if a proper dinner matters to you.",
+      },
+    ],
+  },
+
+  // ── 33. Howl at the Moon ─────────────────────────────────────────────
+  {
+    slug: "howl-at-the-moon-hoxton",
+    searchQuery: "Howl at the Moon 178 Hoxton Street Hoxton London N1",
+    neighbourhood: "Hoxton",
+    vibe: "Big-hearted Victorian local with a famous weekly pub quiz.",
+    longDescription:
+      "A properly independent neighbourhood pub on a Victorian corner since the 1830s, reopened in 2009 with craft ales, weekly quizzes, Sunday Irish trad sessions and roasts that pull in families, dogs and regulars alike.",
+    type: "Pub",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["drinks", "activity"],
+    vibeTags: ["Pub quiz", "Craft beer", "Sunday roast", "Dog-friendly"],
+    editorialSources: [
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/howl-at-the-moon-hoxton",
+        title: "Howl At The Moon",
+        date: "2024-01-25",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/bars-and-pubs/howl-at-the-moon",
+        title: "Howl at the Moon",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Compact and loud on quiz nights",
+        body: "The interior is small, so quiz nights and match days fill fast and get very loud. Grab a table early.",
+      },
+      {
+        label: "Food is pub-simple",
+        body: "Burgers and sandwiches at honest prices, with cheap deals midweek. The Sunday roast is the standout; the rest is reliable rather than destination cooking.",
+      },
+    ],
+  },
+
+  // ── 34. Goodbye Horses ───────────────────────────────────────────────
+  {
+    slug: "goodbye-horses-de-beauvoir",
+    searchQuery: "Goodbye Horses 21 Halliford Street De Beauvoir London N1",
+    neighbourhood: "De Beauvoir Town",
+    vibe: "Beaten-earth floors, 4,000 records and serious natural wine.",
+    longDescription:
+      "Opened in July 2024 in a converted pub on the Islington and Hackney border, Goodbye Horses pairs a ten-metre oak bar and quadraphonic speakers with a rotating natural-wine list and seasonal small plates. Won a Michelin Bib Gourmand in 2026.",
+    type: "Wine Bar",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks", "culture"],
+    vibeTags: ["Natural wine", "Vinyl", "Candlelit", "Small plates"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/bars-and-pubs/goodbye-horses",
+        title:
+          "Goodbye Horses, Islington: neighbourhood wine bars are rarely this fancy",
+        date: "2024-08-13",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Gastroblog/Test-drive/goodbye-horses-review-wine-bar-restaurant-islington-london",
+        title:
+          "Test Driving Goodbye Horses, a groundbreaking new wine bar in Islington",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/goodbye-horses",
+        title: "Goodbye Horses",
+        date: "2025-12-18",
+      },
+      {
+        publication: "Michelin Guide",
+        url: "https://guide.michelin.com/gb/en/greater-london/london/restaurant/goodbye-horses",
+        title: "Goodbye Horses, a Michelin Guide Bib Gourmand restaurant",
+      },
+      {
+        publication: "Harden's",
+        url: "https://www.hardens.com/az/restaurants/london/n1/goodbye-horses.htm",
+        title: "Goodbye Horses, Harden's London review",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Bookings fill weeks ahead",
+        body: "Tables go well in advance, even on a Tuesday. Walk-ins at the bar are accepted but a table is not guaranteed, so arrive before 6:30pm or book.",
+      },
+      {
+        label: "Pricey for a neighbourhood bar",
+        body: "Wine by the glass runs £6 to £12.50 and small plates £10 to £22. Lovely, but it sits above typical local prices.",
+      },
+    ],
+  },
+
+  // ── 35. Barge East ───────────────────────────────────────────────────
+  {
+    slug: "barge-east",
+    searchQuery: "Barge East White Post Lane Hackney Wick London",
+    neighbourhood: "Hackney Wick",
+    vibe: "Seasonal British dining inside a century-old Dutch barge.",
+    longDescription:
+      "A 125-year-old Dutch barge named De Hoop, sailed across the North Sea in 2018 and moored on the River Lee in Hackney Wick. Below decks serves seasonal British menus with produce from the riverside garden; outside, a big terrace spills onto the towpath.",
+    type: "Restaurant",
+    price: "£££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks"],
+    vibeTags: ["Floating", "Seasonal British", "Riverside", "Romantic"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/news/the-floating-east-london-restaurant-that-is-officially-one-of-the-most-unique-places-to-eat-in-the-world-092325",
+        title:
+          "The floating east London restaurant officially one of the most unique places to eat in the world",
+        date: "2025-09-23",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/barge-east",
+        title: "Barge East",
+        date: "2021-05-26",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Antigoni",
+        handle: "@antigonisings",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@antigonisings/video/7394531707329957153",
+        verdict: "positive",
+        note: "Singer and TV personality (700k+ followers) calling Barge East a London must-go.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Spend honestly",
+        body: "The tasting menu runs around £39 a head and garden mains £12 to £14. Reviewers flag the cost as high relative to portion size, especially in the garden.",
+      },
+      {
+        label: "Best in warm months",
+        body: "The terrace and garden are the main draw. Below-decks dinner is the premium offering and needs booking well ahead.",
+      },
+    ],
+  },
+
+  // ── 36. Plaquemine Lock ──────────────────────────────────────────────
+  {
+    slug: "plaquemine-lock",
+    searchQuery: "Plaquemine Lock 139 Graham Street Angel Islington London",
+    neighbourhood: "Islington",
+    vibe: "New Orleans on the Regent's Canal, with live jazz and gumbo.",
+    longDescription:
+      "Jacob Kenedy's (Bocca di Lupo) single-site tribute to his Louisiana roots: a canalside pub serving gumbo, crawfish, po'boys and blackened chicken with live jazz most evenings. Michelin Bib Gourmand since 2018.",
+    type: "Restaurant",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks"],
+    vibeTags: ["Live jazz", "Cajun and Creole", "Canalside", "Bib Gourmand"],
+    editorialSources: [
+      {
+        publication: "Michelin Guide",
+        url: "https://guide.michelin.com/gb/en/greater-london/london/restaurant/plaquemine-lock",
+        title: "Plaquemine Lock, a Michelin Guide Bib Gourmand restaurant",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Gastroblog/Test-drive/test-driving-plaquemine-lock-a-cajun-and-creole-pub-in-islington",
+        title: "Test Driving Plaquemine Lock, a Cajun and Creole pub in Islington",
+        date: "2018-09-06",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/plaquemine-lock",
+        title: "Plaquemine Lock",
+        date: "2023-04-12",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Come for the atmosphere",
+        body: "Reviewers love the canalside setting and live jazz more than the cooking. Treat it as a drinks-and-music spot with solid Cajun food rather than a dining-first destination.",
+      },
+      {
+        label: "Service can lag at peak",
+        body: "Understaffing is a recurring note, with slow bar service and long food waits when it is busy. Go with time to spare.",
+      },
+    ],
+  },
+
+  // ── 37. Mestizo ──────────────────────────────────────────────────────
+  {
+    slug: "mestizo-euston",
+    searchQuery: "Mestizo 103 Hampstead Road Euston London NW1",
+    neighbourhood: "Euston",
+    vibe: "Family-run Mexico City cantina with a huge tequila wall.",
+    longDescription:
+      "Founded in 2004 and still family-run, this is where much of London's Mexican community eats. The downstairs tequila and mezcal bar claims one of Europe's largest selections, while upstairs delivers mole, molcajete and slow-cooked enchiladas.",
+    type: "Restaurant",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner", "drinks"],
+    vibeTags: ["Authentic Mexican", "Tequila bar", "Family-run", "Lively"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/mestizo",
+        title: "Mestizo",
+        date: "2015-10-12",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/mestizo",
+        title: "Mestizo",
+        date: "2017-04-17",
+      },
+      {
+        publication: "Square Meal",
+        url: "https://www.squaremeal.co.uk/restaurants/mestizo_2037",
+        title: "Mestizo, Square Meal listing",
+      },
+      {
+        publication: "Harden's",
+        url: "https://www.hardens.com/az/restaurants/london/nw1/mestizo.htm",
+        title: "Mestizo, Harden's London review",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Authentic over polished",
+        body: "A buzzy community cantina, not a designer Mexican. Expect generous traditional cooking and a lively, sometimes chaotic room.",
+      },
+      {
+        label: "The tequila bar is the move",
+        body: "The downstairs bar is the real reason to come. Sit down there for the mezcal and tequila flights rather than just the dining room.",
+      },
+    ],
+  },
+
+  // ── 38. The River Café ───────────────────────────────────────────────
+  {
+    slug: "the-river-cafe",
+    searchQuery:
+      "The River Cafe Thames Wharf Rainville Road Hammersmith London W6",
+    neighbourhood: "Hammersmith",
+    vibe: "Thames-side Italian benchmark, Michelin-starred since 1997.",
+    longDescription:
+      "Ruth Rogers and the late Rose Gray opened this Hammersmith riverside institution in 1987, originally a canteen for Richard Rogers' architecture practice. It has held a Michelin star since 1997, trained Jamie Oliver and Hugh Fearnley-Whittingstall, and remains London's benchmark for ingredient-led Italian cooking.",
+    type: "Restaurant",
+    price: "£££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner"],
+    vibeTags: ["Michelin star", "Italian", "Thames-side", "Iconic"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/river-cafe",
+        title: "The River Cafe, Hammersmith",
+        date: "2024-11-13",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/river-cafe-london",
+        title: "The River Cafe",
+        date: "2024-08-01",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Topjaw",
+        handle: "@topjaw",
+        platform: "youtube",
+        url: "https://www.youtube.com/shorts/k2OAjghwsQo",
+        verdict: "positive",
+        note: "Owner Ruthie Rogers gives her Best of London in Topjaw's Ep. 152 (Aug 2024).",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Spend honestly",
+        body: "This is special-occasion territory. A recent critic's bill landed around £137 a head with a single glass of wine, and Harden's readers regularly vote it London's most overpriced.",
+      },
+      {
+        label: "Service divides opinion",
+        body: "Reviews swing between warm and aloof. The cooking and the riverside terrace are the reason to come; manage expectations on the rest.",
+      },
+    ],
+  },
+
+  // ── 39. The Blues Kitchen (Camden) ───────────────────────────────────
+  {
+    slug: "the-blues-kitchen-camden",
+    searchQuery: "The Blues Kitchen 111 Camden High Street Camden London NW1",
+    neighbourhood: "Camden",
+    vibe: "Live blues and soul nightly, with a bourbon-soaked Sunday brunch.",
+    longDescription:
+      "A high-energy American bar-diner on Camden High Street with live music every night, from blues jams to soul and Motown. Sunday brunch doubles as a proper jam session, backed by a hefty bourbon list.",
+    type: "Live Music",
+    price: "££",
+    timeOfDay: "Night",
+    moodTags: ["drinks", "culture"],
+    vibeTags: ["Live music", "Blues and soul", "Bourbon", "Sunday brunch"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/music/the-blues-kitchen-camden",
+        title: "The Blues Kitchen Camden",
+      },
+      {
+        publication: "Square Meal",
+        url: "https://www.squaremeal.co.uk/restaurants/the-blues-kitchen-camden_2643",
+        title: "The Blues Kitchen Camden, Square Meal review",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Eating With Tod",
+        handle: "@eatingwithtod",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@eatingwithtod/video/7382911492707847457",
+        verdict: "positive",
+        note: "1.2M-follower food creator on the unlimited Sunday wings deal at Blues Kitchen.",
+      },
+      {
+        creator: "Foodyfella",
+        handle: "@foodyfella_",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@foodyfella_/video/7510200105140555030",
+        verdict: "positive",
+        note: "TikTok Food Creator of the Year 2025 (300k+) on the bottomless brunch. Paid partnership.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Three London sites",
+        body: "Blues Kitchen runs three London venues (Camden, Shoreditch, Brixton). This is the original Camden flagship; the others share the format.",
+      },
+      {
+        label: "Book the brunch",
+        body: "Sunday bottomless brunch slots sell out early and walk-ins rarely land a table on the day.",
+      },
+      {
+        label: "Loud by design",
+        body: "Live music runs late most nights, so it is not the place for a quiet dinner conversation.",
+      },
+    ],
+  },
+
+  // ── 40. Sol's ────────────────────────────────────────────────────────
+  {
+    slug: "sols-bayswater",
+    searchQuery: "Sol's 25 Leinster Terrace Bayswater London W2",
+    neighbourhood: "Bayswater",
+    vibe: "Deli by day, low-intervention wine bar by night, near Hyde Park.",
+    longDescription:
+      "Sol's occupies a bright corner on Leinster Terrace, shifting from a deli and café by day into a natural-wine bar by evening. The list is curated by food writer Mina Holland and the kitchen keeps things tightly Mediterranean.",
+    type: "Wine Bar",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["drinks", "dinner"],
+    vibeTags: ["Natural wine", "Iberian", "Deli", "Neighbourhood gem"],
+    editorialSources: [
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Gastroblog/Test-drive/sols-wine-bar-review-bayswater-west-london",
+        title: "Test Driving Sol's, a cool new wine bar for Bayswater",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/bars-and-pubs/sols",
+        title: "Sol's",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/sols",
+        title: "Sol's review",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Walk-in only",
+        body: "Sol's does not take reservations. Easy off-peak, but expect a wait on weekend evenings.",
+      },
+      {
+        label: "Wine-bar mode is evenings",
+        body: "By day it is more of a café and deli. Come in the evening for the full wine-bar experience.",
+      },
+    ],
+  },
+
+  // ── 41. Kentish Town City Farm ───────────────────────────────────────
+  {
+    slug: "kentish-town-city-farm",
+    searchQuery:
+      "Kentish Town City Farm 1 Cressfield Close Kentish Town London NW5",
+    neighbourhood: "Kentish Town",
+    vibe: "London's first city farm, free, with goats between two railways.",
+    longDescription:
+      "Founded in 1972 by volunteers on a former timberyard wedged between two railway lines, this is the UK's original city farm. Free every day, it keeps goats, pigs, donkeys, horses, chickens and ducks, plus a community garden.",
+    type: "Outdoors",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Free", "City farm", "Family-friendly", "Community"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/things-to-do/kentish-town-city-farm",
+        title: "Kentish Town City Farm",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/london/great-outdoors/the-city-farm-between-two-train-lines",
+        title: "The City Farm That Straddles A Train Line",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Look, don't feed",
+        body: "Unlike some farms, visitors cannot feed or pet the animals. The farm posts a printed bio for each resident instead.",
+      },
+      {
+        label: "Free, charity-run",
+        body: "Run as a registered charity with free entry and donations welcomed. Open daily 9am to 5pm, no booking needed.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 42. Frank's Café (Bold Tendencies) ───────────────────────────────
+  {
+    slug: "franks-cafe-bold-tendencies",
+    searchQuery: "Frank's Cafe Bold Tendencies 95A Rye Lane Peckham London SE15",
+    neighbourhood: "Peckham",
+    vibe: "Summer-only rooftop Negronis on a Peckham car park, since 2009.",
+    longDescription:
+      "Each summer Frank's takes over the upper floors of a Peckham multi-storey car park, pairing sunset Negronis and seasonal food with site-specific art from Bold Tendencies. Entry is free and walk-in only, and the hot-pink staircase is a London icon.",
+    type: "Bar",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["drinks", "culture"],
+    vibeTags: ["Rooftop", "Summer only", "Negroni", "Art space"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/bars-and-pubs/franks-cafe",
+        title: "Frank's Cafe at Bold Tendencies",
+      },
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/franks-cafe-campari-bar",
+        title: "Frank's Cafe, Peckham",
+        date: "2023-05-25",
+      },
+      {
+        publication: "Square Meal",
+        url: "https://www.squaremeal.co.uk/restaurants/franks-cafe_2453",
+        title: "Frank's Café, Square Meal listing",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Summer season only",
+        body: "Open roughly mid-May to mid-September and closed the rest of the year. Always check the Bold Tendencies site for exact dates.",
+      },
+      {
+        label: "Walk-in only",
+        body: "No bookings. Weekend sessions can mean a long queue, so a weekday evening is the easy way in.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 43. Duke of York Square Market ───────────────────────────────────
+  {
+    slug: "duke-of-york-square-market",
+    searchQuery: "Duke of York Square Market Chelsea London",
+    neighbourhood: "Chelsea",
+    vibe: "Upscale Saturday fine-food market beside the Saatchi Gallery.",
+    longDescription:
+      "Around 45 independent traders set up every Saturday in this handsome square off the King's Road, selling artisan produce, street food and global flavours. It sits in front of the Saatchi Gallery, so a market browse pairs easily with a free art fix.",
+    type: "Market",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Artisan food", "Saturdays", "Al fresco", "Saatchi Gallery"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/shopping/duke-of-york-square",
+        title: "Duke Of York Square, Shopping in King's Road, London",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/2014/12/markets-in-london-mapped",
+        title: "Markets In London, Mapped",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Saturdays only",
+        body: "The stalls run Saturdays roughly 10am to 4pm. The surrounding shops open other days but there is no market.",
+      },
+      {
+        label: "Pricey surroundings",
+        body: "Sit-down restaurants around the square skew expensive. The market stalls themselves are affordable street-food pricing.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 44. Exmouth Market ───────────────────────────────────────────────
+  {
+    slug: "exmouth-market",
+    searchQuery: "Exmouth Market Clerkenwell Farringdon London",
+    neighbourhood: "Clerkenwell",
+    vibe: "Pedestrian indie street with weekday street-food stalls.",
+    longDescription:
+      "A short, character-packed Clerkenwell street lined with independent restaurants, bars and boutiques that has resisted the chains since the 1990s. Weekday lunchtimes bring street-food stalls to the pavement, while Moro and Caravan keep the evenings lively.",
+    type: "Market",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Street food", "Indie", "Pedestrianised", "Weekday lunch"],
+    editorialSources: [
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/shopping/exmouth-market",
+        title: "Exmouth Market, Shopping in Exmouth Market, London",
+      },
+      {
+        publication: "Secret London",
+        url: "https://secretldn.com/8-excellent-reasons-explore-exmouth-market/",
+        title: "8 Excellent Reasons To Explore Exmouth Market",
+        date: "2017-05-25",
+      },
+    ],
+    creatorCoverage: [
+      {
+        creator: "Topjaw",
+        handle: "@topjaw",
+        platform: "youtube",
+        url: "https://www.youtube.com/watch?v=xhoMEvjX_bM",
+        verdict: "positive",
+        note: "Topjaw's dedicated local food tour of Exmouth Market, Clerkenwell.",
+      },
+      {
+        creator: "Foodyfella",
+        handle: "@foodyfella_",
+        platform: "tiktok",
+        url: "https://www.tiktok.com/@foodyfella_/video/7329507443409472800",
+        verdict: "positive",
+        note: "300k+ food creator on Dohut, the doughnut stall on Exmouth Market.",
+      },
+    ],
+    criticalFlags: [
+      {
+        label: "Stalls are weekday only",
+        body: "The outdoor street-food stalls trade Monday to Friday, roughly 11am to 2pm. Evenings and weekends the street is lively but stall-free.",
+      },
+      {
+        label: "Not a produce market",
+        body: "This is really a street of permanent independents. The street food is a lunchtime overlay, not a farmers market.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 45. Victoria Park Market ─────────────────────────────────────────
+  {
+    slug: "victoria-park-market",
+    searchQuery: "Victoria Park Market Hackney Sunday London",
+    neighbourhood: "Victoria Park",
+    vibe: "Sunday food market on the Nightwalk inside Victoria Park.",
+    longDescription:
+      "Every Sunday from 10am to 4pm, traders line the Nightwalk path between Bonner Gate and Gore Gate, blending seasonal produce with diverse street food. Launched in 2017, it sits inside one of East London's best-loved green spaces.",
+    type: "Market",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["activity"],
+    vibeTags: ["Sundays", "Street food", "Family-friendly", "In the park"],
+    editorialSources: [
+      {
+        publication: "Secret London",
+        url: "https://secretldn.com/victoria-park-market/",
+        title:
+          "This sensational Sunday market is one of the best in the city for foodies",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/victoria-park-market",
+        title: "Victoria Park Market, Restaurants in Victoria Park, London",
+        date: "2018-05-11",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Sundays only, 10am to 4pm",
+        body: "The market runs Sundays only. The park is open daily but stalls are not present on other days.",
+      },
+      {
+        label: "Tucked inside the park",
+        body: "Enter via Bonner Gate or Gore Gate; the market is on an internal path, not visible from the main road. Mile End is the nearest tube.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 46. Kenwood House ────────────────────────────────────────────────
+  {
+    slug: "kenwood-house",
+    searchQuery: "Kenwood House Hampstead Heath London",
+    neighbourhood: "Hampstead",
+    vibe: "Free Georgian villa on the Heath with Old Masters on the walls.",
+    longDescription:
+      "Remodelled by Robert Adam in the 1760s, Kenwood sits on the northern edge of Hampstead Heath and holds a collection left to the nation in 1928 on the condition it stay free. Highlights include a Rembrandt self-portrait and Vermeer's The Guitar Player.",
+    type: "Culture",
+    price: "Free",
+    timeOfDay: "Day",
+    moodTags: ["culture"],
+    vibeTags: ["Free", "Old Masters", "Hampstead Heath", "Georgian"],
+    editorialSources: [
+      {
+        publication: "English Heritage",
+        url: "https://www.english-heritage.org.uk/visit/places/kenwood/",
+        title: "Kenwood, English Heritage",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/attractions/kenwood-house",
+        title: "Kenwood House, Attractions in Hampstead Heath, London",
+      },
+      {
+        publication: "Londonist",
+        url: "https://londonist.com/2013/11/kenwood-house-reopens-after-restoration",
+        title: "Kenwood House Reopens After Restoration",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Book a slot at weekends",
+        body: "Entry is free, but English Heritage suggests booking an arrival slot online at busy times.",
+      },
+      {
+        label: "Getting there takes effort",
+        body: "No direct tube. The 210 bus from Golders Green or Archway is the way in, so allow extra time from the centre.",
+      },
+    ],
+    skipProspect: true,
+  },
+
+  // ── 47. Churchill War Rooms ──────────────────────────────────────────
+  {
+    slug: "churchill-war-rooms",
+    searchQuery: "Churchill War Rooms Westminster London",
+    neighbourhood: "Westminster",
+    vibe: "The preserved underground bunker where Churchill ran the war.",
+    longDescription:
+      "The Cabinet War Rooms have been kept as they were in August 1945, beneath the Treasury in Whitehall. Part of the Imperial War Museum, the complex pairs the original operational rooms with a museum tracing Churchill's life.",
+    type: "Culture",
+    price: "£££",
+    timeOfDay: "Day",
+    moodTags: ["culture"],
+    vibeTags: ["WWII history", "Underground", "Churchill", "Westminster"],
+    editorialSources: [
+      {
+        publication: "Imperial War Museums",
+        url: "https://www.iwm.org.uk/visits/churchill-war-rooms",
+        title: "Visit Churchill War Rooms, Imperial War Museums",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/museums/churchill-war-rooms",
+        title: "Churchill War Rooms, Museums in Whitehall, London",
+      },
+      {
+        publication: "CNN Travel",
+        url: "https://edition.cnn.com/travel/article/churchill-war-rooms/",
+        title: "Churchill War Rooms: where England plotted WWII victory",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Pricey, so book online",
+        body: "Adult admission is around £34. Booking online avoids the queues and the audio guide is included in the ticket.",
+      },
+      {
+        label: "Allow ninety minutes",
+        body: "The layout can be disorienting, so budget at least an hour and a half to cover both the War Rooms and the Churchill Museum.",
+      },
+    ],
+    skipProspect: true,
+  },
 ];
 
 // Helper to get a seed by slug (used by the ingestion script).
