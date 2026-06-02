@@ -316,6 +316,35 @@ export function PlanFlow({
   }
 
   // ── Result screen ───────────────────────────────────────────────────
+  // Guard: if the chosen area/vibe/budget yields no venues (e.g. an empty or
+  // over-filtered catalogue), there's nothing to route — show a friendly
+  // dead-end with a way back instead of a "Night in " header with zero stops.
+  if (display.steps.length === 0) {
+    return (
+      <div className="px-5 py-16 text-center">
+        <div className="text-4xl mb-3">🗺️</div>
+        <h2 className="text-xl font-extrabold text-heading mb-1.5">
+          No plan for that combo
+        </h2>
+        <p className="text-sm text-muted-fg max-w-[300px] mx-auto leading-relaxed mb-6">
+          We couldn&apos;t pull together enough spots for{" "}
+          {display.area ? <b>{display.area}</b> : "that mix"} right now. Try a
+          different area or vibe.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setOpenedSaved(null);
+            setStep("setup");
+          }}
+          className="h-11 px-5 rounded-2xl bg-primary text-white font-extrabold text-[15px]"
+        >
+          Adjust my plan
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div

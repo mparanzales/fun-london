@@ -80,6 +80,16 @@ export default async function RootLayout({
   return (
     <html lang="en" className={jakarta.variable}>
       <body className="font-sans antialiased min-h-screen">
+        {/* Anti-flash: set the theme palette BEFORE first paint so there's no
+            flash of the wrong colours while React hydrates and ThemeProvider's
+            effect runs. Mirrors lib/theme.ts (key "fl.theme.v1"; auto = night
+            18:00-06:00). Kept inline + tiny on purpose. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var m=localStorage.getItem('fl.theme.v1');var t;if(m==='day'||m==='night'){t=m}else{var h=new Date().getHours();t=(h>=18||h<6)?'night':'day'}document.documentElement.dataset.theme=t}catch(e){}})();",
+          }}
+        />
         {/* SavedProvider, BookingsProvider, ThemeProvider live at root so
             every route (consumer (main) shell, splash, onboarding,
             /venue/[slug], /booking/[slug]/confirmed) shares one provider
