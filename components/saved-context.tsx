@@ -51,6 +51,11 @@ export function SavedProvider({
   const [savedSet, setSavedSet] = useState<Set<string>>(
     () => new Set(MOCK_SAVED_IDS),
   );
+  // Gate the anon persist effect until the first hydrate read has happened.
+  // Without this, on a hard reload the persist effect fires on mount with the
+  // empty initial state and overwrites localStorage BEFORE the hydrate effect
+  // reads it — silently wiping an anonymous user's saved spots.
+  const [hydrated, setHydrated] = useState(false);
   // slug → venue.id (uuid). Populated when authed; empty when anon.
   const slugToUuidRef = useRef<Map<string, string>>(new Map());
 
@@ -69,6 +74,7 @@ export function SavedProvider({
       } catch {
         // localStorage unavailable
       }
+      setHydrated(true);
       return;
     }
 
@@ -158,8 +164,10 @@ export function SavedProvider({
   }, [authUserId]);
 
   // ── Persist (anon only — authed writes happen in toggleSaved) ───────
+  // Gated on `hydrated` so the empty initial state can't clobber a real
+  // saved list before the hydrate read above has run.
   useEffect(() => {
-    if (authUserId) return;
+    if (authUserId || !hydrated) return;
     try {
       window.localStorage.setItem(
         STORAGE_KEY,
@@ -168,7 +176,7 @@ export function SavedProvider({
     } catch {
       // ignore quota / privacy mode
     }
-  }, [savedSet, authUserId]);
+  }, [savedSet, authUserId, hydrated]);
 
   const toggleSaved = useCallback(
     (venueSlug: string) => {

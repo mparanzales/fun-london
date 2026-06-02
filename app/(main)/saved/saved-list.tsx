@@ -7,7 +7,13 @@ import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import type { Venue } from "@/lib/types";
 
-export function SavedList({ allVenues }: { allVenues: Venue[] }) {
+export function SavedList({
+  allVenues,
+  isAnon = false,
+}: {
+  allVenues: Venue[];
+  isAnon?: boolean;
+}) {
   const { savedSet } = useSaved();
   const { bookings } = useBookings();
   const saved = allVenues.filter((v) => savedSet.has(v.slug));
@@ -15,6 +21,8 @@ export function SavedList({ allVenues }: { allVenues: Venue[] }) {
   const hasBookings = bookings.length > 0;
   const hasSaved = saved.length > 0;
   const hasAnything = hasBookings || hasSaved;
+  // Warn anonymous users that anything here lives only in this browser.
+  const showAnonWarning = isAnon && hasAnything;
 
   return (
     <div className="pt-4 pb-6">
@@ -28,6 +36,29 @@ export function SavedList({ allVenues }: { allVenues: Venue[] }) {
           </div>
         )}
       </header>
+
+      {showAnonWarning && (
+        <div className="px-5 pb-4">
+          <div className="rounded-2xl border border-accent/40 bg-accent/10 px-4 py-3.5 flex items-start gap-3">
+            <span className="text-lg leading-none mt-0.5">📌</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-extrabold text-heading">
+                Saved on this device only
+              </div>
+              <p className="text-[12px] text-muted-fg mt-0.5 leading-relaxed">
+                Sign in to keep your spots safe and reach them from any device.
+                Clearing your browser would lose them.
+              </p>
+              <Link
+                href="/sign-in?return=/saved"
+                className="inline-block mt-2 text-[12px] font-extrabold text-primary no-underline"
+              >
+                Sign in to save them →
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {hasBookings && (
         <section className="px-5 pb-6">
