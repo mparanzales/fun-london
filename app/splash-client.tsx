@@ -19,6 +19,9 @@ import Image from "next/image";
 
 const ONBOARDING_KEY = "fl.onboarding.v1";
 const TOTAL_DURATION_MS = 1700;
+// Reduce-motion users skip most of the brand-mark hold (the animation itself
+// is already disabled globally for them).
+const REDUCED_MOTION_DURATION_MS = 350;
 
 export function SplashClient({
   authed,
@@ -30,6 +33,17 @@ export function SplashClient({
   const router = useRouter();
 
   useEffect(() => {
+    // Honour Reduce Motion: the brand-mark animation is already zeroed by the
+    // global prefers-reduced-motion rule, so holding the black screen for the
+    // full 1.7s just strands those users on a blank page. Cut the hold short.
+    let hold = TOTAL_DURATION_MS;
+    try {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        hold = REDUCED_MOTION_DURATION_MS;
+      }
+    } catch {
+      // matchMedia unavailable — keep the default hold.
+    }
     const t = setTimeout(() => {
       let onboarded = false;
       if (authed) {
@@ -44,7 +58,7 @@ export function SplashClient({
         }
       }
       router.replace(onboarded ? "/explore" : "/onboarding");
-    }, TOTAL_DURATION_MS);
+    }, hold);
     return () => clearTimeout(t);
   }, [router, authed, dbOnboarded]);
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth";
+import { safeReturnPath } from "@/lib/safe-redirect";
 import { Logo } from "@/components/logo";
 import { SignInForm } from "./sign-in-form";
 
@@ -29,8 +30,9 @@ export default async function SignInPage({
 }) {
   const user = await getAuthUser();
   if (user) {
-    // Already signed in — bounce them to where they were headed.
-    redirect(searchParams.return ?? "/explore");
+    // Already signed in — bounce them to where they were headed (guarded
+    // against open-redirects via ?return=//evil.com).
+    redirect(safeReturnPath(searchParams.return));
   }
 
   return (

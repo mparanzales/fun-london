@@ -18,13 +18,13 @@
 import type { Participant } from "./types";
 
 // ── Saved venues seed ────────────────────────────────────────────────────
-// Anon users start with two venues already hearted, so /saved isn't empty
-// on first run. Slugs (not ids) — they outlive any Supabase reseed.
+// Empty by design. Previously seeded anon users with two pre-"saved" venues
+// (dishoom-shoreditch, borough-market) so /saved wasn't empty on first run —
+// but those are hidden demo slugs (no google_place_id) that never render in
+// the catalogue, so a new visitor saw "2 saved / nothing to show". Starting
+// at zero is honest; the empty state already invites the first save.
 
-export const MOCK_SAVED_IDS: string[] = [
-  "dishoom-shoreditch",
-  "borough-market",
-];
+export const MOCK_SAVED_IDS: string[] = [];
 
 // ── Plan Together — mock multiplayer participants ────────────────────────
 // Colors and emoji mirror the prototype's plan-together.jsx voter palette.

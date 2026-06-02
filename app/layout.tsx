@@ -50,7 +50,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
+  // No maximumScale/userScalable cap — capping zoom fails WCAG 1.4.4
+  // (users must be able to pinch-zoom up to 200%+).
   // Adapts iOS Safari's status-bar / browser-chrome tint to the user's
   // OS-level light/dark preference. Note: the in-app theme is TIME-based
   // (18:00–06:00 = night) via components/theme-provider.tsx, so the

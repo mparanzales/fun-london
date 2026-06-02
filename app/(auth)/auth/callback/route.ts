@@ -17,11 +17,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { safeReturnPath } from "@/lib/safe-redirect";
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const returnTo = searchParams.get("return") ?? "/explore";
+  // Guard against open-redirects: only a site-internal path is allowed.
+  const returnTo = safeReturnPath(searchParams.get("return"));
 
   // Supabase forwards provider-side OAuth failures here without a `code`,
   // instead populating `error` + `error_description`. Surface those to
