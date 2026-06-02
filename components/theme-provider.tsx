@@ -1,17 +1,22 @@
 "use client";
 import { useEffect } from "react";
+import { getThemeMode, resolveTheme, THEME_CHANGE_EVENT } from "@/lib/theme";
 
 export function ThemeProvider() {
-  // Auto-switch theme based on time: night between 18:00 and 06:00.
+  // Apply the user's saved theme mode. In "auto" mode this follows the clock
+  // (night 18:00–06:00, re-checked each minute); a fixed Light/Dark choice
+  // pins the palette. Re-applies instantly when the profile changes the mode.
   useEffect(() => {
     const apply = () => {
-      const h = new Date().getHours();
-      const isNight = h >= 18 || h < 6;
-      document.documentElement.dataset.theme = isNight ? "night" : "day";
+      document.documentElement.dataset.theme = resolveTheme(getThemeMode());
     };
     apply();
     const id = setInterval(apply, 60_000);
-    return () => clearInterval(id);
+    window.addEventListener(THEME_CHANGE_EVENT, apply);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener(THEME_CHANGE_EVENT, apply);
+    };
   }, []);
   return null;
 }

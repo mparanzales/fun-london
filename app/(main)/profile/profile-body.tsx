@@ -2,11 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import { createClient } from "@/lib/supabase/client";
 import { FeedbackSheet } from "@/components/feedback-sheet";
+import {
+  getThemeMode,
+  nextThemeMode,
+  setThemeMode,
+  themeModeLabel,
+  type ThemeMode,
+} from "@/lib/theme";
 import type { UserPreferences } from "@/lib/types";
 
 // Two states:
@@ -98,6 +105,18 @@ function SignedInProfile({
   const { count: bookingsCount } = useBookings();
   const [signingOut, setSigningOut] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // Theme mode. Start at "auto" (matches SSR) and sync to the saved choice
+  // after mount to avoid a hydration mismatch.
+  const [themeMode, setThemeModeState] = useState<ThemeMode>("auto");
+  useEffect(() => {
+    setThemeModeState(getThemeMode());
+  }, []);
+
+  function cycleTheme() {
+    const next = nextThemeMode(themeMode);
+    setThemeModeState(next);
+    setThemeMode(next); // persists + repaints via ThemeProvider
+  }
 
   const effectiveName = displayName ?? authUserEmail?.split("@")[0] ?? "You";
   const initial = effectiveName.trim()[0]?.toUpperCase() ?? "?";
@@ -117,13 +136,10 @@ function SignedInProfile({
     ? summaryParts.join(" · ")
     : "No spots yet";
 
-  const actionRows = [
-    { icon: "💜", label: "Notification prefs" },
-    { icon: "🌗", label: "Theme: Auto" },
-  ];
-
-  // Edit profile row has its own handler (navigates), so it sits outside
-  // the stub action rows above.
+  // Theme icon mirrors the mode: half-moon for auto, sun for light, moon
+  // for dark.
+  const themeIcon =
+    themeMode === "auto" ? "🌗" : themeMode === "day" ? "☀️" : "🌙";
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -183,18 +199,30 @@ function SignedInProfile({
           <span className="text-muted-fg">›</span>
         </button>
 
-        {actionRows.map((r) => (
-          <button
-            key={r.label}
-            className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
-          >
-            <span className="flex gap-2.5 items-center">
-              <span>{r.icon}</span>
-              <span>{r.label}</span>
-            </span>
-            <span className="text-muted-fg">›</span>
-          </button>
-        ))}
+        <button
+          type="button"
+          onClick={cycleTheme}
+          aria-label={`Theme: ${themeModeLabel(themeMode)}. Tap to change.`}
+          className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
+        >
+          <span className="flex gap-2.5 items-center">
+            <span>{themeIcon}</span>
+            <span>Theme: {themeModeLabel(themeMode)}</span>
+          </span>
+          <span className="text-[11px] font-bold text-muted-fg uppercase tracking-wider">
+            Tap to change
+          </span>
+        </button>
+
+        <div className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-muted-fg text-[13px] font-bold">
+          <span className="flex gap-2.5 items-center">
+            <span>🔔</span>
+            <span>Notifications</span>
+          </span>
+          <span className="text-[10px] font-extrabold uppercase tracking-wider bg-muted text-muted-fg rounded-full px-2 py-1">
+            Soon
+          </span>
+        </div>
 
         <button
           type="button"
