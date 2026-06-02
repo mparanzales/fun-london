@@ -108,8 +108,8 @@ function EmptyState() {
       <div className="text-3xl mb-2">🎉</div>
       <h2 className="text-sm font-extrabold text-heading mb-1">Queue clear</h2>
       <p className="text-xs text-muted-fg leading-relaxed">
-        No candidates waiting. The scout is currently scaffold-only —
-        publication adapters land in Phase 2B, autonomous cron in Phase 2B+. Run{" "}
+        No candidates waiting. The scout is currently scaffold-only, publication
+        adapters land in Phase 2B, autonomous cron in Phase 2B+. Run{" "}
         <code>pnpm scout-candidates:dry</code> locally to test the pipeline
         shape.
       </p>
@@ -161,7 +161,7 @@ function CandidateCard({ c }: { c: Candidate }) {
         <ul className="mt-2 flex flex-col gap-1">
           {c.sources.map((s, i) => (
             <li key={i} className="text-xs text-muted-fg leading-snug">
-              <span className="font-bold text-fg">{s.publication}</span> —{" "}
+              <span className="font-bold text-fg">{s.publication}</span>,{" "}
               <a
                 href={s.url}
                 target="_blank"

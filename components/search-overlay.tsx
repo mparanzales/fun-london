@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
+import { track } from "@/lib/analytics";
 import type { Venue, Event } from "@/lib/types";
 
 type Result =
@@ -75,6 +76,18 @@ export function SearchOverlay({
 
     return out.sort((a, b) => a.score - b.score);
   }, [query, venues, events]);
+
+  // Track searches, debounced, so we log the intent once the user pauses
+  // typing (not on every keystroke). Only meaningful queries (≥2 chars).
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) return;
+    const t = setTimeout(
+      () => track("search_query", { q, results: results.length }),
+      700,
+    );
+    return () => clearTimeout(t);
+  }, [query, results.length]);
 
   const q = query.trim();
 

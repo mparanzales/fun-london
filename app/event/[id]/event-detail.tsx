@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink, Calendar, Clock } from "lucide-react";
 import { EventActions } from "@/components/event-actions";
+import { applyAffiliate } from "@/lib/affiliate";
+import { track } from "@/lib/analytics";
 import type { Event, Venue } from "@/lib/types";
 
 // Event detail — full-screen immersive layout, mirrors the venue
@@ -39,6 +41,12 @@ export function EventDetail({
   const ticketCtaLabel = ticketProvider
     ? `Get tickets → ${ticketProvider}`
     : "Get tickets";
+  // Tag outbound ticket links with attribution + (when configured) the
+  // Ticketmaster/Awin affiliate id. No-op on internal links.
+  const ticketHref =
+    event.sourceUrl && isExternal
+      ? applyAffiliate("ticketmaster", event.sourceUrl)
+      : event.sourceUrl;
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
@@ -142,9 +150,15 @@ export function EventDetail({
         <div className="max-w-md mx-auto pointer-events-auto">
           {event.sourceUrl ? (
             <a
-              href={event.sourceUrl}
+              href={ticketHref ?? event.sourceUrl}
               target={isExternal ? "_blank" : undefined}
               rel={isExternal ? "noopener noreferrer" : undefined}
+              onClick={() =>
+                track("event_ticket_click", {
+                  id: event.id,
+                  provider: ticketProvider ?? "unknown",
+                })
+              }
               className="block w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)] flex items-center justify-center gap-2"
               style={{
                 background:

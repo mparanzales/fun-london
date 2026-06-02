@@ -26,6 +26,7 @@ dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { VENUE_SEEDS, type VenueSeed } from "./venues-seed";
+import { mirrorPhotoToStorage } from "./photo-storage";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 import {
   normalizeOpeningHours,
@@ -221,13 +222,15 @@ function photoUrl(photoName: string, maxWidth = 1600): string {
 
 // ── Row builders ─────────────────────────────────────────────────────────
 
-function buildVenueRow(seed: VenueSeed, details: PlaceDetails) {
+const UNSPLASH_FALLBACK =
+  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
+
+function buildVenueRow(seed: VenueSeed, details: PlaceDetails, imgUrl: string) {
   const websiteUri = details.websiteUri ?? null;
   const bookingLinks = detectBookingLinks(
     websiteUri ?? undefined,
     details.reservable,
   );
-  const photoName = details.photos?.[0]?.name;
 
   return {
     slug: seed.slug,
@@ -246,9 +249,7 @@ function buildVenueRow(seed: VenueSeed, details: PlaceDetails) {
     walking_mins: 12, // hard-coded V1 default; future: compute from user location
     tables_free: 4, // hard-coded V1 default; future: real-time from booking platforms
     next_slot_label: "Open today",
-    img_url: photoName
-      ? photoUrl(photoName)
-      : "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80",
+    img_url: imgUrl,
     mood_tags: seed.moodTags,
     vibe_tags: seed.vibeTags,
     google_place_id: details.id,
@@ -339,7 +340,15 @@ async function processVenue(seed: VenueSeed): Promise<{
   } else {
     if (!supabase) throw new Error("Supabase client not initialised");
 
-    const venueRow = buildVenueRow(seed, details);
+    // Resolve the venue photo: mirror to Supabase Storage (keyless URL) when
+    // FL_PHOTO_BUCKET is configured, else fall back to the keyed Google URL.
+    const photoName = details.photos?.[0]?.name;
+    const imgUrl = photoName
+      ? ((await mirrorPhotoToStorage(photoName, seed.slug, supabase)) ??
+        photoUrl(photoName))
+      : UNSPLASH_FALLBACK;
+
+    const venueRow = buildVenueRow(seed, details, imgUrl);
     const { error: venueErr } = await supabase
       .from("venues")
       .upsert(venueRow, { onConflict: "google_place_id" });

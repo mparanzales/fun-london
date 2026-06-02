@@ -180,6 +180,18 @@ function SignedInProfile({
           </span>
         </button>
       </div>
+
+      <nav className="px-5 mt-6 flex justify-center gap-4 text-[11px] text-muted-fg">
+        <Link href="/privacy" className="underline underline-offset-2">
+          Privacy
+        </Link>
+        <Link href="/terms" className="underline underline-offset-2">
+          Terms
+        </Link>
+        <Link href="/cookies" className="underline underline-offset-2">
+          Cookies
+        </Link>
+      </nav>
     </div>
   );
 }

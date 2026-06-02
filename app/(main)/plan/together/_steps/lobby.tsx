@@ -21,7 +21,7 @@ export function Lobby({ room, onStart }: { room: Room; onStart: () => void }) {
 
   const onShare = async () => {
     const r = await shareOrCopy({
-      title: "Plan a night out — Fun London",
+      title: "Plan a night out, Fun London",
       text: `Join my Fun London room (${room.code}) and let's pick a night.`,
       url: link,
     });
@@ -123,7 +123,7 @@ export function Lobby({ room, onStart }: { room: Room; onStart: () => void }) {
         Start swiping ({room.members.length})
       </button>
       <p className="text-[11px] text-muted-fg text-center -mt-2">
-        Anyone can start — everyone jumps to swiping together.
+        Anyone can start, everyone jumps to swiping together.
       </p>
     </div>
   );

@@ -10,6 +10,7 @@
 // still lands on the right venue page and just re-picks — never a dead end.
 
 import type { BookingLink } from "@/lib/types";
+import { applyAffiliate } from "@/lib/affiliate";
 
 export type ReserveTarget = { platform: BookingLink["platform"]; url: string };
 export type ReserveSlot = { date: string; time: string; party: number }; // date=YYYY-MM-DD, time=HH:MM
@@ -43,7 +44,8 @@ export function buildReserveUrl(
       // so we just hand them the venue's booking page.
       break;
   }
-  return u.toString();
+  // Attribution + affiliate id (no-op until ids are configured in env).
+  return applyAffiliate(target.platform, u.toString());
 }
 
 export function platformLabel(platform: BookingLink["platform"]): string {

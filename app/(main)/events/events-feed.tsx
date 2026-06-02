@@ -226,7 +226,7 @@ export function EventsFeed({
           <div className="rounded-2xl bg-card border border-border p-5 text-center">
             <div className="text-2xl mb-1">🌙</div>
             <p className="text-sm text-muted-fg leading-relaxed">
-              No events match that filter yet. Tier 3 ingests every 4 hours —
+              No events match that filter yet. Tier 3 ingests every 4 hours,
               more sources coming soon.
             </p>
           </div>

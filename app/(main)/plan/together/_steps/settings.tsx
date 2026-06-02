@@ -39,7 +39,7 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
         </h1>
         {room.settings ? (
           <p className="text-sm text-muted-fg mt-2">
-            {summarize(room.settings)} — hang tight, swiping starts in a sec.
+            {summarize(room.settings)}, hang tight, swiping starts in a sec.
           </p>
         ) : (
           <p className="text-sm text-muted-fg mt-2">
@@ -188,7 +188,7 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
         onClick={onLock}
         className="mt-4 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-sm font-extrabold"
       >
-        Lock it in — start swiping
+        Lock it in, start swiping
       </button>
     </div>
   );

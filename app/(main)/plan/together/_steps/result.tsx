@@ -140,7 +140,7 @@ export function Result({
           ✦ How we mixed it
         </div>
         <div className="text-[11.5px] text-fg mt-1 leading-snug">
-          The group&apos;s vibe: {mixSummary} — kept it all within walking
+          The group&apos;s vibe: {mixSummary}, kept it all within walking
           distance.
         </div>
       </div>
@@ -241,7 +241,7 @@ export function Result({
         <p className="text-[11px] text-muted-fg mt-3 leading-snug">
           Couldn&apos;t find an open spot for{" "}
           {plan.unfilledRoles.map((r) => STEP_LABELS[r]).join(" or ")} within
-          walking distance — try a different time or area.
+          walking distance, try a different time or area.
         </p>
       )}
 

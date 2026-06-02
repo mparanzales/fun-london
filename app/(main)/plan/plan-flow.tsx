@@ -19,6 +19,7 @@ import {
   type PlanRole,
   type PlanVibe,
 } from "@/lib/plan-engine";
+import { track } from "@/lib/analytics";
 import type { Venue } from "@/lib/types";
 
 const VIBES: { v: PlanVibe; e: string }[] = [
@@ -276,6 +277,7 @@ export function PlanFlow({
               setOffset(0);
               setOpenedSaved(null);
               setStep("result");
+              track("plan_generate", { area, vibe, budget });
             }}
             className="w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
             style={{
@@ -387,6 +389,7 @@ export function PlanFlow({
             onClick={() => {
               setSaveState("idle");
               setOffset((o) => o + 1);
+              track("plan_reshuffle", { area, vibe, budget });
             }}
             className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold"
           >

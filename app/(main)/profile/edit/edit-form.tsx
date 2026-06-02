@@ -86,7 +86,7 @@ export function EditForm({
       );
       if (error) {
         console.error("[profile-edit] upsert failed:", error);
-        setErrorMsg("Couldn't save — try again in a moment.");
+        setErrorMsg("Couldn't save, try again in a moment.");
         setSaving(false);
         return;
       }
@@ -94,7 +94,7 @@ export function EditForm({
       router.refresh();
     } catch (e) {
       console.error("[profile-edit] upsert threw:", e);
-      setErrorMsg("Couldn't save — try again in a moment.");
+      setErrorMsg("Couldn't save, try again in a moment.");
       setSaving(false);
     }
   }

@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check } from "lucide-react";
 import { useBookings } from "@/components/bookings-context";
+import { track } from "@/lib/analytics";
 import type { Venue } from "@/lib/types";
 
 function deriveDateLabel(d: Date): string {
@@ -49,25 +50,33 @@ export function DidYouBook({
   const { addBooking } = useBookings();
   const [saved, setSaved] = useState(false);
 
-  const startsAt = date && time ? new Date(`${date}T${time}:00`) : new Date();
+  // Guard against a malformed ?d=/?t= producing an Invalid Date — calling
+  // .toISOString() on one throws, and this route has no error boundary.
+  const parsed = date && time ? new Date(`${date}T${time}:00`) : new Date();
+  const startsAt = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
   const dateLabel = deriveDateLabel(startsAt);
   const slotLabel = time ? formatTime(time) : "";
 
   const onYes = () => {
-    const ref = `${venue.slug.slice(0, 3).toUpperCase()}-${Math.floor(Math.random() * 9000) + 1000}`;
+    // Internal record id only — NOT a venue reservation reference. Prefixed
+    // "self-" so it can never be mistaken for a confirmation code, and never
+    // shown to the user as one (see saved-list.tsx).
+    const id = `self-${venue.slug}-${startsAt.getTime()}`;
     addBooking({
-      id: ref,
+      id,
       userId: "",
       venueId: venue.id,
       venueSlug: venue.slug,
       partySize: party,
       startsAt: startsAt.toISOString(),
-      status: "confirmed",
+      // We did not make or verify this booking — the user self-reported it.
+      status: "self_added",
       notes: null,
       createdAt: new Date().toISOString(),
       dateLabel,
       slotLabel,
     });
+    track("booking_self_logged", { venue: venue.slug, party });
     setSaved(true);
   };
 
@@ -122,7 +131,7 @@ export function DidYouBook({
               onClick={onYes}
               className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px]"
             >
-              Yes — add it to my plans
+              Yes, add it to my plans
             </button>
             <button
               type="button"
@@ -139,11 +148,15 @@ export function DidYouBook({
             <Check className="w-8 h-8 text-primary" strokeWidth={3} />
           </div>
           <h1 className="text-2xl font-extrabold text-heading">
-            You&apos;re in. 🎉
+            Added to your plans 🎉
           </h1>
           <p className="text-sm text-muted-fg mt-2">
-            Added to your plans — {dateLabel}
+            {dateLabel}
             {slotLabel ? ` · ${slotLabel}` : ""}, party of {party}.
+          </p>
+          <p className="text-xs text-muted-fg/80 mt-2 leading-relaxed">
+            Your confirmation comes from {venue.name}, since that&apos;s where
+            you booked. We&apos;ve saved this here so you don&apos;t forget.
           </p>
           <div className="mt-7 flex flex-col gap-2.5">
             <Link

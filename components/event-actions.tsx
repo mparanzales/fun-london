@@ -8,6 +8,7 @@ import { useState } from "react";
 import { CalendarPlus, Share2, Check } from "lucide-react";
 import { icsDataUrl } from "@/lib/ics";
 import { shareOrCopy } from "@/lib/share";
+import { track } from "@/lib/analytics";
 import type { Event } from "@/lib/types";
 
 export function EventActions({ event }: { event: Event }) {
@@ -23,6 +24,7 @@ export function EventActions({ event }: { event: Event }) {
   });
 
   const onShare = async () => {
+    track("share", { kind: "event", id: event.id });
     const result = await shareOrCopy({
       title: event.name,
       text: `${event.name} · ${event.venueName}, ${event.area}`,
