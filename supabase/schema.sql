@@ -336,3 +336,31 @@ drop policy if exists "partner_prospects no anon" on public.partner_prospects;
 -- 2026-05-31 · Plan Together v2 — real opening hours on venues ──────────────
 alter table public.venues
   add column if not exists opening_hours jsonb;
+
+-- 2026-06-02 · Soft-launch feedback capture ────────────────────────────────
+-- Anyone (signed in or anonymous) can submit one row; nobody can read rows
+-- back via the API. Reads happen in the Supabase dashboard (service_role,
+-- which bypasses RLS). See app/(main)/profile/actions.ts + feedback-sheet.tsx.
+create table if not exists public.feedback (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete set null,  -- null when anonymous
+  email text,                          -- optional follow-up address
+  use_intent text,                     -- Q1: would_use | maybe | not_yet
+  found_something text,                -- Q2: several | one_or_two | nothing
+  differentiation text,                -- Q3: love | nice | not_fussed
+  wants text[] not null default '{}',  -- Q4: feature multi-select
+  message text,                        -- Q5: open-ended
+  path text,                           -- where in the app it was submitted from
+  created_at timestamptz not null default now()
+);
+create index if not exists feedback_created_idx on public.feedback(created_at desc);
+
+alter table public.feedback enable row level security;
+
+-- Anyone can submit. No SELECT/UPDATE/DELETE policies exist, so anon and
+-- authenticated can write but never read or alter the table.
+drop policy if exists "feedback anyone insert" on public.feedback;
+create policy "feedback anyone insert"
+  on public.feedback for insert
+  to anon, authenticated
+  with check (true);

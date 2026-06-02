@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import { createClient } from "@/lib/supabase/client";
+import { FeedbackSheet } from "@/components/feedback-sheet";
 import type { UserPreferences } from "@/lib/types";
 
 // Two states:
@@ -39,6 +40,7 @@ export function ProfileBody({
 }
 
 function AnonProfile() {
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   return (
     <div className="pt-4 pb-6">
       <header className="px-5 pb-5 flex flex-col items-center text-center">
@@ -52,7 +54,7 @@ function AnonProfile() {
           Sign in to save your spots and keep your bookings across devices.
         </p>
       </header>
-      <div className="px-5">
+      <div className="px-5 flex flex-col gap-2.5">
         <Link
           href="/sign-in?return=/profile"
           className="flex items-center justify-center w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)] no-underline"
@@ -63,7 +65,21 @@ function AnonProfile() {
         >
           Sign in
         </Link>
+
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
+        >
+          <span className="flex gap-2.5 items-center">
+            <span>💬</span>
+            <span>Give Feedback</span>
+          </span>
+          <span className="text-muted-fg">›</span>
+        </button>
       </div>
+
+      {feedbackOpen && <FeedbackSheet onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }
@@ -81,6 +97,7 @@ function SignedInProfile({
   const { count: savedCount } = useSaved();
   const { count: bookingsCount } = useBookings();
   const [signingOut, setSigningOut] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   const effectiveName = displayName ?? authUserEmail?.split("@")[0] ?? "You";
   const initial = effectiveName.trim()[0]?.toUpperCase() ?? "?";
@@ -101,7 +118,6 @@ function SignedInProfile({
     : "No spots yet";
 
   const actionRows = [
-    { icon: "💬", label: "Give Feedback" },
     { icon: "💜", label: "Notification prefs" },
     { icon: "🌗", label: "Theme: Auto" },
   ];
@@ -155,6 +171,18 @@ function SignedInProfile({
           <span className="text-muted-fg">›</span>
         </Link>
 
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
+        >
+          <span className="flex gap-2.5 items-center">
+            <span>💬</span>
+            <span>Give Feedback</span>
+          </span>
+          <span className="text-muted-fg">›</span>
+        </button>
+
         {actionRows.map((r) => (
           <button
             key={r.label}
@@ -192,6 +220,13 @@ function SignedInProfile({
           Cookies
         </Link>
       </nav>
+
+      {feedbackOpen && (
+        <FeedbackSheet
+          defaultEmail={authUserEmail}
+          onClose={() => setFeedbackOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -88,6 +88,33 @@ html, body {
   animation: fl-rise var(--fl-dur) var(--fl-ease-out) both;
 }
 
+/* Bottom-sheet entrance (e.g. the Give Feedback sheet). The panel glides up
+   from the bottom edge while its backdrop fades in, so it reads as an
+   intentional step rather than a card snapping on top. Reduced-motion is
+   honoured by the global override below. */
+@keyframes fl-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes fl-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fl-sheet {
+  animation: fl-sheet-up 360ms var(--fl-ease-out) both;
+}
+.fl-sheet-backdrop {
+  animation: fl-fade-in 260ms ease both;
+}
+
 /* Optional per-item stagger for feed/list children: add `fl-stagger` to a
    container and items rise in sequence. Capped so long lists don't crawl. */
 .fl-stagger > * {

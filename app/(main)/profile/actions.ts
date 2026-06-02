@@ -1,0 +1,89 @@
+"use server";
+
+// Server Action for the "Give Feedback" sheet (components/feedback-sheet.tsx).
+//
+// Works for everyone: signed-in users get their auth id + email stamped on the
+// row (server-side, so the client can't spoof another user), anonymous
+// visitors submit with user_id null. The feedback table is insert-only at the
+// RLS layer, so there is no read-back surface to worry about here.
+
+import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/auth";
+
+// Mirror the option ids the sheet renders. Anything off-list is dropped so a
+// tampered payload can't write junk.
+const USE_INTENT = new Set(["would_use", "maybe", "not_yet"]);
+const FOUND = new Set(["several", "one_or_two", "nothing"]);
+const DIFFERENTIATION = new Set(["love", "nice", "not_fussed"]);
+const WANTS = new Set(["booking", "plans", "events", "sharing", "coverage"]);
+
+export type FeedbackInput = {
+  useIntent?: string | null;
+  foundSomething?: string | null;
+  differentiation?: string | null;
+  wants?: string[];
+  message?: string | null;
+  email?: string | null;
+  path?: string | null;
+};
+
+export type FeedbackResult = { ok: true } | { ok: false; error: string };
+
+function clean(
+  value: string | null | undefined,
+  allowed: Set<string>,
+): string | null {
+  if (typeof value !== "string") return null;
+  return allowed.has(value) ? value : null;
+}
+
+export async function submitFeedback(
+  input: FeedbackInput,
+): Promise<FeedbackResult> {
+  const useIntent = clean(input.useIntent, USE_INTENT);
+  const foundSomething = clean(input.foundSomething, FOUND);
+  const differentiation = clean(input.differentiation, DIFFERENTIATION);
+  const wants = Array.isArray(input.wants)
+    ? input.wants.filter((w) => WANTS.has(w))
+    : [];
+  const message =
+    typeof input.message === "string" && input.message.trim()
+      ? input.message.trim().slice(0, 2000)
+      : null;
+  const email =
+    typeof input.email === "string" && input.email.trim()
+      ? input.email.trim().slice(0, 320)
+      : null;
+  const path =
+    typeof input.path === "string" && input.path.trim()
+      ? input.path.trim().slice(0, 200)
+      : null;
+
+  // Require at least one signal so an empty submit does nothing.
+  const hasContent =
+    useIntent || foundSomething || differentiation || wants.length || message;
+  if (!hasContent) {
+    return { ok: false, error: "empty" };
+  }
+
+  const user = await getAuthUser();
+
+  const supabase = createClient();
+  const { error } = await supabase.from("feedback").insert({
+    user_id: user?.id ?? null,
+    email: email ?? user?.email ?? null,
+    use_intent: useIntent,
+    found_something: foundSomething,
+    differentiation,
+    wants,
+    message,
+    path,
+  });
+
+  if (error) {
+    console.error("[profile/actions] submitFeedback failed:", error);
+    return { ok: false, error: "save_failed" };
+  }
+
+  return { ok: true };
+}
