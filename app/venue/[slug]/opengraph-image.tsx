@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import { fetchVenueBySlug } from "@/lib/queries";
+import { TAGLINE } from "@/lib/config";
 
 // Dynamic Open Graph image for a venue — what shows when a /venue/[slug] link
 // is shared on WhatsApp / iMessage / Slack / X. A clean, brand-gradient card
@@ -14,12 +15,6 @@ export default async function Image({ params }: { params: { slug: string } }) {
   const venue = await fetchVenueBySlug(params.slug).catch(() => null);
   const name = venue?.name ?? "Fun London";
   const area = venue?.neighbourhood ?? "London";
-  const sources = venue?.editorialSources?.length ?? 0;
-  // Single string — Satori requires any element with >1 child to set
-  // display:flex, so we avoid mixing static text + an expression in one div.
-  const tagline =
-    "Independent · No chains" +
-    (sources >= 2 ? ` · Checked in ${sources} sources` : "");
 
   return new ImageResponse(
     <div
@@ -48,7 +43,7 @@ export default async function Image({ params }: { params: { slug: string } }) {
         </div>
       </div>
       <div style={{ fontSize: 30, fontWeight: 600, opacity: 0.95 }}>
-        {tagline}
+        {TAGLINE}
       </div>
     </div>,
     { ...size },

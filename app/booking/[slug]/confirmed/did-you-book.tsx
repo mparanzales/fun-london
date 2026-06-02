@@ -131,7 +131,7 @@ export function DidYouBook({
               onClick={onYes}
               className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px]"
             >
-              Yes — add it to my plans
+              Yes, add it to my plans
             </button>
             <button
               type="button"
@@ -155,8 +155,8 @@ export function DidYouBook({
             {slotLabel ? ` · ${slotLabel}` : ""}, party of {party}.
           </p>
           <p className="text-xs text-muted-fg/80 mt-2 leading-relaxed">
-            This is your own note to keep track — Fun London didn&apos;t make
-            the reservation, so check your confirmation from {venue.name}.
+            Your confirmation comes from {venue.name}, since that&apos;s where
+            you booked. We&apos;ve saved this here so you don&apos;t forget.
           </p>
           <div className="mt-7 flex flex-col gap-2.5">
             <Link

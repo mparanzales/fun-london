@@ -23,7 +23,7 @@ export async function generateMetadata({
   const venue = await fetchVenueBySlug(params.slug);
   if (!venue) return { title: "Venue not found" };
 
-  const title = `${venue.name} — ${venue.neighbourhood}, London`;
+  const title = `${venue.name}, ${venue.neighbourhood}, London`;
   const description =
     venue.longDescription?.slice(0, 200) ||
     `${venue.name} in ${venue.neighbourhood}. Independent London, checked in 2+ trusted sources.`;

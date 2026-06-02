@@ -27,7 +27,7 @@ export default function TermsPage() {
         <strong>We do not take, hold or confirm reservations ourselves.</strong>{" "}
         Any booking you make happens on the third party&apos;s site, under their
         terms, and the &quot;Did you book?&quot; note you save in the app is
-        your own reminder — not a confirmation from us or the venue.
+        your own reminder, not a confirmation from us or the venue.
       </p>
 
       <h2>Accuracy of information</h2>

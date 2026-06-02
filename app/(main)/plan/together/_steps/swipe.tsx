@@ -67,9 +67,7 @@ export function Swipe({
     return (
       <div className="px-5 pt-10 flex flex-col items-center text-center min-h-[calc(100vh-96px)]">
         <div className="text-[40px] mb-2">🪩</div>
-        <h2 className="text-xl font-extrabold text-heading">
-          Nice — votes in.
-        </h2>
+        <h2 className="text-xl font-extrabold text-heading">Nice, votes in.</h2>
         <p className="text-sm text-muted-fg mt-1.5 mb-6">
           Waiting for the group… {room.doneIds.length}/{room.members.length}{" "}
           done.

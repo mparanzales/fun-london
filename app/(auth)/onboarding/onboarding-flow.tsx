@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Logo } from "@/components/logo";
 import { createClient } from "@/lib/supabase/client";
 import { track } from "@/lib/analytics";
+import { TAGLINE } from "@/lib/config";
 import type { Mood, Vibe } from "@/lib/types";
 
 const ONBOARDING_STORAGE_KEY = "fl.onboarding.v1";
@@ -103,8 +104,7 @@ export function OnboardingFlow({ authUserId }: { authUserId: string | null }) {
         <div className="px-5 pt-2 pb-6 flex flex-col items-center gap-3 text-center">
           <Logo variant="gradient" size="lg" />
           <p className="text-[13px] font-semibold text-muted-fg max-w-[16rem] leading-snug">
-            Independent London only. No chains — every spot checked in at least
-            two trusted sources.
+            {TAGLINE}
           </p>
         </div>
       )}

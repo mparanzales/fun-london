@@ -61,7 +61,7 @@ export function SavedList({ allVenues }: { allVenues: Venue[] }) {
                       {b.dateLabel} · {b.slotLabel} · Party of {b.partySize}
                     </div>
                     <div className="text-[10px] text-muted-fg/70 mt-0.5 font-medium">
-                      Self-added — not a venue confirmation
+                      Your reminder
                     </div>
                   </div>
                 </Link>

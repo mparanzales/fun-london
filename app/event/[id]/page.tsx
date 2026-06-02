@@ -16,7 +16,7 @@ export async function generateMetadata({
   const event = await fetchEventById(params.id);
   if (!event) return { title: "Event not found" };
 
-  const title = `${event.name} — ${event.venueName}, ${event.area}`;
+  const title = `${event.name}, ${event.venueName}, ${event.area}`;
   const description = `${event.name} at ${event.venueName}, ${event.area}. ${event.dateLabel}${event.timeLabel ? ` · ${event.timeLabel}` : ""}.`;
   const url = `${SITE_URL}/event/${event.id}`;
 

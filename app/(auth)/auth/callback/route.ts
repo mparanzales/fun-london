@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     console.error(
       `[callback] provider error: ${providerError}` +
         (providerErrorCode ? ` (${providerErrorCode})` : "") +
-        (providerErrorDesc ? ` — ${providerErrorDesc}` : ""),
+        (providerErrorDesc ? `, ${providerErrorDesc}` : ""),
     );
     return NextResponse.redirect(`${origin}/sign-in?error=oauth_failed`);
   }

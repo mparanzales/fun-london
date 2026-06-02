@@ -20,12 +20,12 @@ export default function CookiesPage() {
       <h2>Strictly necessary</h2>
       <ul>
         <li>
-          <strong>Sign-in session</strong> — a secure cookie set by Supabase to
+          <strong>Sign-in session</strong>, a secure cookie set by Supabase to
           keep you signed in. Required for the app to work; cannot be switched
           off.
         </li>
         <li>
-          <strong>Local storage</strong> — your saved venues, plans and
+          <strong>Local storage</strong>, your saved venues, plans and
           preferences are stored on your own device so the app works before you
           sign in. This never leaves your device unless you sign in.
         </li>
@@ -33,7 +33,7 @@ export default function CookiesPage() {
 
       <h2>Analytics (optional)</h2>
       <p>
-        If you accept analytics, we use Vercel Analytics — a privacy-friendly,
+        If you accept analytics, we use Vercel Analytics, a privacy-friendly,
         <strong> cookieless</strong> measurement of page views and key actions
         (saves, reserve clicks, plans). It does not track you across other
         sites. You can decline this in the cookie banner, and we will not load
@@ -44,7 +44,7 @@ export default function CookiesPage() {
       <p>
         When you first visit, we ask whether to enable analytics. To change your
         mind later, clear the site&apos;s storage in your browser settings and
-        reload — the banner will appear again. See our{" "}
+        reload, the banner will appear again. See our{" "}
         <a href="/privacy">Privacy Policy</a> for the full picture.
       </p>
     </>

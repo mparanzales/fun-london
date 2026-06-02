@@ -198,20 +198,16 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         </div>
 
         {/* Trust badge — the differentiating thesis, made visible up-front
-            (not buried in the collapsed "Why this is here"). Source count is
-            shown honestly: only claims "N sources" when we actually hold ≥2. */}
+            (not buried in the collapsed "Why this is here"). "Cross-checked"
+            is only claimed when we actually hold ≥2 editorial sources. */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3 text-[11px] font-bold text-accent">
-          <span>Independent</span>
-          <span aria-hidden className="text-muted-fg/50">
-            ·
-          </span>
           <span>No chains</span>
           {sourceCount >= 2 && (
             <>
               <span aria-hidden className="text-muted-fg/50">
                 ·
               </span>
-              <span>Checked in {sourceCount} sources</span>
+              <span>Cross-checked</span>
             </>
           )}
         </div>
@@ -315,7 +311,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                             {src.title && (
                               <span className="text-muted-fg">
                                 {" "}
-                                — {src.title}
+                                , {src.title}
                               </span>
                             )}
                             {src.date && (

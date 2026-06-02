@@ -139,8 +139,8 @@ export function ReserveSheet({
           Continue to {label} →
         </button>
         <p className="text-[11px] text-muted-fg text-center mt-2.5 leading-relaxed">
-          Opens {label} with your details — confirm the table there, then tell
-          us if you booked.
+          Opens {label} with your details, confirm the table there, then tell us
+          if you booked.
         </p>
       </div>
     </div>

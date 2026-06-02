@@ -23,17 +23,17 @@ export default function PrivacyPage() {
       <h2>What we collect</h2>
       <ul>
         <li>
-          <strong>Account data</strong> — your email address (for magic-link
+          <strong>Account data</strong>, your email address (for magic-link
           sign-in) and, if you sign in with Google, your name and Google profile
           email.
         </li>
         <li>
-          <strong>Your activity in the app</strong> — venues you save, plans and
+          <strong>Your activity in the app</strong>, venues you save, plans and
           self-added bookings you create, and your taste preferences (mood and
           vibe) from onboarding.
         </li>
         <li>
-          <strong>Usage analytics</strong> — privacy-friendly, cookieless
+          <strong>Usage analytics</strong>, privacy-friendly, cookieless
           measurement of which pages and actions are used (via Vercel
           Analytics), only if you accept analytics in the cookie banner.
         </li>
@@ -46,12 +46,12 @@ export default function PrivacyPage() {
       <h2>Why we use it (lawful basis)</h2>
       <ul>
         <li>
-          <strong>To provide the service</strong> (saves, plans, sign-in) —
+          <strong>To provide the service</strong> (saves, plans, sign-in),
           performance of a contract / legitimate interests.
         </li>
         <li>
-          <strong>Analytics</strong> — your consent (you can withdraw it any
-          time via the cookie settings).
+          <strong>Analytics</strong>, your consent (you can withdraw it any time
+          via the cookie settings).
         </li>
       </ul>
 
@@ -77,15 +77,15 @@ export default function PrivacyPage() {
         Under UK GDPR you have the right to access, correct, delete, or export
         your data, and to object to or restrict processing. To exercise any of
         these, or to delete your account, contact us at{" "}
-        <a href="mailto:privacy@funldn.com">privacy@funldn.com</a>. You also
-        have the right to complain to the Information Commissioner&apos;s Office
+        <a href="mailto:hello@funldn.com">hello@funldn.com</a>. You also have
+        the right to complain to the Information Commissioner&apos;s Office
         (ICO) at ico.org.uk.
       </p>
 
       <h2>Contact</h2>
       <p>
         Questions about this policy:{" "}
-        <a href="mailto:privacy@funldn.com">privacy@funldn.com</a>.
+        <a href="mailto:hello@funldn.com">hello@funldn.com</a>.
       </p>
     </>
   );

@@ -14,7 +14,7 @@ import {
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
-import { CITY } from "@/lib/config";
+import { CITY, TAGLINE } from "@/lib/config";
 import { hasPrefs, scoreVenue, scoreEvent } from "@/lib/ranking";
 import type {
   Venue,
@@ -185,7 +185,7 @@ export function ExploreFeed({
         {/* Positioning line — states the thesis on the most-seen screen so a
             first-time user understands what makes this different in seconds. */}
         <p className="mt-2 text-[12px] font-semibold text-muted-fg leading-snug">
-          Independent London, no chains — every spot checked in 2+ places.
+          {TAGLINE}
         </p>
       </header>
 

@@ -88,14 +88,30 @@ type EventRow = {
 
 // ── Mappers ─────────────────────────────────────────────────────────────
 
+// Tidy typographic dashes (— –) and spaced double hyphens out of copy that
+// comes from the DATABASE (venue/event editorial written by curators or the
+// discovery robot). The source-code dash guard can't see DB content, so this
+// keeps the brand's "no dashes" rule consistent on cards and detail pages,
+// for every existing row and every future one, with no re-import.
+// Built via RegExp from an escaped string so the literal em/en dash characters
+// never appear in this source file (the dash guard scans lib/ and would
+// otherwise flag its own helper).
+const DASH_RE = new RegExp("\\s*[\\u2014\\u2013]\\s*", "g"); // em / en dash
+const DBL_HYPHEN_RE = / -{2} /g;
+
+function tidyDashes<T extends string | null | undefined>(s: T): T {
+  if (s == null) return s;
+  return s.replace(DASH_RE, ", ").replace(DBL_HYPHEN_RE, ", ") as T;
+}
+
 function mapVenue(r: VenueRow): Venue {
   return {
     id: r.id,
     slug: r.slug,
     name: r.name,
     type: r.type as VenueType,
-    vibe: r.vibe,
-    longDescription: r.long_description,
+    vibe: tidyDashes(r.vibe),
+    longDescription: tidyDashes(r.long_description),
     neighbourhood: r.neighbourhood,
     address: r.address,
     lat: r.lat,
@@ -117,7 +133,11 @@ function mapVenue(r: VenueRow): Venue {
     instagramHandle: r.instagram_handle,
     editorialSources: r.editorial_sources,
     creatorCoverage: r.creator_coverage,
-    criticalFlags: r.critical_flags,
+    criticalFlags:
+      r.critical_flags?.map((f) => ({
+        label: tidyDashes(f.label),
+        body: tidyDashes(f.body),
+      })) ?? null,
     openingHours: r.opening_hours,
     createdAt: r.created_at,
   };
@@ -126,7 +146,7 @@ function mapVenue(r: VenueRow): Venue {
 function mapEvent(r: EventRow): Event {
   return {
     id: r.id,
-    name: r.name,
+    name: tidyDashes(r.name),
     venueName: r.venue_name,
     venueId: r.venue_id,
     area: r.area,
