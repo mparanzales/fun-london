@@ -58,6 +58,12 @@ export function SavedProvider({
   const [hydrated, setHydrated] = useState(false);
   // slug → venue.id (uuid). Populated when authed; empty when anon.
   const slugToUuidRef = useRef<Map<string, string>>(new Map());
+  // Mirror of the live set so toggleSaved can read current membership without
+  // a stale closure (and without doing side effects inside a state updater).
+  const savedSetRef = useRef(savedSet);
+  useEffect(() => {
+    savedSetRef.current = savedSet;
+  }, [savedSet]);
 
   // ── Hydrate (and migrate if we're newly signed in) ──────────────────
   useEffect(() => {
@@ -180,45 +186,45 @@ export function SavedProvider({
 
   const toggleSaved = useCallback(
     (venueSlug: string) => {
-      setSavedSet((prev) => {
-        const next = new Set(prev);
-        const wasSaved = next.has(venueSlug);
-        if (wasSaved) next.delete(venueSlug);
-        else next.add(venueSlug);
+      const wasSaved = savedSetRef.current.has(venueSlug);
 
-        track(wasSaved ? "venue_unsave" : "venue_save", { venue: venueSlug });
+      // Optimistic UI update.
+      const apply = (saved: boolean) =>
+        setSavedSet((prev) => {
+          const next = new Set(prev);
+          if (saved) next.add(venueSlug);
+          else next.delete(venueSlug);
+          return next;
+        });
+      apply(!wasSaved);
 
-        if (authUserId) {
-          // Fire-and-forget DB write. UI is optimistic; an error logs
-          // to console rather than reverting state, on the assumption
-          // that the read on next mount is the source of truth.
-          const venueId = slugToUuidRef.current.get(venueSlug);
-          if (venueId) {
-            const supabase = createClient();
-            if (wasSaved) {
-              void supabase
-                .from("saved_venues")
-                .delete()
-                .eq("user_id", authUserId)
-                .eq("venue_id", venueId)
-                .then(({ error }) => {
-                  if (error) console.error("[saved] delete failed:", error);
-                });
-            } else {
-              void supabase
-                .from("saved_venues")
-                .upsert(
-                  { user_id: authUserId, venue_id: venueId },
-                  { onConflict: "user_id,venue_id" },
-                )
-                .then(({ error }) => {
-                  if (error) console.error("[saved] insert failed:", error);
-                });
-            }
-          }
+      track(wasSaved ? "venue_unsave" : "venue_save", { venue: venueSlug });
+
+      if (!authUserId) return; // anon: localStorage persist effect handles it
+
+      const venueId = slugToUuidRef.current.get(venueSlug);
+      if (!venueId) return;
+
+      // Persist to the DB; if it fails, REVERT the optimistic change so the UI
+      // reflects what's actually stored (rather than lying until next reload).
+      const supabase = createClient();
+      const op = wasSaved
+        ? supabase
+            .from("saved_venues")
+            .delete()
+            .eq("user_id", authUserId)
+            .eq("venue_id", venueId)
+        : supabase
+            .from("saved_venues")
+            .upsert(
+              { user_id: authUserId, venue_id: venueId },
+              { onConflict: "user_id,venue_id" },
+            );
+      void op.then(({ error }) => {
+        if (error) {
+          console.error("[saved] write failed, reverting:", error);
+          apply(wasSaved);
         }
-
-        return next;
       });
     },
     [authUserId],
