@@ -87,3 +87,43 @@ export async function submitFeedback(
 
   return { ok: true };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Data export (GDPR right to access). Returns everything we hold for the
+// signed-in user as a plain object the client turns into a JSON download.
+// Runs as the user via RLS, so it can only ever read their OWN rows — no
+// service-role, no way to read anyone else's data.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type ExportResult =
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; error: string };
+
+export async function exportMyData(): Promise<ExportResult> {
+  const user = await getAuthUser();
+  if (!user) return { ok: false, error: "not_signed_in" };
+
+  const supabase = createClient();
+  const [profile, saved, bookings, plans] = await Promise.all([
+    supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
+    supabase
+      .from("saved_venues")
+      .select("venue_id, created_at, venues(slug, name)")
+      .eq("user_id", user.id),
+    supabase.from("bookings").select("*").eq("user_id", user.id),
+    supabase.from("plans").select("*").eq("user_id", user.id),
+  ]);
+
+  return {
+    ok: true,
+    data: {
+      exportedAt: new Date().toISOString(),
+      account: { id: user.id, email: user.email ?? null },
+      profile: profile.data ?? null,
+      saved: saved.data ?? [],
+      bookings: bookings.data ?? [],
+      plans: plans.data ?? [],
+      note: "This is all the personal data Fun London holds for your account. Feedback you submit is stored without a readable link back to you.",
+    },
+  };
+}

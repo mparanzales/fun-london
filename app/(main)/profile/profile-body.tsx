@@ -7,6 +7,7 @@ import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import { createClient } from "@/lib/supabase/client";
 import { FeedbackSheet } from "@/components/feedback-sheet";
+import { exportMyData } from "./actions";
 import {
   getThemeMode,
   nextThemeMode,
@@ -118,6 +119,28 @@ function SignedInProfile({
     setThemeMode(next); // persists + repaints via ThemeProvider
   }
 
+  const [exporting, setExporting] = useState(false);
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const res = await exportMyData();
+      if (res.ok) {
+        const blob = new Blob([JSON.stringify(res.data, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "fun-london-my-data.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const effectiveName = displayName ?? authUserEmail?.split("@")[0] ?? "You";
   const initial = effectiveName.trim()[0]?.toUpperCase() ?? "?";
 
@@ -223,6 +246,19 @@ function SignedInProfile({
             Soon
           </span>
         </div>
+
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting}
+          className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold disabled:opacity-50"
+        >
+          <span className="flex gap-2.5 items-center">
+            <span>📦</span>
+            <span>{exporting ? "Preparing…" : "Export my data"}</span>
+          </span>
+          <span className="text-muted-fg">↓</span>
+        </button>
 
         <button
           type="button"
