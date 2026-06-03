@@ -208,14 +208,48 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
   return data ? mapVenue(data as VenueRow) : null;
 }
 
+// Start of "today" in Europe/London, returned as a UTC Date. Uses Intl to read
+// London's wall-clock for `now` (handles GMT/BST automatically) and derives the
+// UTC instant of London midnight — no timezone library needed.
+function startOfLondonDayUtc(now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  // London wall-clock of `now` read as if it were UTC, minus the real instant,
+  // gives London's offset (e.g. +1h during BST).
+  const asUtc = Date.UTC(
+    +p.year,
+    +p.month - 1,
+    +p.day,
+    +p.hour,
+    +p.minute,
+    +p.second,
+  );
+  const offsetMs = asUtc - now.getTime();
+  // Midnight on London's calendar date, expressed as a real UTC instant.
+  const londonMidnightAsUtc = Date.UTC(+p.year, +p.month - 1, +p.day, 0, 0, 0);
+  return new Date(londonMidnightAsUtc - offsetMs);
+}
+
 export async function fetchEvents(): Promise<Event[]> {
   const supabase = createClient();
   // Only surface events from the start of today onward — a "what's on"
   // feed shouldn't list events that already happened. Using start-of-day
   // (rather than the exact current time) keeps events earlier today
   // visible all day rather than dropping them the moment they begin.
-  const startOfToday = new Date();
-  startOfToday.setUTCHours(0, 0, 0, 0);
+  // Computed in Europe/London (not UTC) so the boundary follows London
+  // wall-clock — during BST a UTC midnight is an hour off and drops
+  // late-night events.
+  const startOfToday = startOfLondonDayUtc();
   const { data, error } = await supabase
     .from("events")
     .select("*")
