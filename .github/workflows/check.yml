@@ -26,7 +26,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          # Node 22 (not .nvmrc's 20.16): the test step (vitest) needs a Node
+          # that can require() ESM, since vite is ESM-only. The crons and Vercel
+          # keep their own Node; this override only affects this gate job.
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
