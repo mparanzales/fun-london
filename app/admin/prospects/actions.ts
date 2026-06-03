@@ -9,16 +9,8 @@
 import { revalidatePath } from "next/cache";
 import { getAdminUser } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/admin";
+import { BD_STATUSES } from "./constants";
 
-// The BD lifecycle stages (mirrors schema.sql partner_prospects.bd_status).
-export const BD_STATUSES = [
-  "prospect",
-  "contacted",
-  "in_conversation",
-  "partnered",
-  "declined",
-  "passed",
-] as const;
 const STATUS_SET = new Set<string>(BD_STATUSES);
 
 export async function updateProspect(formData: FormData): Promise<void> {

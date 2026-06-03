@@ -9,7 +9,8 @@
 import { redirect } from "next/navigation";
 import { getAuthUser, isAdminEmail } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/admin";
-import { updateProspect, BD_STATUSES } from "./actions";
+import { updateProspect } from "./actions";
+import { BD_STATUSES } from "./constants";
 
 export const dynamic = "force-dynamic";
 
