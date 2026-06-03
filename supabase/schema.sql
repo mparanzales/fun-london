@@ -98,6 +98,7 @@ create table if not exists public.events (
   last_synced_at timestamptz,              -- last provider re-pull
   sold_out boolean not null default false, -- provider-side status mirror
   cancelled_at timestamptz,                -- set once on provider cancellation (alert flag, not auto-hide)
+  ends_at timestamptz,                      -- Pop-up radar: last day a source='popup' run is on (null for one-off events)
   created_at timestamptz not null default now(),
   constraint events_source_unique unique (source, source_id)
 );
@@ -201,6 +202,17 @@ drop policy if exists "venues public read" on public.venues;
 drop policy if exists "events public read" on public.events;
 create policy "venues public read" on public.venues for select using (true);
 create policy "events public read" on public.events for select using (true);
+
+-- Pop-up radar: admin may hide an auto-published pop-up (set cancelled_at)
+-- without the service-role key. Scoped to source='popup' + the admin email
+-- (mirror FL_ADMIN_EMAILS). Migration: events_admin_hide_popups_policy.
+drop policy if exists "events admin update popups" on public.events;
+create policy "events admin update popups" on public.events for update
+  using (
+    source = 'popup'
+    and (auth.jwt() ->> 'email') = 'admin@funldn.example'
+  )
+  with check (source = 'popup');
 
 -- Saved: users only see/modify their own
 drop policy if exists "saved self read"   on public.saved_venues;

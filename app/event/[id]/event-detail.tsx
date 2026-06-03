@@ -31,20 +31,31 @@ export function EventDetail({
 }) {
   const router = useRouter();
 
-  const longDateLabel = formatLongDate(event.startsAt);
+  const isPopup = event.isPopup;
   const isExternal = !!event.sourceUrl && event.sourceUrl.startsWith("http");
+  // Pop-ups run over a range, so the headline date is when they END.
+  const longDateLabel =
+    isPopup && event.endsAt
+      ? `Ends ${formatLongDate(event.endsAt)}`
+      : formatLongDate(event.startsAt);
+  const eyebrow = isPopup
+    ? `Pop-up · ${event.area}`
+    : `${event.area} · ${event.category}`;
   // Name the ticket provider from the outbound URL's host so the CTA is
   // always accurate — today it's Ticketmaster, but Eventbrite / Skiddle /
   // DICE / Universe links will label themselves correctly with no schema
   // or type change the moment those sources come online.
   const ticketProvider = providerFromUrl(event.sourceUrl);
-  const ticketCtaLabel = ticketProvider
-    ? `Get tickets → ${ticketProvider}`
-    : "Get tickets";
-  // Tag outbound ticket links with attribution + (when configured) the
-  // Ticketmaster/Awin affiliate id. No-op on internal links.
-  const ticketHref =
-    event.sourceUrl && isExternal
+  // Pop-ups aren't ticketed: the CTA visits the official page, and we don't
+  // tag it with the ticket affiliate.
+  const ctaLabel = isPopup
+    ? "Visit official page"
+    : ticketProvider
+      ? `Get tickets → ${ticketProvider}`
+      : "Get tickets";
+  const ctaHref = isPopup
+    ? event.sourceUrl
+    : event.sourceUrl && isExternal
       ? applyAffiliate("ticketmaster", event.sourceUrl)
       : event.sourceUrl;
 
@@ -80,7 +91,7 @@ export function EventDetail({
       {/* ── Info block ─────────────────────────────────────────────── */}
       <div className="px-5 pt-5">
         <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
-          {event.area} · {event.category}
+          {eyebrow}
         </div>
         <h1 className="text-[28px] font-extrabold tracking-tight text-heading leading-tight mt-1.5">
           {event.name}
@@ -95,14 +106,24 @@ export function EventDetail({
             <Calendar size={13} strokeWidth={2} />
             {longDateLabel}
           </span>
-          <span className="flex items-center gap-1.5 border border-fg/15 rounded-full px-3 py-1.5 text-xs font-medium text-fg">
-            <Clock size={13} strokeWidth={2} />
-            {event.timeLabel}
-          </span>
+          {/* A pop-up's "Until X" duplicates the "Ends X" above, so hide it. */}
+          {!isPopup && (
+            <span className="flex items-center gap-1.5 border border-fg/15 rounded-full px-3 py-1.5 text-xs font-medium text-fg">
+              <Clock size={13} strokeWidth={2} />
+              {event.timeLabel}
+            </span>
+          )}
           <span className="border border-fg/15 rounded-full px-3 py-1.5 text-xs font-medium text-fg">
             {event.price}
           </span>
         </div>
+
+        {/* Editorial blurb — the "what is this" detail. */}
+        {event.description && (
+          <p className="text-[15px] text-fg/90 leading-relaxed mt-5">
+            {event.description}
+          </p>
+        )}
 
         {/* Real secondary actions — add to calendar (.ics) + share */}
         <EventActions event={event} />
@@ -150,13 +171,13 @@ export function EventDetail({
         <div className="max-w-md mx-auto pointer-events-auto">
           {event.sourceUrl ? (
             <a
-              href={ticketHref ?? event.sourceUrl}
+              href={ctaHref ?? event.sourceUrl}
               target={isExternal ? "_blank" : undefined}
               rel={isExternal ? "noopener noreferrer" : undefined}
               onClick={() =>
                 track("event_ticket_click", {
                   id: event.id,
-                  provider: ticketProvider ?? "unknown",
+                  provider: isPopup ? "popup" : (ticketProvider ?? "unknown"),
                 })
               }
               className="block w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)] flex items-center justify-center gap-2"
@@ -165,7 +186,7 @@ export function EventDetail({
                   "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
               }}
             >
-              {ticketCtaLabel}
+              {ctaLabel}
               {isExternal && (
                 <ExternalLink size={16} strokeWidth={2.25} aria-hidden />
               )}

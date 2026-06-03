@@ -23,8 +23,12 @@
     "scout-candidates": "tsx scripts/scout-candidates.ts",
     "discover-venues:dry": "tsx scripts/discover-venues.ts --dry-run",
     "discover-venues": "tsx scripts/discover-venues.ts",
+    "discover-popups:dry": "tsx scripts/discover-popups.ts --dry-run",
+    "discover-popups": "tsx scripts/discover-popups.ts",
     "backfill-photos:dry": "tsx scripts/backfill-photos.ts --dry-run",
     "backfill-photos": "tsx scripts/backfill-photos.ts",
+    "backfill-popup-images:dry": "tsx scripts/backfill-popup-images.ts --dry-run",
+    "backfill-popup-images": "tsx scripts/backfill-popup-images.ts",
     "test": "vitest run"
   },
   "dependencies": {
