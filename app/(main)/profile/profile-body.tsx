@@ -7,7 +7,7 @@ import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import { createClient } from "@/lib/supabase/client";
 import { FeedbackSheet } from "@/components/feedback-sheet";
-import { exportMyData } from "./actions";
+import { exportMyData, deleteMyAccount } from "./actions";
 import {
   getThemeMode,
   nextThemeMode,
@@ -139,6 +139,30 @@ function SignedInProfile({
     } finally {
       setExporting(false);
     }
+  }
+
+  // Account deletion (destructive — gated behind an explicit confirm step).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  async function handleDelete() {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    const res = await deleteMyAccount();
+    if (res.ok) {
+      // Account is gone — clear the local session and send them home.
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      router.replace("/");
+      return;
+    }
+    setDeleting(false);
+    setDeleteError(
+      res.error === "not_configured"
+        ? "Account deletion isn't available right now. Email hello@funldn.com and we'll remove it."
+        : "Something went wrong. Please try again, or email hello@funldn.com.",
+    );
   }
 
   const effectiveName = displayName ?? authUserEmail?.split("@")[0] ?? "You";
@@ -284,6 +308,54 @@ function SignedInProfile({
           Cookies
         </Link>
       </nav>
+
+      <div className="px-5 mt-5 flex flex-col items-center">
+        {!confirmingDelete ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setConfirmingDelete(true);
+            }}
+            className="text-[12px] font-semibold text-muted-fg/80 hover:text-red-500 transition-colors"
+          >
+            Delete my account
+          </button>
+        ) : (
+          <div className="w-full max-w-sm bg-card border border-red-500/30 rounded-2xl p-4 text-center">
+            <div className="text-[13px] font-extrabold text-heading mb-1">
+              Delete your account?
+            </div>
+            <p className="text-[12px] text-muted-fg leading-relaxed mb-3">
+              This permanently removes your account, saved spots, bookings and
+              plans. It can&apos;t be undone.
+            </p>
+            {deleteError && (
+              <p className="text-[12px] text-red-500 font-semibold mb-3">
+                {deleteError}
+              </p>
+            )}
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+                className="flex-1 h-11 rounded-2xl bg-muted text-fg font-bold text-[13px] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 h-11 rounded-2xl bg-red-500 text-white font-extrabold text-[13px] disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : "Delete forever"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {feedbackOpen && (
         <FeedbackSheet

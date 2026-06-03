@@ -8,6 +8,7 @@
 // RLS layer, so there is no read-back surface to worry about here.
 
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { getAuthUser } from "@/lib/auth";
 
 // Mirror the option ids the sheet renders. Anything off-list is dropped so a
@@ -126,4 +127,42 @@ export async function exportMyData(): Promise<ExportResult> {
       note: "This is all the personal data Fun London holds for your account. Feedback you submit is stored without a readable link back to you.",
     },
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Account deletion (GDPR right to erasure).
+//
+// Removing the auth.users row needs the service-role key (the anon client
+// can't delete an auth user). The FK cascades clear the rest: profiles,
+// saved_venues, bookings and plans are ON DELETE CASCADE; feedback.user_id is
+// ON DELETE SET NULL, so submitted feedback is kept but de-linked from the
+// person. We only ever delete the CALLING user's own id.
+//
+// Requires SUPABASE_SERVICE_ROLE_KEY in the server env (Vercel). Returns
+// "not_configured" if it's missing so the UI can degrade gracefully.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type DeleteResult = { ok: true } | { ok: false; error: string };
+
+export async function deleteMyAccount(): Promise<DeleteResult> {
+  const user = await getAuthUser();
+  if (!user) return { ok: false, error: "not_signed_in" };
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    console.error("[profile] deleteMyAccount: SUPABASE_SERVICE_ROLE_KEY unset");
+    return { ok: false, error: "not_configured" };
+  }
+
+  const admin = createAdminClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { error } = await admin.auth.admin.deleteUser(user.id);
+  if (error) {
+    console.error("[profile] deleteMyAccount failed:", error);
+    return { ok: false, error: "delete_failed" };
+  }
+  return { ok: true };
 }
