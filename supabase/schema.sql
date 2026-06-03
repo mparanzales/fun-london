@@ -210,7 +210,9 @@ drop policy if exists "events admin update popups" on public.events;
 create policy "events admin update popups" on public.events for update
   using (
     source = 'popup'
-    and (auth.jwt() ->> 'email') = 'admin@funldn.example'
+    -- auth.jwt() wrapped in a subselect so it's evaluated once per query, not
+    -- per row (Supabase Auth RLS InitPlan advisory).
+    and ((select auth.jwt()) ->> 'email') = 'admin@funldn.example'
   )
   with check (source = 'popup');
 
