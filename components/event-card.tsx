@@ -13,21 +13,15 @@ type Props = {
 };
 
 export function EventCard({ event, showCategoryTag = true }: Props) {
-  // Pop-ups have no tickets to reserve, so link straight to the official
-  // page in a new tab. Normal events go to the internal detail, where the
-  // sticky Reserve CTA opens the provider's ticket page.
-  const external = event.isPopup && !!event.sourceUrl;
-  const href = external ? event.sourceUrl! : `/event/${event.id}`;
+  // Internal link to the immersive event detail. From there the user
+  // can read venue context, then tap the sticky Reserve CTA that opens
+  // the provider's ticket page in a new tab.
+  const href = `/event/${event.id}`;
 
   return (
     <Link
       href={href}
-      {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-      aria-label={
-        event.isPopup
-          ? `View the pop-up ${event.name}`
-          : `View details for ${event.name}`
-      }
+      aria-label={`View details for ${event.name}`}
       className="relative block w-full"
     >
       <div
@@ -44,18 +38,10 @@ export function EventCard({ event, showCategoryTag = true }: Props) {
         {/* Bottom gradient for legibility of any future title overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
 
-        {event.isPopup ? (
-          // Pop-ups get a solid accent pill so they read as time-limited,
-          // not as a regular gig.
-          <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-accent text-white text-xs font-semibold uppercase tracking-wider shadow-sm">
-            Pop-up
+        {showCategoryTag && (
+          <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-white text-xs font-medium uppercase tracking-wider">
+            {event.category}
           </div>
-        ) : (
-          showCategoryTag && (
-            <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-white text-xs font-medium uppercase tracking-wider">
-              {event.category}
-            </div>
-          )
         )}
       </div>
 
@@ -69,18 +55,9 @@ export function EventCard({ event, showCategoryTag = true }: Props) {
           <span>{event.area}</span>
         </div>
         <div className="text-[11px] font-medium text-muted-fg mt-1 flex items-center gap-1.5 flex-wrap">
-          {event.isPopup && event.endsAt ? (
-            // For a pop-up, the urgent info is when it ends.
-            <span className="font-semibold text-accent">
-              Ends {formatEventDate(event.endsAt)}
-            </span>
-          ) : (
-            <>
-              <span>{formatEventDate(event.startsAt)}</span>
-              <span>·</span>
-              <span>{event.timeLabel}</span>
-            </>
-          )}
+          <span>{formatEventDate(event.startsAt)}</span>
+          <span>·</span>
+          <span>{event.timeLabel}</span>
           <span>·</span>
           <span>{event.price}</span>
         </div>

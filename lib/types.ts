@@ -185,11 +185,6 @@ export type Event = {
   // venue's own site, etc.). Null for legacy manual demo rows.
   // Used as the click target on the event card.
   sourceUrl: string | null;
-  // Pop-up radar: true when this row is a temporary pop-up (source='popup').
-  // The card swaps the category pill for a "POP-UP" pill + "Ends <date>".
-  isPopup: boolean;
-  // The last day a pop-up runs (ISO). Null for normal one-off events.
-  endsAt: string | null;
 };
 
 export type Booking = {
