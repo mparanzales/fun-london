@@ -7,6 +7,7 @@ import {
   UtensilsCrossed,
   Palette,
   Laugh,
+  PartyPopper,
   type LucideIcon,
 } from "lucide-react";
 import { EventCard } from "@/components/event-card";
@@ -26,7 +27,9 @@ const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
   { id: "custom", label: "Custom" },
 ];
 
-type CategoryFilter = "all" | EventCategory;
+// "popup" is a pseudo-category (it filters to temporary pop-up listings rather
+// than an EventCategory), so it lives in this row next to the real categories.
+type CategoryFilter = "all" | EventCategory | "popup";
 const CATEGORY_FILTERS: {
   id: CategoryFilter;
   label: string;
@@ -37,6 +40,7 @@ const CATEGORY_FILTERS: {
   { id: "Food", label: "Food", Icon: UtensilsCrossed },
   { id: "Art", label: "Art", Icon: Palette },
   { id: "Comedy", label: "Comedy", Icon: Laugh },
+  { id: "popup", label: "Pop-ups", Icon: PartyPopper },
 ];
 
 // ── Date helpers ────────────────────────────────────────────────────────
@@ -118,18 +122,32 @@ export function EventsFeed({
         hi = null;
     }
 
+    const nowMs = now.getTime();
     return events
       .filter((e) => {
-        const start = new Date(e.startsAt);
-        if (lo && start < lo) return false;
-        if (hi && start > hi) return false;
-        if (category !== "all" && e.category !== category) return false;
+        // A pop-up runs over a range, so test whether its run OVERLAPS the
+        // window, not just its start. Normal events have no endsAt, so
+        // start and end collapse to the same instant (original behaviour).
+        const startMs = new Date(e.startsAt).getTime();
+        const endMs = e.endsAt ? new Date(e.endsAt).getTime() : startMs;
+        if (lo && endMs < lo.getTime()) return false; // already finished
+        if (hi && startMs > hi.getTime()) return false; // starts after window
+        if (category === "popup") {
+          if (!e.isPopup) return false;
+        } else if (category !== "all" && e.category !== category) {
+          return false;
+        }
         return true;
       })
-      .sort(
-        (a, b) =>
-          new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
-      );
+      .sort((a, b) => {
+        // A pop-up already running (start in the past) sorts as if it were
+        // "now" so it sits with today's items rather than weeks above them.
+        const key = (e: Event) => {
+          const s = new Date(e.startsAt).getTime();
+          return e.isPopup ? Math.max(s, nowMs) : s;
+        };
+        return key(a) - key(b);
+      });
   }, [events, quick, fromDate, toDate, category]);
 
   return (
@@ -193,7 +211,7 @@ export function EventsFeed({
           icon on top, label below, no per-chip background, color shift
           on selection. Grid keeps all five columns equal-width and
           guarantees no horizontal scroll. */}
-      <div className="px-5 pt-1 pb-4 grid grid-cols-5 gap-1">
+      <div className="px-5 pt-1 pb-4 grid grid-cols-6 gap-1">
         {CATEGORY_FILTERS.map((c) => {
           const on = category === c.id;
           const iconClass =

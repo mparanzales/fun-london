@@ -84,6 +84,8 @@ type EventRow = {
   category: string;
   img_url: string;
   source_url: string | null;
+  source: string | null;
+  ends_at: string | null;
 };
 
 // ── Mappers ─────────────────────────────────────────────────────────────
@@ -157,6 +159,8 @@ function mapEvent(r: EventRow): Event {
     category: r.category as EventCategory,
     imgUrl: r.img_url,
     sourceUrl: r.source_url,
+    isPopup: r.source === "popup",
+    endsAt: r.ends_at,
   };
 }
 
@@ -213,8 +217,13 @@ export async function fetchEvents(): Promise<Event[]> {
   const { data, error } = await supabase
     .from("events")
     .select("*")
-    .is("cancelled_at", null) // hide events a provider has cancelled
-    .gte("starts_at", startOfToday.toISOString()) // hide past events
+    .is("cancelled_at", null) // hide cancelled events / hidden pop-ups
+    // Normal events: keep from the start of today onward. Pop-ups: ALSO keep
+    // while their run is still on (they may have started in the past but
+    // ends_at is today or later). cancelled_at doubles as the pop-up "hide".
+    .or(
+      `starts_at.gte.${startOfToday.toISOString()},ends_at.gte.${startOfToday.toISOString()}`,
+    )
     .order("starts_at", { ascending: true });
   if (error) throw new Error(`fetchEvents: ${error.message}`);
   return (data as EventRow[]).map(mapEvent);

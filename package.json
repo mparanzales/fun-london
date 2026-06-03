@@ -23,6 +23,8 @@
     "scout-candidates": "tsx scripts/scout-candidates.ts",
     "discover-venues:dry": "tsx scripts/discover-venues.ts --dry-run",
     "discover-venues": "tsx scripts/discover-venues.ts",
+    "discover-popups:dry": "tsx scripts/discover-popups.ts --dry-run",
+    "discover-popups": "tsx scripts/discover-popups.ts",
     "backfill-photos:dry": "tsx scripts/backfill-photos.ts --dry-run",
     "backfill-photos": "tsx scripts/backfill-photos.ts",
     "test": "vitest run"

@@ -1,0 +1,77 @@
+name: discover-popups
+
+# Pop-up radar — autonomous London pop-up discovery (Gemini, free).
+#
+# Runs scripts/discover-popups.ts every 4 hours. Each run asks Gemini 2.5 Flash
+# (with built-in Google Search grounding) for temporary/limited-time things in
+# London — supper clubs, chef residencies, temporary bars/restaurants, immersive
+# shows, art installations, seasonal markets, design/retail pop-ups — then keeps
+# only the ones a REPUTABLE editorial publication actually covers (a fresh
+# per-candidate grounding check, >= 1 trusted source). Survivors are AUTO-PUBLISHED
+# to public.events with source='popup' and an ends_at run date, and expired
+# pop-ups are removed. The card UI gives them a "POP-UP" pill + "Ends <date>".
+#
+# the maintainer's heads-up: the run SUMMARY block below lists every pop-up added (and how
+# many expired) in the GitHub Actions run summary. She can hide any from the app
+# at /admin/popups.
+#
+# Sibling crons:
+#   • discover-venues.yml (Tier 2)  — permanent venues (:15 past odd-4h hours)
+#   • events-ingest.yml   (Tier 3)  — ticketed events (:30 past)
+#   • maintenance.yml     (Tier 1)  — refresh existing venues (03:00)
+# Offset to :45 so it never queues with the others. Shares the free Gemini daily
+# quota with discover-venues, so the per-run target is deliberately small.
+
+on:
+  schedule:
+    # https://crontab.guru/#45_3,7,11,15,19,23_*_*_*
+    - cron: "45 3,7,11,15,19,23 * * *"
+  workflow_dispatch:
+
+jobs:
+  discover-popups:
+    name: discover + auto-publish pop-ups
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 override — same Supabase realtime / native-WebSocket
+          # reason as the other data crons.
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run pop-up radar + render summary
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -o pipefail
+          pnpm exec tsx scripts/discover-popups.ts 2>&1 | tee discover-popups.log
+
+      - name: Render step summary
+        if: always()
+        run: |
+          {
+            echo "## Pop-up radar summary"
+            echo ""
+            echo '```'
+            if grep -q "─── SUMMARY ───" discover-popups.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' discover-popups.log
+            else
+              tail -40 discover-popups.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
