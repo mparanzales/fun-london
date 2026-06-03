@@ -370,9 +370,11 @@ create index if not exists feedback_created_idx on public.feedback(created_at de
 alter table public.feedback enable row level security;
 
 -- Anyone can submit. No SELECT/UPDATE/DELETE policies exist, so anon and
--- authenticated can write but never read or alter the table.
+-- authenticated can write but never read or alter the table. The check pins
+-- user_id (anon rows null; a signed-in user can only attribute feedback to
+-- their own id) so it's not "always true" and can't be spoofed.
 drop policy if exists "feedback anyone insert" on public.feedback;
 create policy "feedback anyone insert"
   on public.feedback for insert
   to anon, authenticated
-  with check (true);
+  with check (user_id is null or user_id = (select auth.uid()));
