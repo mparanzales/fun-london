@@ -4,21 +4,18 @@ The weekly "new in London" retention email is built. Two one-time steps switch
 it on. Until then nothing breaks: the profile toggle shows but won't save, and
 the weekly job stays dormant.
 
-## 1. Run the database migration (Supabase SQL editor)
+## 1. Run the database migration ✅ DONE (2026-06-04)
 
-Adds the opt-in flag + the unsubscribe token to your profiles table. Safe to
-re-run.
-
-Supabase dashboard → **SQL Editor** → New query → paste and Run:
+Applied to the live database (migration `add_email_digest_optin_to_profiles`).
+The profiles table now has `email_weekly_opt_in` + `email_unsub_token`, so the
+profile toggle saves and the one-click unsubscribe link works. Nothing to do
+here. (SQL kept for reference:)
 
 ```sql
 alter table public.profiles
   add column if not exists email_weekly_opt_in boolean not null default false,
   add column if not exists email_unsub_token uuid not null default gen_random_uuid();
 ```
-
-After this, the profile toggle ("Email me what's new in London") saves, and the
-one-click unsubscribe link works.
 
 ## 2. Add your Resend API key as a GitHub secret
 
