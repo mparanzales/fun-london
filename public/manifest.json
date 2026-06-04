@@ -19,8 +19,8 @@
       "purpose": "any"
     },
     {
-      "src": "/apple-icon.png",
-      "sizes": "1024x1024",
+      "src": "/maskable.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     }
