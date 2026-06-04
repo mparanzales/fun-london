@@ -1,8 +1,9 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
-// Unit tests for the pure logic engines (lib/**). Node environment — these are
-// framework-free functions, no DOM. The "@/..." alias mirrors tsconfig paths.
+// Unit tests for the pure logic engines (lib/**) and ingestion-script
+// invariants (scripts/**). Node environment — these are framework-free
+// functions, no DOM. The "@/..." alias mirrors tsconfig paths.
 export default defineConfig({
   resolve: {
     alias: {
@@ -11,6 +12,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "scripts/**/*.test.ts"],
   },
 });

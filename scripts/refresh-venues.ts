@@ -26,7 +26,11 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { photoStorageEnabled } from "./photo-storage";
+import {
+  photoStorageEnabled,
+  mirrorPhotoToStorage,
+  isKeyedPhotoUrl,
+} from "./photo-storage";
 import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
@@ -108,10 +112,6 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
     );
   }
   return (await res.json()) as PlaceDetails;
-}
-
-function photoUrl(photoName: string, maxWidth = 1600): string {
-  return `https://places.googleapis.com/v1/${photoName}/media?key=${GOOGLE_PLACES_API_KEY}&maxWidthPx=${maxWidth}`;
 }
 
 // ── Types for current DB row ────────────────────────────────────────────
@@ -262,24 +262,10 @@ function diffRow(
     });
   }
 
-  // Photo refresh — Google's photo names rotate. Only update if there's a
-  // fresh photo AND the current img_url is still a Google Places URL
-  // (don't clobber a manually-set img_url).
-  // When Storage mirroring is enabled, photos are owned by the ingest/discover
-  // pipeline (which writes keyless Storage URLs); refreshing here would re-add
-  // a keyed Google URL, so skip. When disabled (today), behaviour is unchanged.
-  const photoName = details.photos?.[0]?.name;
-  if (
-    photoName &&
-    !photoStorageEnabled() &&
-    row.img_url.startsWith("https://places.googleapis.com/")
-  ) {
-    const newImg = photoUrl(photoName);
-    if (newImg !== row.img_url) {
-      update.img_url = newImg;
-      // No diff entry — image-URL diffs are noise in logs.
-    }
-  }
+  // Photo handling is NOT done here: diffRow is a pure/sync function, and we
+  // must never write a keyed Google URL. Re-mirroring (and self-healing any
+  // keyed/empty img_url to a keyless Storage URL) happens in processVenue via
+  // selfHealPhoto, which has the async Supabase client.
 
   // Closure detection — once a venue is marked closed, never auto-unmark.
   if (
@@ -401,6 +387,45 @@ async function deadLinksForVenue(row: VenueRow): Promise<DeadLink[]> {
 
 // ── Per-venue processor ─────────────────────────────────────────────────
 
+// Self-heal the photo to a keyless URL. The daily refresh is the safety net
+// that permanently ends the recurring keyed-URL regression: if a row ever ends
+// up with a keyed places.googleapis.com URL (or no photo) and Google still has
+// a photo for it, re-mirror to keyless Storage. A keyless/manual URL is left
+// untouched, and we NEVER write a keyed URL — if mirroring is unavailable we
+// leave the bad URL in place rather than re-keying it.
+async function selfHealPhoto(
+  row: VenueRow,
+  details: PlaceDetails,
+  update: Partial<VenueRow> & { last_synced_at: string },
+  diffs: Diff[],
+): Promise<void> {
+  const photoName = details.photos?.[0]?.name;
+  if (!photoName) return;
+  // Only act on unsafe (keyed) or missing URLs; leave good ones alone.
+  if (row.img_url && !isKeyedPhotoUrl(row.img_url)) return;
+  if (!photoStorageEnabled()) {
+    console.warn(
+      `  [photo] ${row.slug}: img_url needs re-mirror but FL_PHOTO_BUCKET is unset — leaving as-is (won't write a keyed URL)`,
+    );
+    return;
+  }
+  if (DRY_RUN) {
+    console.log(`  [dry-run] would re-mirror photo to a keyless Storage URL`);
+    return;
+  }
+  if (!supabase) return;
+  const mirrored = await mirrorPhotoToStorage(photoName, row.slug, supabase);
+  if (mirrored && mirrored !== row.img_url) {
+    update.img_url = mirrored;
+    diffs.push({
+      slug: row.slug,
+      field: "img_url",
+      before: isKeyedPhotoUrl(row.img_url) ? "keyed Google URL" : "(none)",
+      after: "keyless Storage URL",
+    });
+  }
+}
+
 async function processVenue(row: VenueRow): Promise<{
   diffs: Diff[];
   deadLinks: DeadLink[];
@@ -410,6 +435,7 @@ async function processVenue(row: VenueRow): Promise<{
 
   const details = await placeDetails(row.google_place_id);
   const { update, diffs } = diffRow(row, details);
+  await selfHealPhoto(row, details, update, diffs);
 
   if (diffs.length === 0) {
     console.log(`  no field changes`);

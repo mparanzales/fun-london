@@ -2,10 +2,15 @@
 // photo URLs by downloading the photo at ingest time and re-hosting it on
 // Supabase Storage (a keyless public URL).
 //
-// SAFETY: this is FLAG-GATED. It only activates when FL_PHOTO_BUCKET is set
-// (the name of a public Storage bucket). Until then every caller falls back to
-// the existing keyed Google URL, so the live ingestion crons behave exactly as
-// before — zero risk from merging this.
+// SAFETY / INVARIANT: a keyed `places.googleapis.com` URL must NEVER be
+// written to venues.img_url — it would re-expose the Places API key to every
+// browser (the bug that kept regressing). The keyed media URL is built and
+// used ONLY inside this module, server-side, to fetch the photo bytes. Callers
+// must go through `resolveVenuePhoto()` (ingest/discover) or self-heal via
+// `mirrorPhotoToStorage()` (refresh); on any failure they fall back to the
+// keyless `FALLBACK_IMG_URL`, never to a keyed URL. Mirroring is FLAG-GATED on
+// FL_PHOTO_BUCKET — when it is unset, callers get the keyless fallback (not a
+// keyed URL), so a missing bucket degrades to a placeholder, never a leak.
 //
 // THE MAINTAINER — to switch it on (closes the exposed-key security issue for good):
 //   1. Supabase dashboard → Storage → New bucket → name "venue-photos",
@@ -22,8 +27,46 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const PHOTO_BUCKET = process.env.FL_PHOTO_BUCKET ?? "";
 
+// Keyless stock image used when a venue's real photo cannot be mirrored. This
+// is the ONLY fallback callers may persist — it is never a keyed Google URL.
+export const FALLBACK_IMG_URL =
+  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
+
 export function photoStorageEnabled(): boolean {
   return PHOTO_BUCKET.length > 0;
+}
+
+// True if a URL points at Google's Places media endpoint, which embeds the API
+// key as a query param. Such URLs are safe to FETCH server-side but must NEVER
+// be stored in venues.img_url. Used to detect and self-heal stale keyed rows.
+export function isKeyedPhotoUrl(url: string | null | undefined): boolean {
+  return typeof url === "string" && url.includes("places.googleapis.com");
+}
+
+const MIRROR_ATTEMPTS = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Run a mirror operation with a few retries on transient failure (network
+// blips, Google 5xx/429, Storage upload errors). Returns null only after every
+// attempt fails — so a momentary hiccup never makes a caller persist a keyed
+// fallback, which was the root cause of keyed URLs creeping back in.
+async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MIRROR_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < MIRROR_ATTEMPTS) await sleep(400 * attempt);
+    }
+  }
+  console.error(
+    `  [photo] ${label}: gave up after ${MIRROR_ATTEMPTS} attempts — ${(lastErr as Error).message}`,
+  );
+  return null;
 }
 
 // Build the (key-bearing) Google CDN URL used to FETCH the photo bytes.
@@ -44,12 +87,9 @@ export async function mirrorPhotoToStorage(
   supabase: SupabaseClient,
 ): Promise<string | null> {
   if (!photoStorageEnabled()) return null;
-  try {
+  return withRetry(`mirror ${slug}`, async () => {
     const res = await fetch(googleMediaUrl(photoName));
-    if (!res.ok) {
-      console.error(`  [photo] fetch ${slug}: HTTP ${res.status}`);
-      return null;
-    }
+    if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
     const contentType = res.headers.get("content-type") ?? "image/jpeg";
     const ext = contentType.includes("png") ? "png" : "jpg";
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -58,16 +98,26 @@ export async function mirrorPhotoToStorage(
     const { error } = await supabase.storage
       .from(PHOTO_BUCKET)
       .upload(path, buffer, { contentType, upsert: true });
-    if (error) {
-      console.error(`  [photo] upload ${slug}: ${error.message}`);
-      return null;
-    }
+    if (error) throw new Error(`upload: ${error.message}`);
+
     const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-    return data?.publicUrl ?? null;
-  } catch (e) {
-    console.error(`  [photo] mirror ${slug}: ${(e as Error).message}`);
-    return null;
-  }
+    if (!data?.publicUrl) throw new Error("no public URL returned");
+    return data.publicUrl;
+  });
+}
+
+// The single safe way to turn a Google photo NAME into a URL for the DB.
+// Mirrors to keyless Storage; on any failure (or when mirroring is disabled)
+// returns the keyless stock fallback. GUARANTEE: never returns a keyed URL, so
+// ingest/discover can use it unconditionally without re-introducing the key.
+export async function resolveVenuePhoto(
+  photoName: string | null | undefined,
+  slug: string,
+  supabase: SupabaseClient,
+): Promise<string> {
+  if (!photoName) return FALLBACK_IMG_URL;
+  const mirrored = await mirrorPhotoToStorage(photoName, slug, supabase);
+  return mirrored ?? FALLBACK_IMG_URL;
 }
 
 // Generic variant: download an arbitrary public image URL (e.g. a pop-up's

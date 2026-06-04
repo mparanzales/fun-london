@@ -29,7 +29,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { mirrorPhotoToStorage } from "./photo-storage";
+import { resolveVenuePhoto, FALLBACK_IMG_URL } from "./photo-storage";
 import type { BookingLink, Mood, VenueType } from "@/lib/types";
 import {
   normalizeOpeningHours,
@@ -311,9 +311,6 @@ async function londonLocationCount(name: string): Promise<number> {
   }
 }
 
-function photoUrl(photoName: string, maxWidth = 1600): string {
-  return `https://places.googleapis.com/v1/${photoName}/media?key=${GOOGLE_PLACES_API_KEY}&maxWidthPx=${maxWidth}`;
-}
 
 // ── Gemini (validation via grounding + editorial) ────────────────────────
 
@@ -653,14 +650,14 @@ async function main() {
       while (usedSlugs.has(slug)) slug = `${slugify(name)}-${n++}`;
       usedSlugs.add(slug);
 
-      // Resolve the photo: mirror to Supabase Storage (keyless) when enabled,
-      // else the keyed Google URL. Skip the upload on dry runs.
+      // Resolve the photo to a keyless URL (mirrored to Storage, or the
+      // keyless stock fallback). Never a keyed Google URL — see photo-storage.
+      // On dry runs we skip the fetch/upload entirely and use the fallback.
       const photoName = p.photos?.[0]?.name;
-      const imgUrl = photoName
-        ? (supabase && !DRY_RUN
-            ? await mirrorPhotoToStorage(photoName, slug, supabase)
-            : null) ?? photoUrl(photoName)
-        : "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
+      const imgUrl =
+        supabase && !DRY_RUN
+          ? await resolveVenuePhoto(photoName, slug, supabase)
+          : FALLBACK_IMG_URL;
 
       const row = {
         slug,

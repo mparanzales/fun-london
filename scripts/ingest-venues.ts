@@ -26,7 +26,7 @@ dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { VENUE_SEEDS, type VenueSeed } from "./venues-seed";
-import { mirrorPhotoToStorage } from "./photo-storage";
+import { resolveVenuePhoto } from "./photo-storage";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 import {
   normalizeOpeningHours,
@@ -207,23 +207,7 @@ function hasMajorBookingPlatform(links: BookingLink[]): boolean {
   );
 }
 
-// ── Photo URL ────────────────────────────────────────────────────────────
-
-function photoUrl(photoName: string, maxWidth = 1600): string {
-  // Returns a Google-CDN URL that resolves to the photo. The API key is
-  // inline because the photo-media endpoint requires it. Acceptable for
-  // V1 because the key is restricted to Places API only at the Google
-  // Cloud level — even if scraped from the page, it can't be abused for
-  // anything beyond Places lookups (and our usage is well under the free
-  // tier). Future: download + reupload to Supabase Storage so the key
-  // doesn't appear in public URLs.
-  return `https://places.googleapis.com/v1/${photoName}/media?key=${GOOGLE_PLACES_API_KEY}&maxWidthPx=${maxWidth}`;
-}
-
 // ── Row builders ─────────────────────────────────────────────────────────
-
-const UNSPLASH_FALLBACK =
-  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
 
 function buildVenueRow(seed: VenueSeed, details: PlaceDetails, imgUrl: string) {
   const websiteUri = details.websiteUri ?? null;
@@ -340,13 +324,11 @@ async function processVenue(seed: VenueSeed): Promise<{
   } else {
     if (!supabase) throw new Error("Supabase client not initialised");
 
-    // Resolve the venue photo: mirror to Supabase Storage (keyless URL) when
-    // FL_PHOTO_BUCKET is configured, else fall back to the keyed Google URL.
+    // Resolve the venue photo to a keyless URL (mirrored to Supabase Storage,
+    // or the keyless stock fallback). resolveVenuePhoto NEVER returns a keyed
+    // Google URL, so the API key can't leak into venues.img_url.
     const photoName = details.photos?.[0]?.name;
-    const imgUrl = photoName
-      ? ((await mirrorPhotoToStorage(photoName, seed.slug, supabase)) ??
-        photoUrl(photoName))
-      : UNSPLASH_FALLBACK;
+    const imgUrl = await resolveVenuePhoto(photoName, seed.slug, supabase);
 
     const venueRow = buildVenueRow(seed, details, imgUrl);
     const { error: venueErr } = await supabase
