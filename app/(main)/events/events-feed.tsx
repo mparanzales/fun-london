@@ -7,6 +7,7 @@ import {
   UtensilsCrossed,
   Palette,
   Laugh,
+  Disc3,
   Store,
   type LucideIcon,
 } from "lucide-react";
@@ -30,17 +31,21 @@ const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
 // "popup" is a pseudo-category (it filters to temporary pop-up listings rather
 // than an EventCategory), so it lives in this row next to the real categories.
 type CategoryFilter = "all" | EventCategory | "popup";
-const CATEGORY_FILTERS: {
-  id: CategoryFilter;
+
+// Every category chip we COULD show, in display order. Which ones actually
+// render is decided per-load from the events present (see categoryChips) — a
+// chip for a category with zero events is a dead filter and makes the feed
+// look like it's hiding content, so we only show categories we can fill.
+const ALL_CATEGORY_CHIPS: {
+  id: EventCategory;
   label: string;
   Icon: LucideIcon;
 }[] = [
-  { id: "all", label: "All", Icon: Sparkles },
   { id: "Music", label: "Music", Icon: Music },
   { id: "Food", label: "Food", Icon: UtensilsCrossed },
   { id: "Art", label: "Art", Icon: Palette },
   { id: "Comedy", label: "Comedy", Icon: Laugh },
-  { id: "popup", label: "Pop-ups", Icon: Store },
+  { id: "Club", label: "Club", Icon: Disc3 },
 ];
 
 // ── Date helpers ────────────────────────────────────────────────────────
@@ -150,6 +155,22 @@ export function EventsFeed({
       });
   }, [events, quick, fromDate, toDate, category]);
 
+  // Data-driven category chips: "All", then only the categories actually
+  // present in the feed (in display order), then "Pop-ups" if any exist. This
+  // hides empty filters (e.g. Food until Eventbrite is wired) and surfaces new
+  // ones (e.g. Club) automatically as the ingest categorises real events.
+  const categoryChips = useMemo(() => {
+    const present = new Set(events.map((e) => e.category));
+    const chips: { id: CategoryFilter; label: string; Icon: LucideIcon }[] = [
+      { id: "all", label: "All", Icon: Sparkles },
+      ...ALL_CATEGORY_CHIPS.filter((c) => present.has(c.id)),
+    ];
+    if (events.some((e) => e.isPopup)) {
+      chips.push({ id: "popup", label: "Pop-ups", Icon: Store });
+    }
+    return chips;
+  }, [events]);
+
   return (
     <div className="pt-4 pb-6">
       <header className="px-5 pb-3">
@@ -207,33 +228,41 @@ export function EventsFeed({
         </div>
       )}
 
-      {/* Category row — matches the /explore page filter chips:
-          icon on top, label below, no per-chip background, color shift
-          on selection. Grid keeps all five columns equal-width and
-          guarantees no horizontal scroll. */}
-      <div className="px-5 pt-1 pb-4 grid grid-cols-6 gap-1">
-        {CATEGORY_FILTERS.map((c) => {
-          const on = category === c.id;
-          const iconClass =
-            "w-6 h-6 transition-colors duration-200 " +
-            (on ? "text-accent" : "text-muted-fg");
-          const labelClass =
-            "text-xs transition-colors duration-200 " +
-            (on ? "text-accent font-medium" : "text-muted-fg font-normal");
-          return (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setCategory(c.id)}
-              aria-pressed={on}
-              className="flex flex-col items-center gap-1 py-2"
-            >
-              <c.Icon className={iconClass} strokeWidth={on ? 2.4 : 2} />
-              <span className={labelClass}>{c.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Category row — matches the /explore page filter chips: icon on top,
+          label below, no per-chip background, colour shift on selection. The
+          column count tracks the number of visible chips so they stay
+          equal-width with no horizontal scroll. Hidden entirely when there are
+          no real categories to filter (only "All"). */}
+      {categoryChips.length > 1 && (
+        <div
+          className="px-5 pt-1 pb-4 grid gap-1"
+          style={{
+            gridTemplateColumns: `repeat(${categoryChips.length}, minmax(0, 1fr))`,
+          }}
+        >
+          {categoryChips.map((c) => {
+            const on = category === c.id;
+            const iconClass =
+              "w-6 h-6 transition-colors duration-200 " +
+              (on ? "text-accent" : "text-muted-fg");
+            const labelClass =
+              "text-xs transition-colors duration-200 " +
+              (on ? "text-accent font-medium" : "text-muted-fg font-normal");
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setCategory(c.id)}
+                aria-pressed={on}
+                className="flex flex-col items-center gap-1 py-2"
+              >
+                <c.Icon className={iconClass} strokeWidth={on ? 2.4 : 2} />
+                <span className={labelClass}>{c.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Event list */}
       <div className="px-5 flex flex-col gap-4">

@@ -33,6 +33,7 @@ dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { EVENT_SUBSCRIPTIONS, type EventSubscription } from "./events-seed";
+import { tmCategory } from "./event-category";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -392,29 +393,6 @@ type TicketmasterEventsResponse = {
   _embedded?: { events?: TicketmasterEvent[] };
 };
 
-// Map Ticketmaster's segment + genre → Fun London's EventCategory.
-// Our union is "Music" | "Food" | "Art" | "Comedy" | "Club". Comedy is a
-// GENRE under the "Arts & Theatre" segment (there's no top-level Comedy
-// segment), so we check genre first — otherwise stand-up shows would all
-// be mislabelled "Art". Sports / Film / Misc fall back to Music since we
-// wouldn't curate those venues anyway.
-function tmCategory(
-  segment: string | undefined,
-  genre: string | undefined,
-): string {
-  if (genre && genre.toLowerCase().includes("comedy")) return "Comedy";
-  switch (segment) {
-    case "Music":
-      return "Music";
-    case "Arts & Theatre":
-      return "Art";
-    case "Comedy":
-      return "Comedy";
-    default:
-      return "Music";
-  }
-}
-
 function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
   // Need a stable start time. Ticketmaster sometimes returns only
   // localDate (no time) for early-announced shows; coerce to 19:00
@@ -446,6 +424,10 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
 
   const segment = e.classifications?.[0]?.segment?.name;
   const genre = e.classifications?.[0]?.genre?.name;
+  // Drop events that don't map to one of our categories (Sports/Film/etc.)
+  // rather than mislabelling them — keeps the feed honest and on-brand.
+  const category = tmCategory(segment, genre);
+  if (!category) return null;
   const soldOut =
     (e.dates?.status?.code ?? "").toLowerCase() === "cancelled" ||
     (e.dates?.status?.code ?? "").toLowerCase() === "offsale";
@@ -457,7 +439,7 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
     starts_at: startsAt,
     time_label: timeLabel,
     price,
-    category: tmCategory(segment, genre),
+    category,
     img_url: safeImageUrl(img?.url),
     description: e.info ?? e.pleaseNote ?? null,
     sold_out: soldOut,
