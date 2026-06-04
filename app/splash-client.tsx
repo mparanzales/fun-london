@@ -11,9 +11,12 @@
 //   - signed in + onboarded in DB   → /explore
 //   - signed in + NOT onboarded     → /onboarding (finish what you started)
 //   - anonymous + localStorage key  → /explore (local-only onboarded)
-//   - anonymous + no key            → /onboarding
+//   - anonymous + no key            → REVEAL the landing page underneath
+//                                     (first-time, signed-out visitor) — no
+//                                     redirect, so funldn.com shows the product
+//                                     instead of dropping into the quiz.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 
@@ -22,6 +25,10 @@ const TOTAL_DURATION_MS = 1700;
 // Reduce-motion users skip most of the brand-mark hold (the animation itself
 // is already disabled globally for them).
 const REDUCED_MOTION_DURATION_MS = 350;
+// How long the fade-out runs before the overlay is removed from the DOM.
+const FADE_OUT_MS = 450;
+
+type Phase = "hold" | "leaving" | "gone";
 
 export function SplashClient({
   authed,
@@ -31,6 +38,7 @@ export function SplashClient({
   dbOnboarded: boolean;
 }) {
   const router = useRouter();
+  const [phase, setPhase] = useState<Phase>("hold");
 
   useEffect(() => {
     // Honour Reduce Motion: the brand-mark animation is already zeroed by the
@@ -45,25 +53,42 @@ export function SplashClient({
       // matchMedia unavailable — keep the default hold.
     }
     const t = setTimeout(() => {
-      let onboarded = false;
       if (authed) {
         // DB wins when signed in — survives cross-device sign-in.
-        onboarded = dbOnboarded;
-      } else {
-        // Anonymous → fall back to localStorage as before.
-        try {
-          onboarded = !!window.localStorage.getItem(ONBOARDING_KEY);
-        } catch {
-          // localStorage unavailable — treat as not onboarded.
-        }
+        router.replace(dbOnboarded ? "/explore" : "/onboarding");
+        return;
       }
-      router.replace(onboarded ? "/explore" : "/onboarding");
+      // Anonymous: localStorage tells us if they've onboarded on this device.
+      let hasOnboarded = false;
+      try {
+        hasOnboarded = !!window.localStorage.getItem(ONBOARDING_KEY);
+      } catch {
+        // localStorage unavailable — treat as a first-time visitor.
+      }
+      if (hasOnboarded) {
+        router.replace("/explore");
+        return;
+      }
+      // First-time, signed-out visitor → fade the splash to reveal the
+      // landing page rendered underneath. No navigation.
+      setPhase("leaving");
     }, hold);
     return () => clearTimeout(t);
   }, [router, authed, dbOnboarded]);
 
+  // Once the fade-out finishes, drop the overlay entirely so it doesn't trap
+  // pointer events or focus over the revealed landing.
+  useEffect(() => {
+    if (phase !== "leaving") return;
+    const t = setTimeout(() => setPhase("gone"), FADE_OUT_MS);
+    return () => clearTimeout(t);
+  }, [phase]);
+
+  if (phase === "gone") return null;
+
   return (
     <div
+      aria-hidden={phase === "leaving"}
       style={{
         position: "fixed",
         inset: 0,
@@ -72,6 +97,9 @@ export function SplashClient({
         alignItems: "center",
         justifyContent: "center",
         zIndex: 100,
+        opacity: phase === "leaving" ? 0 : 1,
+        transition: `opacity ${FADE_OUT_MS}ms ease`,
+        pointerEvents: phase === "leaving" ? "none" : "auto",
       }}
     >
       <div className="fl-splash-mark">
