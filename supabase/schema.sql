@@ -16,8 +16,21 @@ create table if not exists public.profiles (
   avatar_url text,
   preferences jsonb,         -- { moods, vibes, budget, areas }
   onboarded boolean not null default false,
+  -- Weekly "new in London" digest opt-in (default OFF — explicit consent).
+  -- email_unsub_token backs the one-click unsubscribe link (no login needed);
+  -- it is secret, but profiles RLS is self-read only so it never leaks.
+  email_weekly_opt_in boolean not null default false,
+  email_unsub_token uuid not null default gen_random_uuid(),
   created_at timestamptz not null default now()
 );
+
+-- Idempotent for databases created before the digest columns existed
+-- (schema.sql is re-runnable; `create table if not exists` will not alter an
+-- existing table, so add the columns explicitly). Existing rows are backfilled
+-- with the defaults (opt-in false, a fresh unsubscribe token).
+alter table public.profiles
+  add column if not exists email_weekly_opt_in boolean not null default false,
+  add column if not exists email_unsub_token uuid not null default gen_random_uuid();
 
 -- Venues — backs the `Venue` type
 -- Renamed from `places` in v1. Columns expanded to match the v2 Venue type

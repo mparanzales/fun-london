@@ -7,7 +7,7 @@ import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import { createClient } from "@/lib/supabase/client";
 import { FeedbackSheet } from "@/components/feedback-sheet";
-import { exportMyData, deleteMyAccount } from "./actions";
+import { exportMyData, deleteMyAccount, setEmailDigestOptIn } from "./actions";
 import {
   getThemeMode,
   nextThemeMode,
@@ -29,11 +29,13 @@ export function ProfileBody({
   authUserEmail,
   displayName,
   preferences,
+  emailOptIn,
 }: {
   authUserId: string | null;
   authUserEmail: string | null;
   displayName: string | null;
   preferences: UserPreferences | null;
+  emailOptIn: boolean;
 }) {
   if (!authUserId) {
     return <AnonProfile />;
@@ -43,6 +45,7 @@ export function ProfileBody({
       authUserEmail={authUserEmail}
       displayName={displayName}
       preferences={preferences}
+      emailOptIn={emailOptIn}
     />
   );
 }
@@ -96,16 +99,32 @@ function SignedInProfile({
   authUserEmail,
   displayName,
   preferences,
+  emailOptIn,
 }: {
   authUserEmail: string | null;
   displayName: string | null;
   preferences: UserPreferences | null;
+  emailOptIn: boolean;
 }) {
   const router = useRouter();
   const { count: savedCount } = useSaved();
   const { count: bookingsCount } = useBookings();
   const [signingOut, setSigningOut] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+
+  // Weekly-digest opt-in. Optimistic toggle: flip immediately, revert if the
+  // server write fails (so the switch never lies about your consent).
+  const [emailWeekly, setEmailWeekly] = useState(emailOptIn);
+  const [savingEmail, setSavingEmail] = useState(false);
+  async function toggleEmailWeekly() {
+    if (savingEmail) return;
+    const next = !emailWeekly;
+    setEmailWeekly(next);
+    setSavingEmail(true);
+    const res = await setEmailDigestOptIn(next);
+    if (!res.ok) setEmailWeekly(!next); // revert on failure
+    setSavingEmail(false);
+  }
   // Theme mode. Start at "auto" (matches SSR) and sync to the saved choice
   // after mount to avoid a hydration mismatch.
   const [themeMode, setThemeModeState] = useState<ThemeMode>("auto");
@@ -261,15 +280,34 @@ function SignedInProfile({
           </span>
         </button>
 
-        <div className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-muted-fg text-[13px] font-bold">
+        <button
+          type="button"
+          onClick={toggleEmailWeekly}
+          disabled={savingEmail}
+          role="switch"
+          aria-checked={emailWeekly}
+          aria-label="Email me what's new in London each week"
+          className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold disabled:opacity-50"
+        >
           <span className="flex gap-2.5 items-center">
             <span>🔔</span>
-            <span>Notifications</span>
+            <span>Email me what&apos;s new in London</span>
           </span>
-          <span className="text-[10px] font-extrabold uppercase tracking-wider bg-muted text-muted-fg rounded-full px-2 py-1">
-            Soon
+          {/* Pill toggle — accent track when on, muted when off. */}
+          <span
+            className={
+              "relative w-10 h-6 rounded-full transition-colors flex-shrink-0 " +
+              (emailWeekly ? "bg-primary" : "bg-muted")
+            }
+          >
+            <span
+              className={
+                "absolute top-0.5 w-5 h-5 rounded-full bg-card shadow-soft transition-all " +
+                (emailWeekly ? "left-[18px]" : "left-0.5")
+              }
+            />
           </span>
-        </div>
+        </button>
 
         <button
           type="button"

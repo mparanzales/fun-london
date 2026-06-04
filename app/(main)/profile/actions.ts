@@ -130,6 +130,34 @@ export async function exportMyData(): Promise<ExportResult> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Weekly digest email opt-in.
+//
+// Stores explicit consent for the weekly "new in London" email on the user's
+// own profile row (RLS self-update). Default is OFF; the user turns it on here
+// and can turn it off here or via the one-click unsubscribe link in any email.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type OptInResult = { ok: true } | { ok: false; error: string };
+
+export async function setEmailDigestOptIn(
+  optIn: boolean,
+): Promise<OptInResult> {
+  const user = await getAuthUser();
+  if (!user) return { ok: false, error: "not_signed_in" };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ email_weekly_opt_in: optIn })
+    .eq("id", user.id);
+  if (error) {
+    console.error(`[profile] setEmailDigestOptIn: ${error.message}`);
+    return { ok: false, error: "write_failed" };
+  }
+  return { ok: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Account deletion (GDPR right to erasure).
 //
 // Removing the auth.users row needs the service-role key (the anon client

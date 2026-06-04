@@ -16,6 +16,7 @@ export default async function ProfilePage() {
       authUserEmail={authUser?.email ?? null}
       displayName={profile?.displayName ?? null}
       preferences={profile?.preferences ?? null}
+      emailOptIn={profile?.emailWeeklyOptIn ?? false}
     />
   );
 }

@@ -235,6 +235,7 @@ export type Profile = {
   displayName: string | null;
   preferences: UserPreferences | null;
   onboarded: boolean;
+  emailWeeklyOptIn: boolean;
 };
 
 // ── Plan Together (mock multiplayer) ─────────────────────────────────────

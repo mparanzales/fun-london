@@ -294,13 +294,18 @@ type ProfileRow = {
   display_name: string | null;
   preferences: UserPreferences | null;
   onboarded: boolean;
+  // Optional so this stays safe to deploy before the email-digest migration
+  // runs — selecting "*" simply omits the column when it doesn't exist yet.
+  email_weekly_opt_in?: boolean | null;
 };
 
 export async function fetchProfile(userId: string): Promise<Profile | null> {
   const supabase = createClient();
+  // select("*") rather than a column list so a not-yet-migrated DB (missing
+  // email_weekly_opt_in) doesn't error — the field just reads as undefined.
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, display_name, preferences, onboarded")
+    .select("*")
     .eq("id", userId)
     .maybeSingle();
   if (error) throw new Error(`fetchProfile(${userId}): ${error.message}`);
@@ -311,5 +316,6 @@ export async function fetchProfile(userId: string): Promise<Profile | null> {
     displayName: r.display_name,
     preferences: r.preferences,
     onboarded: r.onboarded,
+    emailWeeklyOptIn: r.email_weekly_opt_in ?? false,
   };
 }
