@@ -13,12 +13,19 @@ type Props = {
    * sections (e.g. "Eats" filter) where the tag adds no information.
    */
   showCategoryTag?: boolean;
+  /**
+   * Mark this card's image as the LCP candidate (above the fold) so Next
+   * eager-loads it. Set on the first card of a feed only — Next warns if the
+   * largest-paint image isn't prioritised.
+   */
+  priority?: boolean;
 };
 
 export function VenueCard({
   venue,
   variant = "tall",
   showCategoryTag = true,
+  priority = false,
 }: Props) {
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
@@ -61,6 +68,7 @@ export function VenueCard({
             // API key; bypass Vercel's optimizer for those so we don't
             // burn the optimization quota on rerenderable proxies.
             unoptimized={venue.imgUrl.includes("googleapis.com")}
+            priority={priority}
             className="object-cover group-hover:scale-105 transition-transform duration-500"
           />
           {/* Bottom gradient for any future title overlay */}

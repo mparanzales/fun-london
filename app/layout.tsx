@@ -78,7 +78,11 @@ export default async function RootLayout({
   const authUserId = authUser?.id ?? null;
 
   return (
-    <html lang="en" className={jakarta.variable}>
+    // suppressHydrationWarning: the inline anti-flash script below writes
+    // data-theme onto <html> before React hydrates, so the client DOM has an
+    // attribute the server markup doesn't. Scopes to <html>'s own attributes
+    // only — the documented Next.js pattern for pre-paint theme injection.
+    <html lang="en" className={jakarta.variable} suppressHydrationWarning>
       <body className="font-sans antialiased min-h-screen">
         {/* Anti-flash: set the theme palette BEFORE first paint so there's no
             flash of the wrong colours while React hydrates and ThemeProvider's

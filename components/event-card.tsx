@@ -10,9 +10,18 @@ type Props = {
    * information.
    */
   showCategoryTag?: boolean;
+  /**
+   * Mark this card's image as the LCP candidate (above the fold) so Next
+   * eager-loads it. Set on the first card of a feed only.
+   */
+  priority?: boolean;
 };
 
-export function EventCard({ event, showCategoryTag = true }: Props) {
+export function EventCard({
+  event,
+  showCategoryTag = true,
+  priority = false,
+}: Props) {
   // Every card opens the internal detail page (events and pop-ups alike), so
   // the user reads the full context there before tapping out to the official
   // page or ticket provider.
@@ -37,6 +46,7 @@ export function EventCard({ event, showCategoryTag = true }: Props) {
           alt={event.name}
           fill
           sizes="(max-width: 640px) 100vw, 400px"
+          priority={priority}
           className="object-cover group-hover:scale-105 transition-transform duration-500"
         />
         {/* Bottom gradient for legibility of any future title overlay */}

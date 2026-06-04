@@ -203,19 +203,21 @@ export function ExploreFeed({
         </div>
       ) : (
         <div className="px-5 pt-5 flex flex-col gap-4">
-          {items.map((item) =>
+          {items.map((item, index) =>
             item.kind === "venue" ? (
               <VenueCard
                 key={`venue-${item.data.id}`}
                 venue={item.data}
                 variant="wide"
                 showCategoryTag={showCategoryTag}
+                priority={index === 0}
               />
             ) : (
               <EventCard
                 key={`event-${item.data.id}`}
                 event={item.data}
                 showCategoryTag={showCategoryTag}
+                priority={index === 0}
               />
             ),
           )}
