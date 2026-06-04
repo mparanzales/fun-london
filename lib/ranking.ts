@@ -82,6 +82,9 @@ export function scoreVenue(v: Venue, prefs: UserPreferences): number {
   s += vibeBoost(v, prefs.vibes);
   if (prefs.budget && v.price === prefs.budget) s += 1;
   s += (v.rating - 4) * 0.5; // gentle quality nudge as a tie-breaker
+  // Hand-curated venues edge ahead of robot-discovered ones on close calls,
+  // without overriding a strong taste match.
+  if (v.curationTier === "curated") s += 0.75;
   return s;
 }
 

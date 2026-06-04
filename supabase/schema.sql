@@ -79,8 +79,14 @@ create table if not exists public.venues (
   -- Plan Together v2 — real opening hours (normalized Google Places
   -- regularOpeningHours): { periods: [{open:{day,hour,minute}, close:{...}|null}] }
   opening_hours jsonb,
+  -- "curated" = hand-picked seed venue, "discovered" = added by the robot.
+  -- Curated venues rank first in the catalogue. Default discovered.
+  curation_tier text not null default 'discovered',
   created_at timestamptz not null default now()
 );
+-- Idempotent for existing databases (see the profiles alter above).
+alter table public.venues
+  add column if not exists curation_tier text not null default 'discovered';
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
 create index if not exists venues_type_idx on public.venues(type);
 create index if not exists venues_slug_idx on public.venues(slug);

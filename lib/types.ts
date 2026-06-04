@@ -134,6 +134,9 @@ export type Venue = {
   criticalFlags: CriticalFlag[] | null;
   // Phase: real opening hours (Google Places), for "open when we meet".
   openingHours: OpeningHours | null;
+  // "curated" = hand-picked seed venue; "discovered" = added by the autonomous
+  // robot. Curated venues rank first. Defaults to "discovered".
+  curationTier: "curated" | "discovered";
   createdAt: string;
 };
 

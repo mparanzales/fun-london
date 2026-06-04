@@ -36,6 +36,13 @@ export const REGION_OF: Record<string, Region> = {
   "Notting Hill": "West",
   Hammersmith: "West",
   Bayswater: "West",
+  Chiswick: "West",
+  "Shepherd's Bush": "West",
+  "Maida Vale": "West",
+  "Queen's Park": "West",
+  "Ladbroke Grove": "West",
+  Pimlico: "West",
+  Richmond: "West",
   // East
   Shoreditch: "East",
   Hackney: "East",
@@ -49,7 +56,7 @@ export const REGION_OF: Record<string, Region> = {
   "Victoria Park": "East",
   Whitechapel: "East",
   Walthamstow: "East",
-  // South
+  // South (incl. south-west)
   Bermondsey: "South",
   Borough: "South",
   "Borough Market": "South",
@@ -57,6 +64,15 @@ export const REGION_OF: Record<string, Region> = {
   Brixton: "South",
   Camberwell: "South",
   "Herne Hill": "South",
+  Clapham: "South",
+  Battersea: "South",
+  Balham: "South",
+  Putney: "South",
+  Wandsworth: "South",
+  Vauxhall: "South",
+  Tooting: "South",
+  Greenwich: "South",
+  Deptford: "South",
   // North
   Islington: "North",
   "Stoke Newington": "North",
@@ -64,6 +80,12 @@ export const REGION_OF: Record<string, Region> = {
   "Kentish Town": "North",
   Hampstead: "North",
   Canonbury: "North",
+  Highbury: "North",
+  "Crouch End": "North",
+  "Finsbury Park": "North",
+  Archway: "North",
+  "Tufnell Park": "North",
+  "Muswell Hill": "North",
 };
 
 export function regionOf(neighbourhood: string): Region | null {

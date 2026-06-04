@@ -97,6 +97,19 @@ const NEIGHBOURHOODS = [
   "Spitalfields",
   "London Fields",
   "Camberwell",
+  // West / North / South-west broadening (2026-06-04) — the grid was
+  // east/south-east heavy, so the catalogue clustered there. These open up
+  // the rest of the map. The 4-hourly cron rotates through them over time.
+  "Camden",
+  "Kentish Town",
+  "Notting Hill",
+  "Chelsea",
+  "Chiswick",
+  "Shepherd's Bush",
+  "Clapham",
+  "Battersea",
+  "Highbury",
+  "Crouch End",
 ];
 
 type Category = {
@@ -677,6 +690,8 @@ async function main() {
         tables_free: 4,
         next_slot_label: "Open today",
         img_url: imgUrl,
+        // Robot-found venues are the discovered tier (curated seed ranks first).
+        curation_tier: "discovered",
         mood_tags: cat.moods,
         vibe_tags: ["Independent"],
         google_place_id: p.id,

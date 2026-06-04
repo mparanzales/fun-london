@@ -234,6 +234,8 @@ function buildVenueRow(seed: VenueSeed, details: PlaceDetails, imgUrl: string) {
     tables_free: 4, // hard-coded V1 default; future: real-time from booking platforms
     next_slot_label: "Open today",
     img_url: imgUrl,
+    // Seed venues are hand-picked — they rank first in the catalogue.
+    curation_tier: "curated",
     mood_tags: seed.moodTags,
     vibe_tags: seed.vibeTags,
     google_place_id: details.id,

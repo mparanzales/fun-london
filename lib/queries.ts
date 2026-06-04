@@ -68,6 +68,8 @@ type VenueRow = {
   creator_coverage: CreatorCoverage[] | null;
   critical_flags: CriticalFlag[] | null;
   opening_hours: OpeningHours | null;
+  // Optional so this stays safe if a row predates the curation_tier column.
+  curation_tier?: string | null;
   created_at: string;
 };
 
@@ -142,6 +144,7 @@ function mapVenue(r: VenueRow): Venue {
         body: tidyDashes(f.body),
       })) ?? null,
     openingHours: r.opening_hours,
+    curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
     createdAt: r.created_at,
   };
 }
@@ -179,6 +182,9 @@ export async function fetchVenues(): Promise<Venue[]> {
     .from("venues")
     .select("*")
     .not("google_place_id", "is", null)
+    // Curated (hand-picked) venues first — "curated" sorts before "discovered"
+    // ascending — then stable by created_at.
+    .order("curation_tier", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) throw new Error(`fetchVenues: ${error.message}`);
   return (data as VenueRow[]).map(mapVenue);
