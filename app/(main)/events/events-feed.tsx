@@ -254,7 +254,10 @@ export function EventsFeed({
                 type="button"
                 onClick={() => setCategory(c.id)}
                 aria-pressed={on}
-                className="flex flex-col items-center gap-1 py-2"
+                className={
+                  "flex flex-col items-center gap-1 py-2 rounded-xl transition-colors " +
+                  (on ? "bg-accent/10" : "")
+                }
               >
                 <c.Icon className={iconClass} strokeWidth={on ? 2.4 : 2} />
                 <span className={labelClass}>{c.label}</span>

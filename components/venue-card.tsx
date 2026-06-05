@@ -82,7 +82,7 @@ export function VenueCard({
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
 
           {showCategoryTag && (
-            <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-white text-xs font-medium uppercase tracking-wider">
+            <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/35 backdrop-blur-md border border-white/20 text-white text-xs font-medium uppercase tracking-wider">
               {venue.type}
             </div>
           )}
@@ -117,7 +117,7 @@ export function VenueCard({
       <button
         onClick={onHeart}
         aria-label={saved ? "Unsave" : "Save"}
-        className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center cursor-pointer z-10"
+        className="absolute top-1.5 right-1.5 w-11 h-11 flex items-center justify-center cursor-pointer z-10"
       >
         <Heart
           size={22}

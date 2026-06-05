@@ -60,7 +60,7 @@ export function EventCard({
           </div>
         ) : (
           showCategoryTag && (
-            <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-white text-xs font-medium uppercase tracking-wider">
+            <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/35 backdrop-blur-md border border-white/20 text-white text-xs font-medium uppercase tracking-wider">
               {event.category}
             </div>
           )
