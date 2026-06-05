@@ -107,17 +107,28 @@ export function ExploreFeed({
   // let the user sort the current view by walking distance.
   const [userGeo, setUserGeo] = useState<LatLng | null>(null);
   const [nearestFirst, setNearestFirst] = useState(false);
+  // idle = ready · locating = waiting on the browser · denied = permission off
+  // · unavailable = no geolocation / hardware error.
+  const [geoStatus, setGeoStatus] = useState<
+    "idle" | "locating" | "denied" | "unavailable"
+  >("idle");
   useEffect(() => {
     setUserGeo(readUserGeo());
   }, []);
 
   function toggleNearest() {
-    if (userGeo) {
+    // Re-read in case the welcome sheet stored coords after this mounted.
+    const stored = userGeo ?? readUserGeo();
+    if (stored) {
+      if (!userGeo) setUserGeo(stored);
       setNearestFirst((v) => !v);
       return;
     }
-    // No stored location yet — ask for it now, then turn the sort on.
-    if (!("geolocation" in navigator)) return;
+    if (!("geolocation" in navigator)) {
+      setGeoStatus("unavailable");
+      return;
+    }
+    setGeoStatus("locating");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const g = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -131,11 +142,14 @@ export function ExploreFeed({
         }
         setUserGeo(g);
         setNearestFirst(true);
+        setGeoStatus("idle");
       },
-      () => {
-        /* denied — leave the toggle off */
+      (err) => {
+        // Tell the user instead of failing silently. PERMISSION_DENIED = 1.
+        setGeoStatus(err.code === 1 ? "denied" : "unavailable");
       },
-      { enableHighAccuracy: false, timeout: 8000 },
+      // Reuse a recent fix (10 min) so we don't re-prompt or hang.
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 },
     );
   }
 
@@ -264,21 +278,40 @@ export function ExploreFeed({
           type="button"
           onClick={toggleNearest}
           aria-pressed={nearestFirst}
+          disabled={geoStatus === "locating"}
           className={
-            "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[11px] font-bold transition " +
+            "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[11px] font-bold transition disabled:opacity-70 " +
             (nearestFirst
               ? "bg-primary text-primary-fg"
               : "bg-muted text-muted-fg")
           }
         >
           <MapPin size={12} strokeWidth={2.4} />
-          {nearestFirst ? "Nearest first" : "Near you"}
+          {geoStatus === "locating"
+            ? "Locating…"
+            : nearestFirst
+              ? "Nearest first"
+              : "Near you"}
         </button>
-        {selectedFilter === "for-you" && personalized && !nearestFirst && (
+        {geoStatus === "denied" && (
           <span className="text-[11px] font-semibold text-muted-fg">
-            ✨ Sorted around your taste
+            Location is off. Turn it on for this site in your browser to sort by
+            nearest.
           </span>
         )}
+        {geoStatus === "unavailable" && (
+          <span className="text-[11px] font-semibold text-muted-fg">
+            Could not get your location. Try again.
+          </span>
+        )}
+        {selectedFilter === "for-you" &&
+          personalized &&
+          !nearestFirst &&
+          geoStatus === "idle" && (
+            <span className="text-[11px] font-semibold text-muted-fg">
+              ✨ Sorted around your taste
+            </span>
+          )}
       </div>
 
       {items.length === 0 ? (
