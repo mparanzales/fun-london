@@ -222,10 +222,10 @@ function buildHtml(
         style="max-width:440px;background:#ffffff;border-radius:18px;
         padding:24px;border:1px solid #e3ddd2;">
         <tr><td>
-          <div style="font-size:22px;font-weight:800;color:#1a1409;">Fun London</div>
+          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:hsl(250 70% 50%);">This week in independent London</div>
+          <div style="font-size:22px;font-weight:800;color:#1a1409;margin-top:4px;">Fun London</div>
           <div style="font-size:14px;color:#645c50;margin-top:4px;">
-            The independent London worth leaving the house for. Here is what is
-            new this week.</div>
+            No chains. No sponsored slots. Here is what is new this week.</div>
         </td></tr>
         ${venuesBlock}
         ${eventsBlock}

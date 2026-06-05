@@ -279,13 +279,9 @@ export function PlanFlow({
               setStep("result");
               track("plan_generate", { area, vibe, budget });
             }}
-            className="w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
-            style={{
-              background:
-                "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
-            }}
+            className="w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
           >
-            Make my plan ✨
+            Build the night ✨
           </button>
         </div>
 

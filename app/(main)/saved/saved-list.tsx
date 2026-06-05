@@ -124,7 +124,7 @@ export function SavedList({
             Nothing saved yet
           </h2>
           <p className="text-xs text-muted-fg mt-1">
-            Tap the heart on any place to keep it here.
+            Tap the heart on any place. Go on, be fussy.
           </p>
         </div>
       )}

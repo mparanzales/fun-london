@@ -5,8 +5,13 @@
 
 export const CITY = "London";
 
-// One source of truth for the hero tagline so onboarding, the Explore
-// masthead and the share (OG) images can never drift apart.
+// One source of truth for the taglines so the masthead, landing and share (OG)
+// images never drift apart.
+//   LEAD_TAGLINE — the punchy positioning line; names the villain (chains), the
+//     integrity (no paid slots) and the method (cross-checked). Lead with this.
+//   TAGLINE — the deeper mission line; used as a quieter secondary / OG line.
+// Both are lowercase + period-terminated on purpose (editorial voice). No dashes.
+export const LEAD_TAGLINE = "no chains. no sponsored slots. checked twice.";
 export const TAGLINE = "The independent London worth leaving the house for.";
 
 // Absolute base URL of the production site. Used for canonical/OG URLs,
