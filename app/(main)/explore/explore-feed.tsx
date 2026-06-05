@@ -15,7 +15,7 @@ import {
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
-import { CITY, LEAD_TAGLINE } from "@/lib/config";
+import { CITY } from "@/lib/config";
 import { hasPrefs, scoreVenue, scoreEvent } from "@/lib/ranking";
 import {
   readUserGeo,
@@ -263,11 +263,6 @@ export function ExploreFeed({
             <Search className="w-6 h-6" strokeWidth={2} />
           </button>
         </div>
-        {/* Positioning line — states the thesis on the most-seen screen so a
-            first-time user understands what makes this different in seconds. */}
-        <p className="mt-2 text-[12px] font-semibold text-muted-fg leading-snug">
-          {LEAD_TAGLINE}
-        </p>
       </header>
 
       {/* DESKTOP hero band (lg+ only) — big lowercase headline + trust strip,
