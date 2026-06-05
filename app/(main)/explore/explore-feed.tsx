@@ -9,6 +9,7 @@ import {
   Music,
   Ticket,
   Search,
+  MapPin,
   type LucideIcon,
 } from "lucide-react";
 import { VenueCard } from "@/components/venue-card";
@@ -16,6 +17,13 @@ import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
 import { CITY, TAGLINE } from "@/lib/config";
 import { hasPrefs, scoreVenue, scoreEvent } from "@/lib/ranking";
+import {
+  readUserGeo,
+  haversineKm,
+  distanceLabel,
+  GEO_STORAGE_KEY,
+  type LatLng,
+} from "@/lib/geo";
 import type {
   Venue,
   Event,
@@ -95,50 +103,109 @@ export function ExploreFeed({
 
   const personalized = hasPrefs(prefs);
 
-  const items = useMemo<FeedItem[]>(() => {
-    switch (selectedFilter) {
-      case "for-you": {
-        const all: FeedItem[] = [
-          ...allVenues.map<FeedItem>((v) => ({ kind: "venue", data: v })),
-          ...allEvents.map<FeedItem>((e) => ({ kind: "event", data: e })),
-        ];
-        // Rank by taste when we have prefs; otherwise keep the original
-        // order. Array.sort is stable, so equal-score items keep their
-        // relative order (venues before events).
-        if (prefs && personalized) {
-          const score = (it: FeedItem) =>
-            it.kind === "venue"
-              ? scoreVenue(it.data, prefs)
-              : scoreEvent(it.data, prefs);
-          return [...all].sort((a, b) => score(b) - score(a));
-        }
-        return all;
-      }
-      case "restaurants":
-        return allVenues
-          .filter((v) => v.type === "Restaurant")
-          .map<FeedItem>((v) => ({ kind: "venue", data: v }));
-      case "bars":
-        return allVenues
-          .filter((v) => BAR_TYPES.includes(v.type))
-          .map<FeedItem>((v) => ({ kind: "venue", data: v }));
-      case "cafes":
-        return allVenues
-          .filter((v) => v.type === "Cafe")
-          .map<FeedItem>((v) => ({ kind: "venue", data: v }));
-      case "music":
-        return [
-          ...allVenues
-            .filter((v) => MUSIC_VENUE_TYPES.includes(v.type))
-            .map<FeedItem>((v) => ({ kind: "venue", data: v })),
-          ...allEvents
-            .filter((e) => e.category === MUSIC_EVENT_CATEGORY)
-            .map<FeedItem>((e) => ({ kind: "event", data: e })),
-        ];
-      case "events":
-        return allEvents.map<FeedItem>((e) => ({ kind: "event", data: e }));
+  // "Near you" — read the location captured by the welcome sheet (if any) and
+  // let the user sort the current view by walking distance.
+  const [userGeo, setUserGeo] = useState<LatLng | null>(null);
+  const [nearestFirst, setNearestFirst] = useState(false);
+  useEffect(() => {
+    setUserGeo(readUserGeo());
+  }, []);
+
+  function toggleNearest() {
+    if (userGeo) {
+      setNearestFirst((v) => !v);
+      return;
     }
-  }, [selectedFilter, allVenues, allEvents, prefs, personalized]);
+    // No stored location yet — ask for it now, then turn the sort on.
+    if (!("geolocation" in navigator)) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const g = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        try {
+          window.localStorage.setItem(
+            GEO_STORAGE_KEY,
+            JSON.stringify({ ...g, at: Date.now() }),
+          );
+        } catch {
+          /* ignore */
+        }
+        setUserGeo(g);
+        setNearestFirst(true);
+      },
+      () => {
+        /* denied — leave the toggle off */
+      },
+      { enableHighAccuracy: false, timeout: 8000 },
+    );
+  }
+
+  const items = useMemo<FeedItem[]>(() => {
+    const base = ((): FeedItem[] => {
+      switch (selectedFilter) {
+        case "for-you": {
+          const all: FeedItem[] = [
+            ...allVenues.map<FeedItem>((v) => ({ kind: "venue", data: v })),
+            ...allEvents.map<FeedItem>((e) => ({ kind: "event", data: e })),
+          ];
+          // Rank by taste when we have prefs; otherwise keep the original
+          // order. Array.sort is stable, so equal-score items keep their
+          // relative order (venues before events).
+          if (prefs && personalized) {
+            const score = (it: FeedItem) =>
+              it.kind === "venue"
+                ? scoreVenue(it.data, prefs)
+                : scoreEvent(it.data, prefs);
+            return [...all].sort((a, b) => score(b) - score(a));
+          }
+          return all;
+        }
+        case "restaurants":
+          return allVenues
+            .filter((v) => v.type === "Restaurant")
+            .map<FeedItem>((v) => ({ kind: "venue", data: v }));
+        case "bars":
+          return allVenues
+            .filter((v) => BAR_TYPES.includes(v.type))
+            .map<FeedItem>((v) => ({ kind: "venue", data: v }));
+        case "cafes":
+          return allVenues
+            .filter((v) => v.type === "Cafe")
+            .map<FeedItem>((v) => ({ kind: "venue", data: v }));
+        case "music":
+          return [
+            ...allVenues
+              .filter((v) => MUSIC_VENUE_TYPES.includes(v.type))
+              .map<FeedItem>((v) => ({ kind: "venue", data: v })),
+            ...allEvents
+              .filter((e) => e.category === MUSIC_EVENT_CATEGORY)
+              .map<FeedItem>((e) => ({ kind: "event", data: e })),
+          ];
+        case "events":
+          return allEvents.map<FeedItem>((e) => ({ kind: "event", data: e }));
+      }
+    })();
+
+    // "Nearest first" — sort the filtered view by walking distance. Events and
+    // coordinate-less venues sink to the bottom (Infinity).
+    if (nearestFirst && userGeo) {
+      const dist = (it: FeedItem): number => {
+        if (it.kind !== "venue") return Infinity;
+        const { lat, lng } = it.data;
+        if (lat == null || lng == null) return Infinity;
+        return haversineKm(userGeo, { lat, lng });
+      };
+      return [...base].sort((a, b) => dist(a) - dist(b));
+    }
+    return base;
+  }, [
+    selectedFilter,
+    allVenues,
+    allEvents,
+    prefs,
+    personalized,
+    nearestFirst,
+    userGeo,
+  ]);
 
   // Smart category-tag visibility:
   //   For You / Music / Events → mixed sources or subtypes → show tags
@@ -191,11 +258,28 @@ export function ExploreFeed({
 
       <FilterChipRow selected={selectedFilter} onSelect={setSelectedFilter} />
 
-      {selectedFilter === "for-you" && personalized && (
-        <div className="px-5 pt-1.5 text-[11px] font-semibold text-muted-fg">
-          ✨ Sorted around your taste
-        </div>
-      )}
+      {/* "Near you" sort + taste status line. */}
+      <div className="px-5 pt-1.5 flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={toggleNearest}
+          aria-pressed={nearestFirst}
+          className={
+            "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[11px] font-bold transition " +
+            (nearestFirst
+              ? "bg-primary text-primary-fg"
+              : "bg-muted text-muted-fg")
+          }
+        >
+          <MapPin size={12} strokeWidth={2.4} />
+          {nearestFirst ? "Nearest first" : "Near you"}
+        </button>
+        {selectedFilter === "for-you" && personalized && !nearestFirst && (
+          <span className="text-[11px] font-semibold text-muted-fg">
+            ✨ Sorted around your taste
+          </span>
+        )}
+      </div>
 
       {items.length === 0 ? (
         <div className="px-5 pt-10 text-center text-sm text-muted-fg">
@@ -211,6 +295,19 @@ export function ExploreFeed({
                 variant="wide"
                 showCategoryTag={showCategoryTag}
                 priority={index === 0}
+                distanceLabel={
+                  nearestFirst &&
+                  userGeo &&
+                  item.data.lat != null &&
+                  item.data.lng != null
+                    ? distanceLabel(
+                        haversineKm(userGeo, {
+                          lat: item.data.lat,
+                          lng: item.data.lng,
+                        }),
+                      )
+                    : undefined
+                }
               />
             ) : (
               <EventCard

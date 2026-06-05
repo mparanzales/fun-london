@@ -19,6 +19,11 @@ type Props = {
    * largest-paint image isn't prioritised.
    */
   priority?: boolean;
+  /**
+   * Optional walk-time / distance label shown in the meta line, e.g. when the
+   * feed is sorted by "nearest first".
+   */
+  distanceLabel?: string;
 };
 
 export function VenueCard({
@@ -26,6 +31,7 @@ export function VenueCard({
   variant = "tall",
   showCategoryTag = true,
   priority = false,
+  distanceLabel,
 }: Props) {
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
@@ -89,6 +95,14 @@ export function VenueCard({
             <span>{venue.neighbourhood}</span>
             <span>·</span>
             <span>{venue.price}</span>
+            {distanceLabel && (
+              <>
+                <span>·</span>
+                <span className="text-primary font-semibold">
+                  {distanceLabel}
+                </span>
+              </>
+            )}
           </div>
           <div className="text-[11px] italic text-fg/75 mt-1 truncate">
             {venue.vibe}
