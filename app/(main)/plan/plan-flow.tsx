@@ -374,14 +374,22 @@ export function PlanFlow({
                 {s.role}
               </div>
             </div>
-            <div className="bg-card border border-border rounded-2xl overflow-hidden">
+            <Link
+              href={`/venue/${s.venue.slug}`}
+              className="block bg-card border border-border rounded-2xl overflow-hidden transition-transform duration-300 ease-out lg:hover:-translate-y-0.5"
+            >
               <div
                 className="h-[120px]"
                 style={{ background: `url(${s.venue.imgUrl}) center/cover` }}
               />
               <div className="p-3.5">
-                <div className="text-[15px] font-extrabold text-heading">
-                  {s.venue.name}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[15px] font-extrabold text-heading">
+                    {s.venue.name}
+                  </div>
+                  <span className="text-[11px] font-bold text-primary whitespace-nowrap">
+                    View →
+                  </span>
                 </div>
                 <div className="text-[11px] text-muted-fg mt-1 flex items-center gap-1.5 flex-wrap">
                   <span className="text-accent font-bold">{s.venue.type}</span>
@@ -396,7 +404,7 @@ export function PlanFlow({
                   &quot;{s.venue.vibe}&quot;
                 </div>
               </div>
-            </div>
+            </Link>
             {s.walkToNextMins != null && (
               <div className="ml-3 text-[11px] text-muted-fg py-1.5 pl-3 border-l-2 border-dashed border-border">
                 🚶 ~{s.walkToNextMins} min walk

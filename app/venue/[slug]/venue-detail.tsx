@@ -228,6 +228,19 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           ))}
         </div>
 
+        {/* Menu / website — restaurants point at the menu, others at the site.
+            Honest secondary link (the Reserve CTA stays the primary action). */}
+        {venue.websiteUrl && (
+          <a
+            href={venue.websiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 mt-4 text-sm font-bold text-primary"
+          >
+            {venue.type === "Restaurant" ? "See the menu" : "Visit website"} ↗
+          </a>
+        )}
+
         {/* ── Real Talk ──────────────────────────────────────────────
             Editorial pull-quote treatment. Eyebrow + headline above,
             then a single vertical accent rule running down the side of
