@@ -319,7 +319,7 @@ export function ExploreFeed({
           Nothing here yet. Check back soon.
         </div>
       ) : (
-        <div className="px-5 pt-5 flex flex-col gap-4">
+        <div className="px-5 pt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
           {items.map((item, index) =>
             item.kind === "venue" ? (
               <VenueCard

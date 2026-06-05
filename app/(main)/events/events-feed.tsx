@@ -265,7 +265,7 @@ export function EventsFeed({
       )}
 
       {/* Event list */}
-      <div className="px-5 flex flex-col gap-4">
+      <div className="px-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
         {filtered.map((e) => (
           <EventCard key={e.id} event={e} />
         ))}
