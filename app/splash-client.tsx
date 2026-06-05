@@ -4,8 +4,8 @@
 //
 // Rendered as a child of app/page.tsx (a Server Component) which has resolved
 // whether the user is signed in. This plays the brand-mark animation, then:
-//   - signed in                       → /events (the "What's on" home)
-//   - anonymous + has visited before  → /events
+//   - signed in                       → /explore (home)
+//   - anonymous + has visited before  → /explore
 //   - anonymous + first time          → REVEAL the landing page underneath
 //                                       (no redirect, so funldn.com shows the
 //                                       product).
@@ -46,7 +46,7 @@ export function SplashClient({ authed }: { authed: boolean }) {
     const t = setTimeout(() => {
       // Home is now the "What's on" feed (/events). No taste quiz anymore.
       if (authed) {
-        router.replace("/events");
+        router.replace("/explore");
         return;
       }
       // Anonymous: show the landing once, then go straight to the app on
@@ -59,7 +59,7 @@ export function SplashClient({ authed }: { authed: boolean }) {
         // localStorage unavailable — treat as a first-time visitor.
       }
       if (visited) {
-        router.replace("/events");
+        router.replace("/explore");
         return;
       }
       // First-time, signed-out visitor → fade the splash to reveal the

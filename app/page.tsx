@@ -1,11 +1,11 @@
 // Splash entry point — Server Component.
 //
 // Plays every time "/" is visited (no session skip). There is no taste quiz
-// anymore — the home is the "What's on" feed (/events).
+// anymore — the home is the Explore feed; "What's on" (/events) is the 2nd tab.
 //
 // Routing rule (resolved in SplashClient after the brand-mark animation):
-//   - signed in                       → /events
-//   - anonymous + has visited before  → /events
+//   - signed in                       → /explore
+//   - anonymous + has visited before  → /explore
 //   - anonymous + first time          → reveal the LandingPage rendered here
 //     underneath the splash (no redirect) — so funldn.com is a real, indexable,
 //     shareable page. "Visited" is marked once they enter the app shell.
