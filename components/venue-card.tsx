@@ -49,9 +49,10 @@ export function VenueCard({
   return (
     <div
       className={
-        variant === "tall"
+        "transition-transform duration-300 ease-out lg:hover:-translate-y-1 " +
+        (variant === "tall"
           ? "relative block w-[170px] flex-shrink-0"
-          : "relative block w-full"
+          : "relative block w-full")
       }
     >
       <Link

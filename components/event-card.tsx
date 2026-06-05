@@ -35,7 +35,7 @@ export function EventCard({
           ? `View the pop-up ${event.name}`
           : `View details for ${event.name}`
       }
-      className="relative block w-full"
+      className="relative block w-full transition-transform duration-300 ease-out lg:hover:-translate-y-1"
     >
       <div
         className="relative w-full rounded-2xl overflow-hidden shadow-card group"

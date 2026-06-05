@@ -231,10 +231,10 @@ export function ExploreFeed({
 
   return (
     <div className="pb-6">
-      {/* Masthead row: editorial wordmark left, search affordance right.
-          items-end aligns the search button to the bottom edge of the
-          wordmark line (not the eyebrow), so they baseline together. */}
-      <header className="px-5 pt-8 pb-6">
+      {/* MOBILE masthead (hidden on desktop, which uses the hero band below).
+          Editorial wordmark left, search right; the "fun London" wordmark now
+          carries the brand gradient. */}
+      <header className="px-5 pt-8 pb-6 lg:hidden">
         {/* Personal greeting line — same display name appears on /profile. */}
         <div className="text-xl font-medium text-fg mb-1">
           Hi {greetingName},
@@ -248,10 +248,10 @@ export function ExploreFeed({
               {eyebrow}
             </span>
             <span className="inline-flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-primary lowercase">
+              <span className="text-3xl font-bold fl-grad-text lowercase">
                 fun
               </span>
-              <span className="text-3xl font-bold text-primary">{CITY}</span>
+              <span className="text-3xl font-bold fl-grad-text">{CITY}</span>
             </span>
           </h1>
           <button
@@ -270,10 +270,27 @@ export function ExploreFeed({
         </p>
       </header>
 
+      {/* DESKTOP hero band (lg+ only) — big lowercase headline + trust strip,
+          where the "no chains, cross-checked" credibility becomes visible. */}
+      <section className="hidden lg:block px-6 pt-10 pb-7">
+        <h1 className="text-5xl font-extrabold lowercase tracking-tight leading-[1.04]">
+          <span className="fl-grad-text">the independent {CITY}</span>
+          <br />
+          <span className="text-heading">worth leaving the house for.</span>
+        </h1>
+        <div className="mt-5 flex items-center gap-3 text-[13px] font-bold uppercase tracking-wider text-muted-fg">
+          <span>{allVenues.length} independent venues</span>
+          <span className="text-border">/</span>
+          <span>cross-checked in 2+ sources</span>
+          <span className="text-border">/</span>
+          <span>no chains</span>
+        </div>
+      </section>
+
       <FilterChipRow selected={selectedFilter} onSelect={setSelectedFilter} />
 
       {/* "Near you" sort + taste status line. */}
-      <div className="px-5 pt-1.5 flex items-center gap-2 flex-wrap">
+      <div className="px-5 lg:px-6 pt-1.5 flex items-center gap-2 flex-wrap">
         <button
           type="button"
           onClick={toggleNearest}
@@ -319,7 +336,7 @@ export function ExploreFeed({
           Nothing here yet. Check back soon.
         </div>
       ) : (
-        <div className="px-5 pt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
           {items.map((item, index) =>
             item.kind === "venue" ? (
               <VenueCard
@@ -391,7 +408,7 @@ function FilterChipRow({
   ];
 
   return (
-    <div className="px-5 grid grid-cols-6 gap-1 py-2">
+    <div className="px-5 lg:px-6 grid grid-cols-6 lg:flex lg:gap-5 gap-1 py-2">
       {chips.map((c) => {
         const isSelected = selected === c.key;
         const iconClass =

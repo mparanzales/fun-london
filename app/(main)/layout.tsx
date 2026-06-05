@@ -1,4 +1,5 @@
 import { BottomNav } from "@/components/bottom-nav";
+import { DesktopNav } from "@/components/desktop-nav";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { PageTransition } from "@/components/page-transition";
 import { MarkVisited } from "@/components/mark-visited";
@@ -15,10 +16,12 @@ export default function MainLayout({
   return (
     <>
       <MarkVisited />
-      {/* Mobile-first column; widens on large screens so funldn.com uses the
-          space on a laptop instead of a phone-width strip. Browse feeds become
-          multi-column grids at lg; forms/profile stay comfortably centred. */}
-      <div className="max-w-md lg:max-w-3xl mx-auto pb-24 min-h-screen">
+      {/* Desktop gets a sticky top nav; mobile keeps the bottom nav. */}
+      <DesktopNav />
+      {/* Mobile-first column; widens to a full multi-column canvas on large
+          screens so funldn.com uses the space on a laptop instead of a
+          phone-width strip. Forms/profile self-centre at their own width. */}
+      <div className="max-w-md lg:max-w-6xl mx-auto pb-24 lg:pb-16 min-h-screen">
         <ErrorBoundary>
           <PageTransition>{children}</PageTransition>
         </ErrorBoundary>

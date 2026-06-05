@@ -14,7 +14,7 @@ const TABS = [
 export function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card backdrop-blur border-t border-border">
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-card backdrop-blur border-t border-border">
       <div className="max-w-md mx-auto grid grid-cols-5 px-2 pt-1.5 pb-[max(env(safe-area-inset-bottom),8px)]">
         {TABS.map((tab) => {
           const active = pathname.startsWith(tab.href);

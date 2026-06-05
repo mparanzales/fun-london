@@ -64,6 +64,21 @@ html, body {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 
+/* ── Brand gradient ────────────────────────────────────────────────────
+   The signature warm coral→magenta (--fl-gradient). Use .fl-grad for fills
+   (buttons, the saved heart, the verification badge) and .fl-grad-text to
+   paint text/wordmarks with it. This is the brand's identity colour; the
+   indigo --fl-primary stays as a quiet functional accent (links, focus). */
+.fl-grad {
+  background-image: var(--fl-gradient);
+}
+.fl-grad-text {
+  background-image: var(--fl-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 /* ── Motion ────────────────────────────────────────────────────────────
    "Editorial & smooth": a single, fast, ease-OUT fade-and-rise applied to
    page content as each route settles in. Premium motion is quick (≈320ms)
