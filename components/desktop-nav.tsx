@@ -51,7 +51,7 @@ export function DesktopNav() {
           })}
           <Link
             href="/profile"
-            className="ml-2 px-4 py-2 rounded-full text-sm font-bold text-primary-fg fl-grad shadow-soft"
+            className="ml-2 px-4 py-2 rounded-full text-sm font-bold text-primary-fg bg-primary shadow-soft"
           >
             You
           </Link>

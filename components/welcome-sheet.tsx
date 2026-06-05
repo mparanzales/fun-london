@@ -137,7 +137,7 @@ export function WelcomeSheet({ signedIn }: { signedIn: boolean }) {
         <button
           onClick={handleGoogle}
           disabled={googleLoading}
-          className="mt-5 w-full h-[52px] rounded-2xl fl-grad text-white font-extrabold text-[15px] flex items-center justify-center gap-2 disabled:opacity-60"
+          className="mt-5 w-full h-[52px] rounded-2xl bg-primary text-primary-fg font-extrabold text-[15px] flex items-center justify-center gap-2 disabled:opacity-60"
         >
           {googleLoading ? "Opening Google..." : "Continue with Google"}
         </button>

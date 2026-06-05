@@ -17,15 +17,20 @@
      invert between day and night, but the brand purple and its contrast
      foreground stay the same so CTAs read identically across themes
      and the wordmark color doesn't shift. */
-  --fl-primary: hsl(233 70% 55%);
+  /* Brand: a refined jewel-tone blue→violet (the panel's verdict). Solid violet
+     is the everyday UI workhorse; the 2-stop gradient is the signature, rationed
+     to the wordmark + one hero moment and always carrying film grain. No second
+     accent colour (no coral). */
+  --fl-primary: hsl(250 70% 50%);
   --fl-primary-fg: #ffffff;
-  --fl-accent: hsl(265 80% 60%);
+  --fl-accent: hsl(266 78% 58%);
   --fl-accent-fg: #ffffff;
-  --fl-gradient: linear-gradient(135deg, hsl(20 90% 60%) 0%, hsl(340 80% 60%) 100%);
+  --fl-gradient: linear-gradient(135deg, hsl(240 84% 60%) 0%, hsl(266 78% 58%) 100%);
 }
 
 [data-theme="night"] {
-  --fl-bg: #14110d;
+  /* Violet-undertoned near-black (not pure black) so night stays in-family. */
+  --fl-bg: #14121a;
   --fl-fg: #ece6d9;
   --fl-heading: #ffffff;
   --fl-muted: #2a2520;
@@ -69,9 +74,25 @@ html, body {
    (buttons, the saved heart, the verification badge) and .fl-grad-text to
    paint text/wordmarks with it. This is the brand's identity colour; the
    indigo --fl-primary stays as a quiet functional accent (links, focus). */
+/* Gradient FILL surfaces (hero moments, the splash, share images). Always
+   grainy: a clean gradient reads "generic AI"; the gradient WITH film grain is
+   the ownable, editorial texture (the panel's real unlock). Ration its use. */
 .fl-grad {
+  position: relative;
+  isolation: isolate;
   background-image: var(--fl-gradient);
 }
+.fl-grad::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.16;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* Gradient TEXT (the wordmark) — kept clean, no grain overlay on type. */
 .fl-grad-text {
   background-image: var(--fl-gradient);
   -webkit-background-clip: text;
