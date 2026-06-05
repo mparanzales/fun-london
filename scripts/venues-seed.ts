@@ -2596,6 +2596,74 @@ export const VENUE_SEEDS: VenueSeed[] = [
     ],
     skipProspect: true,
   },
+
+  // ── Berenjak Soho ───────────────────────────────────────────────────────
+  {
+    slug: "berenjak-soho",
+    searchQuery: "Berenjak Soho London",
+    neighbourhood: "Soho",
+    vibe: "Tehran-style kababi, Bib Gourmand, charcoal and mazeh.",
+    longDescription:
+      "A tiny Tehran-inspired kababi from the JKS team, tucked into a Soho townhouse. Charcoal kababs, warm taftoon bread baked in the window and a run of mazeh, with the kind of warmth that earned its Michelin Bib Gourmand.",
+    type: "Restaurant",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner"],
+    vibeTags: ["Persian", "Charcoal", "Bib Gourmand"],
+    editorialSources: [
+      {
+        publication: "Michelin Guide",
+        url: "https://guide.michelin.com/us/en/greater-london/london/restaurant/berenjak",
+        title: "Berenjak — Michelin Bib Gourmand",
+      },
+      {
+        publication: "Hot Dinners",
+        url: "https://www.hot-dinners.com/Restaurant-Reviews/Soho-Fitzrovia-Covent-Garden/berenjak-london-soho-iranian-persean-kebab",
+        title: "Berenjak, Soho — review",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Small and busy",
+        body: "It is a tiny room that fills fast. Go early or expect to wait at peak times.",
+      },
+    ],
+  },
+
+  // ── Agora (Borough) ──────────────────────────────────────────────────────
+  {
+    slug: "agora-borough",
+    searchQuery: "Agora Borough Yards Greek restaurant London",
+    neighbourhood: "Borough",
+    vibe: "Athens-style souvla rotisserie, flatbreads, almost illegally fun.",
+    longDescription:
+      "David Carter's (Manteca, Smokestak) Athens-inspired all-day spot in Borough Yards, built around a giant charcoal souvla rotisserie. Loud, generous and a Michelin Bib Gourmand. Walk-in only.",
+    type: "Restaurant",
+    price: "££",
+    timeOfDay: "Evening",
+    moodTags: ["dinner"],
+    vibeTags: ["Greek", "Charcoal rotisserie", "Walk-in only"],
+    editorialSources: [
+      {
+        publication: "The Infatuation",
+        url: "https://www.theinfatuation.com/london/reviews/agora-borough-market",
+        title: "Agora — Borough Market review",
+      },
+      {
+        publication: "Time Out",
+        url: "https://www.timeout.com/london/restaurants/agora",
+        title: "Agora — Athens-inspired Borough Market dining",
+      },
+    ],
+    creatorCoverage: [],
+    criticalFlags: [
+      {
+        label: "Walk-in only",
+        body: "No bookings. Go early or be ready to queue, especially at the weekend.",
+      },
+    ],
+  },
 ];
 
 // Helper to get a seed by slug (used by the ingestion script).

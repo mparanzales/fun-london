@@ -369,8 +369,19 @@ async function processVenue(seed: VenueSeed): Promise<{
 // ── Main ─────────────────────────────────────────────────────────────────
 
 async function main() {
+  // Optional `--only=slug1,slug2` to (re)ingest just those venues instead of
+  // the whole seed (e.g. adding a couple of new ones without re-hitting Google
+  // + re-mirroring photos for all 49).
+  const onlyArg = process.argv.find((a) => a.startsWith("--only="));
+  const onlySlugs = onlyArg
+    ? new Set(onlyArg.slice("--only=".length).split(",").filter(Boolean))
+    : null;
+  const seeds = onlySlugs
+    ? VENUE_SEEDS.filter((s) => onlySlugs.has(s.slug))
+    : VENUE_SEEDS;
+
   console.log(
-    `Fun London — venue ingestion · ${VENUE_SEEDS.length} venues · ${DRY_RUN ? "DRY RUN" : "WRITING"}\n`,
+    `Fun London — venue ingestion · ${seeds.length} venues${onlySlugs ? " (filtered)" : ""} · ${DRY_RUN ? "DRY RUN" : "WRITING"}\n`,
   );
 
   const results = {
@@ -379,7 +390,7 @@ async function main() {
     failed: [] as { slug: string; error: string }[],
   };
 
-  for (const seed of VENUE_SEEDS) {
+  for (const seed of seeds) {
     try {
       const r = await processVenue(seed);
       if (r.inVenues) results.venues.push(r.slug);
