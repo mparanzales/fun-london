@@ -1,6 +1,7 @@
 import { getAuthUser } from "@/lib/auth";
 import { fetchVenues, fetchEvents, fetchProfile } from "@/lib/queries";
 import { ExploreFeed } from "./explore-feed";
+import { WelcomeSheet } from "@/components/welcome-sheet";
 
 // Server Component: fetches the catalog from Supabase plus the auth
 // user's profile (when signed in) and hands the greeting name to the
@@ -17,11 +18,15 @@ export default async function ExplorePage() {
   const greetingName =
     profile?.displayName ?? authUser?.email?.split("@")[0] ?? "there";
   return (
-    <ExploreFeed
-      venues={venues}
-      events={events}
-      greetingName={greetingName}
-      preferences={profile?.preferences ?? null}
-    />
+    <>
+      <ExploreFeed
+        venues={venues}
+        events={events}
+        greetingName={greetingName}
+        preferences={profile?.preferences ?? null}
+      />
+      {/* First-visit sign-up + permissions prompt (anon only, once per device). */}
+      <WelcomeSheet signedIn={!!authUser} />
+    </>
   );
 }
