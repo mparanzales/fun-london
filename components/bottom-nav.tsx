@@ -4,8 +4,8 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const TABS = [
+  { href: "/events", label: "What's on", icon: "calendar" },
   { href: "/explore", label: "Explore", icon: "compass" },
-  { href: "/events", label: "Events", icon: "calendar" },
   { href: "/plan", label: "Plan", icon: "sparkles" },
   { href: "/saved", label: "Saved", icon: "heart" },
   { href: "/profile", label: "You", icon: "user" },

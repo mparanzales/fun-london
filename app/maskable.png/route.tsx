@@ -35,6 +35,8 @@ export async function GET() {
       }}
     >
       {/* ~58% width keeps the mark inside the maskable safe zone. */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- Satori (next/og)
+          renders raw <img>; next/image is not available in ImageResponse. */}
       <img
         src={logoSrc}
         width={300}

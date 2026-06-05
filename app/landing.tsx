@@ -64,17 +64,17 @@ export function LandingPage({ venues }: { venues: Venue[] }) {
         </p>
         <div className="relative mt-8 flex flex-col items-center gap-3">
           <Link
-            href="/explore"
+            href="/events"
             className="w-full max-w-[300px] h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold shadow-soft flex items-center justify-center gap-2"
           >
-            Start exploring
+            See what&apos;s on
             <ArrowRight size={18} strokeWidth={2.5} />
           </Link>
           <Link
-            href="/onboarding"
+            href="/explore"
             className="text-[13px] font-semibold text-muted-fg underline underline-offset-4 hover:text-fg"
           >
-            or take the 30-second taste quiz
+            or browse all the places
           </Link>
         </div>
       </section>

@@ -1,26 +1,20 @@
 // Splash entry point — Server Component.
 //
-// Plays every time "/" is visited (no session skip). Reads the user's
-// onboarding state from public.profiles when they're signed in, so
-// signing in on a new device doesn't re-prompt onboarding. Anonymous
-// visitors still fall back to localStorage["fl.onboarding.v1"], which
-// the onboarding flow writes on completion.
+// Plays every time "/" is visited (no session skip). There is no taste quiz
+// anymore — the home is the "What's on" feed (/events).
 //
-// Routing rule (resolved in SplashClient after the brand-mark animation
-// finishes):
-//   - signed in + profile.onboarded === true   → /explore
-//   - signed in + profile.onboarded === false  → /onboarding
-//   - anonymous + localStorage key             → /explore
-//   - anonymous + no key                        → reveal the LandingPage
-//     rendered here underneath the splash (no redirect) — so funldn.com is a
-//     real, indexable, shareable page instead of dead-ending in the quiz.
+// Routing rule (resolved in SplashClient after the brand-mark animation):
+//   - signed in                       → /events
+//   - anonymous + has visited before  → /events
+//   - anonymous + first time          → reveal the LandingPage rendered here
+//     underneath the splash (no redirect) — so funldn.com is a real, indexable,
+//     shareable page. "Visited" is marked once they enter the app shell.
 //
-// Keeping the splash for everyone (even authed+onboarded users) preserves
-// the brand moment on every cold open.
+// Keeping the splash for everyone preserves the brand moment on every cold open.
 
 import type { Metadata } from "next";
 import { getAuthUser } from "@/lib/auth";
-import { fetchProfile, fetchVenues } from "@/lib/queries";
+import { fetchVenues } from "@/lib/queries";
 import { CITY, TAGLINE, SITE_URL } from "@/lib/config";
 import { SplashClient } from "./splash-client";
 import { LandingPage } from "./landing";
@@ -43,18 +37,6 @@ const FEATURED_COUNT = 8;
 
 export default async function SplashPage() {
   const user = await getAuthUser();
-
-  let dbOnboarded = false;
-  if (user) {
-    try {
-      const profile = await fetchProfile(user.id);
-      dbOnboarded = profile?.onboarded ?? false;
-    } catch {
-      // Profile fetch failed — fall through with dbOnboarded=false. The
-      // worst case is we send a signed-in user to /onboarding for one
-      // extra round-trip; not a user-facing error.
-    }
-  }
 
   // Featured venues for the landing — highest-rated first. Failures degrade
   // gracefully to a venue-less landing (the splash + hero still render).
@@ -92,7 +74,7 @@ export default async function SplashPage() {
           redirects past it (returning/signed-in) or fades to reveal it
           (first-time, signed-out visitors). */}
       <LandingPage venues={featured} />
-      <SplashClient authed={!!user} dbOnboarded={dbOnboarded} />
+      <SplashClient authed={!!user} />
     </>
   );
 }

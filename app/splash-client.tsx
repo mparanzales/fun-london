@@ -2,25 +2,22 @@
 
 // Splash animation + routing.
 //
-// Rendered as the only child of app/page.tsx (a Server Component). The
-// server side has already resolved whether the user is signed in and
-// whether their public.profiles.onboarded is true; this component just
-// plays the brand-mark animation, then routes.
-//
-// Routing rule (matches the docstring in app/page.tsx):
-//   - signed in + onboarded in DB   → /explore
-//   - signed in + NOT onboarded     → /onboarding (finish what you started)
-//   - anonymous + localStorage key  → /explore (local-only onboarded)
-//   - anonymous + no key            → REVEAL the landing page underneath
-//                                     (first-time, signed-out visitor) — no
-//                                     redirect, so funldn.com shows the product
-//                                     instead of dropping into the quiz.
+// Rendered as a child of app/page.tsx (a Server Component) which has resolved
+// whether the user is signed in. This plays the brand-mark animation, then:
+//   - signed in                       → /events (the "What's on" home)
+//   - anonymous + has visited before  → /events
+//   - anonymous + first time          → REVEAL the landing page underneath
+//                                       (no redirect, so funldn.com shows the
+//                                       product).
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 
-const ONBOARDING_KEY = "fl.onboarding.v1";
+// "Has this anonymous visitor seen the landing before?" — set when they tap
+// into the app from the landing. The legacy onboarding key counts too, so
+// returning users from before this change skip straight to the app.
+const VISITED_KEYS = ["fl.visited.v1", "fl.onboarding.v1"];
 const TOTAL_DURATION_MS = 1700;
 // Reduce-motion users skip most of the brand-mark hold (the animation itself
 // is already disabled globally for them).
@@ -30,13 +27,7 @@ const FADE_OUT_MS = 450;
 
 type Phase = "hold" | "leaving" | "gone";
 
-export function SplashClient({
-  authed,
-  dbOnboarded,
-}: {
-  authed: boolean;
-  dbOnboarded: boolean;
-}) {
+export function SplashClient({ authed }: { authed: boolean }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("hold");
 
@@ -53,20 +44,22 @@ export function SplashClient({
       // matchMedia unavailable — keep the default hold.
     }
     const t = setTimeout(() => {
+      // Home is now the "What's on" feed (/events). No taste quiz anymore.
       if (authed) {
-        // DB wins when signed in — survives cross-device sign-in.
-        router.replace(dbOnboarded ? "/explore" : "/onboarding");
+        router.replace("/events");
         return;
       }
-      // Anonymous: localStorage tells us if they've onboarded on this device.
-      let hasOnboarded = false;
+      // Anonymous: show the landing once, then go straight to the app on
+      // return. "Visited" is marked when they tap into the app from the
+      // landing; the legacy onboarding key counts too (existing users).
+      let visited = false;
       try {
-        hasOnboarded = !!window.localStorage.getItem(ONBOARDING_KEY);
+        visited = VISITED_KEYS.some((k) => !!window.localStorage.getItem(k));
       } catch {
         // localStorage unavailable — treat as a first-time visitor.
       }
-      if (hasOnboarded) {
-        router.replace("/explore");
+      if (visited) {
+        router.replace("/events");
         return;
       }
       // First-time, signed-out visitor → fade the splash to reveal the
@@ -74,7 +67,7 @@ export function SplashClient({
       setPhase("leaving");
     }, hold);
     return () => clearTimeout(t);
-  }, [router, authed, dbOnboarded]);
+  }, [router, authed]);
 
   // Once the fade-out finishes, drop the overlay entirely so it doesn't trap
   // pointer events or focus over the revealed landing.
