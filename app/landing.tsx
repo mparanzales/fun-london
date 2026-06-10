@@ -4,10 +4,11 @@
 // signed-out visitors the splash fades away to reveal this; returning and
 // signed-in users are redirected past it to /explore. Because it is real
 // server-rendered HTML (not a JS-only redirect), Google can index it and a
-// shared link shows the product instead of dead-ending in the sign-up quiz.
+// shared link shows the product instead of dead-ending in a sign-up screen.
 //
-// Primary action: "Start exploring" → /explore (lowest friction). The taste
-// quiz is offered as an optional secondary link.
+// Primary action: "Start exploring" → /explore. (The login gate in middleware
+// then decides whether an anonymous visitor may continue — item 2 of the
+// new-front-door work. The taste quiz has been removed.)
 
 import Link from "next/link";
 import { ShieldCheck, CheckCheck, Sparkles, ArrowRight } from "lucide-react";

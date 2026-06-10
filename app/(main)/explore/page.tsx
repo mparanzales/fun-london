@@ -1,7 +1,6 @@
 import { getAuthUser } from "@/lib/auth";
 import { fetchVenues, fetchEvents, fetchProfile } from "@/lib/queries";
 import { ExploreFeed } from "./explore-feed";
-import { WelcomeSheet } from "@/components/welcome-sheet";
 
 // Server Component: fetches the catalog from Supabase plus the auth
 // user's profile (when signed in) and hands the greeting name to the
@@ -17,16 +16,18 @@ export default async function ExplorePage() {
   ]);
   const greetingName =
     profile?.displayName ?? authUser?.email?.split("@")[0] ?? "there";
+  // NOTE: the old anon WelcomeSheet (dismissible "just browse" sign-up +
+  // location/notification prompt) is retired — the metered SignupWall in the
+  // feed now owns anonymous sign-up, and a dismissible "just browse" door
+  // contradicts the new logged-in model. Location/notification opt-in moves to
+  // a post-sign-in step (the "near me" work).
   return (
-    <>
-      <ExploreFeed
-        venues={venues}
-        events={events}
-        greetingName={greetingName}
-        preferences={profile?.preferences ?? null}
-      />
-      {/* First-visit sign-up + permissions prompt (anon only, once per device). */}
-      <WelcomeSheet signedIn={!!authUser} />
-    </>
+    <ExploreFeed
+      venues={venues}
+      events={events}
+      greetingName={greetingName}
+      preferences={profile?.preferences ?? null}
+      signedIn={!!authUser}
+    />
   );
 }

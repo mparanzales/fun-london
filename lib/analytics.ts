@@ -33,7 +33,6 @@ export type AnalyticsEvent =
   | "together_swipe"
   | "share" // Web Share / clipboard from any surface
   | "search_query"
-  | "onboarding_complete"
   | "sign_in_complete";
 
 type Props = Record<string, string | number | boolean | null | undefined>;

@@ -10,11 +10,13 @@ import {
   Ticket,
   Search,
   MapPin,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
+import { SignupWall } from "@/components/signup-wall";
 import { CITY } from "@/lib/config";
 import { hasPrefs, scoreVenue, scoreEvent } from "@/lib/ranking";
 import {
@@ -31,8 +33,6 @@ import type {
   EventCategory,
   UserPreferences,
 } from "@/lib/types";
-
-const ONBOARDING_STORAGE_KEY = "fl.onboarding.v1";
 
 type FilterKey =
   | "for-you"
@@ -61,50 +61,39 @@ function getEyebrow(): "today in" | "tonight in" {
   return h >= 6 && h < 18 ? "today in" : "tonight in";
 }
 
+// How many general spots a signed-out visitor sees before the sign-up wall.
+// Kept short on purpose — a taste, not the catalogue.
+const PREVIEW_COUNT = 4;
+
+// Shown-once flag for the signed-in "turn on location" nudge.
+const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
+
 export function ExploreFeed({
   venues: allVenues,
   events: allEvents,
   greetingName,
   preferences,
+  signedIn,
 }: {
   venues: Venue[];
   events: Event[];
   greetingName: string;
   preferences: UserPreferences | null;
+  signedIn: boolean;
 }) {
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
   const [searchOpen, setSearchOpen] = useState(false);
   const eyebrow = getEyebrow();
 
-  // Preferences: server-provided (signed-in profile) win; otherwise hydrate
-  // from the anonymous onboarding payload in localStorage on mount.
-  const [prefs, setPrefs] = useState<UserPreferences | null>(preferences);
-  useEffect(() => {
-    if (preferences) {
-      setPrefs(preferences);
-      return;
-    }
-    try {
-      const raw = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
-      if (!raw) return;
-      const p = JSON.parse(raw) as Partial<UserPreferences>;
-      if (p && (p.moods?.length || p.vibes?.length)) {
-        setPrefs({
-          moods: p.moods ?? [],
-          vibes: p.vibes ?? [],
-          budget: p.budget ?? null,
-          areas: p.areas ?? [],
-        });
-      }
-    } catch {
-      // localStorage unavailable
-    }
-  }, [preferences]);
-
+  // Preferences come only from a signed-in profile now — the anonymous taste
+  // quiz was removed. Anonymous visitors therefore have no taste signal: the
+  // feed keeps its default order and the "Sorted around your taste" label
+  // stays off, so we never claim personalisation we don't have.
+  const prefs = preferences;
   const personalized = hasPrefs(prefs);
 
-  // "Near you" — read the location captured by the welcome sheet (if any) and
-  // let the user sort the current view by walking distance.
+  // "Near you" — read any previously captured location and let the user sort
+  // the current view by walking distance.
   const [userGeo, setUserGeo] = useState<LatLng | null>(null);
   const [nearestFirst, setNearestFirst] = useState(false);
   // idle = ready · locating = waiting on the browser · denied = permission off
@@ -115,6 +104,31 @@ export function ExploreFeed({
   useEffect(() => {
     setUserGeo(readUserGeo());
   }, []);
+
+  // One-time "turn on location" nudge for signed-in users. The old anonymous
+  // welcome sheet used to ask for location; it's retired, so signed-in users
+  // get this slim inline prompt once (until they enable or dismiss it). Shown
+  // only when signed in AND no location is stored yet.
+  const [showLocPrompt, setShowLocPrompt] = useState(false);
+  useEffect(() => {
+    if (!signedIn) return;
+    try {
+      if (window.localStorage.getItem(LOCATION_PROMPTED_KEY)) return;
+      if (readUserGeo()) return;
+      setShowLocPrompt(true);
+    } catch {
+      // localStorage unavailable — skip the nudge.
+    }
+  }, [signedIn]);
+
+  function markLocPrompted() {
+    try {
+      window.localStorage.setItem(LOCATION_PROMPTED_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    setShowLocPrompt(false);
+  }
 
   function toggleNearest() {
     // Re-read in case the welcome sheet stored coords after this mounted.
@@ -326,13 +340,52 @@ export function ExploreFeed({
           )}
       </div>
 
+      {/* One-time location nudge for signed-in users (slim inline card, not a
+          modal). "Turn on" reuses the same geolocation flow as the chip. */}
+      {showLocPrompt && geoStatus !== "denied" && (
+        <div className="px-5 lg:px-6 pt-3">
+          <div className="flex items-center gap-3 rounded-2xl bg-card border border-border p-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <MapPin size={18} className="text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-extrabold text-heading">
+                See what&apos;s good near you
+              </div>
+              <div className="text-[11px] text-muted-fg">
+                Turn on location to sort by walking distance.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                markLocPrompted();
+                toggleNearest();
+              }}
+              className="h-8 px-3 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-primary text-primary-fg shrink-0"
+            >
+              Turn on
+            </button>
+            <button
+              type="button"
+              onClick={markLocPrompted}
+              aria-label="Dismiss"
+              className="text-muted-fg shrink-0"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {items.length === 0 ? (
         <div className="px-5 pt-10 text-center text-sm text-muted-fg">
           Nothing here yet. Check back soon.
         </div>
       ) : (
+        <>
         <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
-          {items.map((item, index) =>
+          {(signedIn ? items : items.slice(0, PREVIEW_COUNT)).map((item, index) =>
             item.kind === "venue" ? (
               <VenueCard
                 key={`venue-${item.data.id}`}
@@ -364,6 +417,8 @@ export function ExploreFeed({
             ),
           )}
         </div>
+        {!signedIn && <SignupWall returnTo="/explore" />}
+        </>
       )}
 
       {searchOpen && (
