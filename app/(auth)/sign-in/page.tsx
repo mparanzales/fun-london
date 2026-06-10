@@ -1,9 +1,7 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth";
 import { safeReturnPath } from "@/lib/safe-redirect";
-import { PEEK_COOKIE } from "@/lib/peek";
 import { Logo } from "@/components/logo";
 import { SignInForm } from "./sign-in-form";
 
@@ -37,9 +35,6 @@ export default async function SignInPage({
     redirect(safeReturnPath(searchParams.return));
   }
 
-  // Has this visitor already spent their one free preview? If so, no skip.
-  const peeked = !!cookies().get(PEEK_COOKIE);
-
   return (
     <div className="relative max-w-md mx-auto min-h-[100svh] bg-bg px-5 py-10 flex flex-col overflow-hidden">
       {/* Hero block: brand + invitation, vertically centered in the upper
@@ -71,17 +66,15 @@ export default async function SignInPage({
         initialError={initialErrorFor(searchParams.error)}
       />
 
-      {/* "Skip" grants the ONE free peek at the /explore preview. Once that
-          peek is spent (the fl_peeked cookie is set), the escape hatch is
-          removed and the only way forward is to create an account. */}
-      {!peeked && (
-        <Link
-          href="/explore"
-          className="mt-6 self-center text-[13px] font-medium text-muted-fg/70 hover:text-fg lowercase tracking-tight transition-colors"
-        >
-          take a peek →
-        </Link>
-      )}
+      {/* "Skip" → the always-on /explore preview (a few cards, then the
+          sign-up wall in the feed). Browsing is free; doing anything —
+          tapping a place, saving, planning — requires an account. */}
+      <Link
+        href="/explore"
+        className="mt-6 self-center text-[13px] font-medium text-muted-fg/70 hover:text-fg lowercase tracking-tight transition-colors"
+      >
+        take a peek →
+      </Link>
     </div>
   );
 }
