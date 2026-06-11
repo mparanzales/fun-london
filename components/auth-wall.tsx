@@ -9,7 +9,8 @@
 // locked so the blurred page can't be scrolled or tapped. `returnTo` is derived
 // from the current path so the user lands back here after authenticating.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Users } from "lucide-react";
@@ -24,6 +25,9 @@ export function AuthWall({
   body?: string;
 }) {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   // Lock background scroll while the wall is showing.
   useEffect(() => {
@@ -35,11 +39,15 @@ export function AuthWall({
     };
   }, [signedIn]);
 
-  if (signedIn) return null;
+  if (signedIn || !mounted) return null;
 
   const href = `/sign-in?return=${encodeURIComponent(pathname || "/explore")}`;
 
-  return (
+  // Portal to <body> so the fixed overlay is relative to the viewport, not a
+  // transformed ancestor (the (main) PageTransition wrapper applies a CSS
+  // transform, which would otherwise capture position:fixed and stretch this
+  // to the full page height).
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center px-6"
       // Blur + dim whatever the page painted behind this overlay.
@@ -80,6 +88,7 @@ export function AuthWall({
           </Link>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

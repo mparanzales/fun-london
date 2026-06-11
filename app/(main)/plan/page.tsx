@@ -2,6 +2,7 @@ import { fetchVenues } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
 import { PlanFlow } from "./plan-flow";
 import { PlanTogetherCard } from "./plan-together-card";
+import { AuthWall } from "@/components/auth-wall";
 
 export default async function PlanPage() {
   const [venues, authUser] = await Promise.all([fetchVenues(), getAuthUser()]);
@@ -9,6 +10,7 @@ export default async function PlanPage() {
     <div className="pt-4 pb-6">
       <PlanFlow venues={venues} authUserId={authUser?.id ?? null} />
       <PlanTogetherCard />
+      <AuthWall signedIn={!!authUser} title="Sign up to plan your night" />
     </div>
   );
 }
