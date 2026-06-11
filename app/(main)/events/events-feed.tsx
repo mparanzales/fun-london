@@ -12,7 +12,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { EventCard } from "@/components/event-card";
+import { SignupWall } from "@/components/signup-wall";
 import type { Event, EventCategory } from "@/lib/types";
+
+// How many events a signed-out visitor sees before the sign-up wall (mirrors
+// the Explore feed's metered preview).
+const PREVIEW_COUNT = 4;
 
 // ── Filter shapes ───────────────────────────────────────────────────────
 
@@ -89,9 +94,11 @@ function parseDateInput(value: string): Date | null {
 export function EventsFeed({
   events,
   todayLabel,
+  signedIn,
 }: {
   events: Event[];
   todayLabel: string;
+  signedIn: boolean;
 }) {
   const [quick, setQuick] = useState<QuickFilter>("all");
   const [fromDate, setFromDate] = useState("");
@@ -267,9 +274,9 @@ export function EventsFeed({
         </div>
       )}
 
-      {/* Event list */}
+      {/* Event list — metered preview for signed-out visitors (like Explore). */}
       <div className="px-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {filtered.map((e) => (
+        {(signedIn ? filtered : filtered.slice(0, PREVIEW_COUNT)).map((e) => (
           <EventCard key={e.id} event={e} />
         ))}
         {filtered.length === 0 && (
@@ -282,6 +289,7 @@ export function EventsFeed({
           </div>
         )}
       </div>
+      {!signedIn && filtered.length > 0 && <SignupWall returnTo="/events" />}
     </div>
   );
 }

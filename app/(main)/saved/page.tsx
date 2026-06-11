@@ -1,6 +1,7 @@
 import { fetchVenues } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
 import { SavedList } from "./saved-list";
+import { AuthWall } from "@/components/auth-wall";
 
 // Server Component: fetches all venues from Supabase, hands them to the
 // client SavedList which filters by the client-side useSaved set + uses
@@ -14,5 +15,14 @@ export default async function SavedPage() {
     fetchVenues(),
     getAuthUser(),
   ]);
-  return <SavedList allVenues={allVenues} isAnon={!authUser} />;
+  return (
+    <>
+      <SavedList allVenues={allVenues} isAnon={!authUser} />
+      <AuthWall
+        signedIn={!!authUser}
+        title="Sign up to save your spots"
+        mainShell
+      />
+    </>
+  );
 }
