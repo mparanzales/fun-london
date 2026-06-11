@@ -52,23 +52,36 @@ export function AuthWall({
   // transformed ancestor (the (main) PageTransition wrapper applies a CSS
   // transform, which would otherwise capture position:fixed and stretch this
   // to the full page height).
+  // Soft fade at the top/bottom edges of the blur so it ramps into the page
+  // instead of slicing it with a hard line (which cut through the filter chips).
+  const fadeMask =
+    "linear-gradient(to bottom, transparent 0, #000 48px, #000 calc(100% - 48px), transparent 100%)";
+
   return createPortal(
     <div
       className={`fixed inset-x-0 z-[70] flex items-center justify-center px-6 ${
         // Leave the page title (top) and the bottom nav uncovered on tabbed
         // pages; full-screen on detail pages.
         mainShell
-          ? "top-[104px] bottom-[calc(64px+env(safe-area-inset-bottom))]"
+          ? "top-[88px] bottom-[calc(64px+env(safe-area-inset-bottom))]"
           : "inset-y-0"
       }`}
-      // Blur + dim whatever the page painted behind this overlay.
-      style={{
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
-        backgroundColor: "color-mix(in srgb, var(--fl-bg) 55%, transparent)",
-      }}
     >
-      <div className="w-full max-w-sm rounded-3xl bg-card border border-border p-7 text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+      {/* Blur + dim layer — separate from the card so the edge fade (mask)
+          softens the blur without fading the card. */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          backgroundColor: "color-mix(in srgb, var(--fl-bg) 55%, transparent)",
+          ...(mainShell
+            ? { maskImage: fadeMask, WebkitMaskImage: fadeMask }
+            : {}),
+        }}
+      />
+      <div className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-7 text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
           <Users className="h-7 w-7 text-primary" />
         </div>
