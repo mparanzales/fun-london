@@ -19,10 +19,15 @@ export function AuthWall({
   signedIn,
   title = "Sign up to keep exploring",
   body = "Save your spots, plan the whole night, and get picks near you — free.",
+  mainShell = false,
 }: {
   signedIn: boolean;
   title?: string;
   body?: string;
+  // When the page lives inside the tabbed (main) shell, inset the blur so the
+  // page title (top) and the bottom nav stay sharp + usable — only the content
+  // between them is blurred. Detail pages (venue/event) blur full-screen.
+  mainShell?: boolean;
 }) {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
@@ -49,7 +54,13 @@ export function AuthWall({
   // to the full page height).
   return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center px-6"
+      className={`fixed inset-x-0 z-[70] flex items-center justify-center px-6 ${
+        // Leave the page title (top) and the bottom nav uncovered on tabbed
+        // pages; full-screen on detail pages.
+        mainShell
+          ? "top-[104px] bottom-[calc(64px+env(safe-area-inset-bottom))]"
+          : "inset-y-0"
+      }`}
       // Blur + dim whatever the page painted behind this overlay.
       style={{
         backdropFilter: "blur(8px)",

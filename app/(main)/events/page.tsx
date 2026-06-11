@@ -26,7 +26,11 @@ export default async function EventsPage() {
   return (
     <>
       <EventsFeed events={events} todayLabel={todayInLondon()} />
-      <AuthWall signedIn={!!authUser} title="Sign up to see what's on" />
+      <AuthWall
+        signedIn={!!authUser}
+        title="Sign up to see what's on"
+        mainShell
+      />
     </>
   );
 }

@@ -10,7 +10,11 @@ export default async function PlanPage() {
     <div className="pt-4 pb-6">
       <PlanFlow venues={venues} authUserId={authUser?.id ?? null} />
       <PlanTogetherCard />
-      <AuthWall signedIn={!!authUser} title="Sign up to plan your night" />
+      <AuthWall
+        signedIn={!!authUser}
+        title="Sign up to plan your night"
+        mainShell
+      />
     </div>
   );
 }
