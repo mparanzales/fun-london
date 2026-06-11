@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchVenueBySlug } from "@/lib/queries";
+import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { VenueDetail } from "./venue-detail";
+import { AuthWall } from "@/components/auth-wall";
 
 // Top-level route OUTSIDE the (main) route group on purpose — that means
 // no bottom nav, no max-w-md shell wrapper. The detail screen handles
@@ -45,7 +47,10 @@ export default async function VenuePage({
 }: {
   params: { slug: string };
 }) {
-  const venue = await fetchVenueBySlug(params.slug);
+  const [venue, authUser] = await Promise.all([
+    fetchVenueBySlug(params.slug),
+    getAuthUser(),
+  ]);
   if (!venue) notFound();
 
   // Structured data → rich results in Google (rating stars, price, area).
@@ -91,6 +96,10 @@ export default async function VenuePage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <VenueDetail venue={venue} />
+      <AuthWall
+        signedIn={!!authUser}
+        title={`Sign up to see ${venue.name}`}
+      />
     </>
   );
 }

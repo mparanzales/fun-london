@@ -48,9 +48,15 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (!user) {
+    // Venue/event DETAIL pages render for anon too, but their content is shown
+    // blurred behind a sign-up card (components/auth-wall.tsx) — the soft
+    // "enter a place → sign up" gate. Rendering (not redirecting) also keeps
+    // these pages indexable/shareable.
     const isPublic =
       pathname === "/" ||
       pathname === "/explore" ||
+      pathname.startsWith("/venue/") ||
+      pathname.startsWith("/event/") ||
       pathname === "/robots.txt" ||
       pathname === "/sitemap.xml" ||
       pathname === "/sign-in" ||

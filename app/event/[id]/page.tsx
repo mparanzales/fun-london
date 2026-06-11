@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchEventById, fetchVenueById } from "@/lib/queries";
+import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { EventDetail } from "./event-detail";
+import { AuthWall } from "@/components/auth-wall";
 
 // Force dynamic so changes from the events ingest cron show up
 // immediately on the detail page (no static cache).
@@ -35,7 +37,10 @@ export default async function EventDetailPage({
 }: {
   params: { id: string };
 }) {
-  const event = await fetchEventById(params.id);
+  const [event, authUser] = await Promise.all([
+    fetchEventById(params.id),
+    getAuthUser(),
+  ]);
   if (!event) notFound();
 
   // Pull the linked venue when we have one. Gives the detail page
@@ -80,6 +85,7 @@ export default async function EventDetailPage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <EventDetail event={event} venue={venue} />
+      <AuthWall signedIn={!!authUser} title={`Sign up to see ${event.name}`} />
     </>
   );
 }
