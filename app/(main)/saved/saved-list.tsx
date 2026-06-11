@@ -18,7 +18,22 @@ export function SavedList({
   const { bookings } = useBookings();
   const saved = allVenues.filter((v) => savedSet.has(v.slug));
 
-  const hasBookings = bookings.length > 0;
+  // "Coming up" should only list reminders that haven't passed. Compare against
+  // the start of today (so something earlier today still counts), and show the
+  // soonest first. Past reminders drop off rather than lingering as "upcoming".
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const upcoming = bookings
+    .filter((b) => {
+      const d = new Date(b.startsAt);
+      return !Number.isNaN(d.getTime()) && d >= startOfToday;
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+    );
+
+  const hasBookings = upcoming.length > 0;
   const hasSaved = saved.length > 0;
   const hasAnything = hasBookings || hasSaved;
   // Warn anonymous users that anything here lives only in this browser.
@@ -32,7 +47,7 @@ export function SavedList({
         </h1>
         {hasAnything && (
           <div className="text-xs text-muted-fg mt-0.5">
-            {summary(bookings.length, saved.length)}
+            {summary(upcoming.length, saved.length)}
           </div>
         )}
       </header>
@@ -66,7 +81,7 @@ export function SavedList({
             Coming up
           </h2>
           <div className="flex flex-col gap-2">
-            {bookings.map((b) => {
+            {upcoming.map((b) => {
               const venue = allVenues.find((v) => v.slug === b.venueSlug);
               if (!venue) return null;
               return (
