@@ -33,9 +33,22 @@ export function SavedList({
         new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
     );
 
+  // Past reminders → a "Been there" history (most recent first). Foundation for
+  // a future "would you go back?" taste signal.
+  const past = bookings
+    .filter((b) => {
+      const d = new Date(b.startsAt);
+      return !Number.isNaN(d.getTime()) && d < startOfToday;
+    })
+    .sort(
+      (a, b) =>
+        new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
+    );
+
   const hasBookings = upcoming.length > 0;
   const hasSaved = saved.length > 0;
-  const hasAnything = hasBookings || hasSaved;
+  const hasPast = past.length > 0;
+  const hasAnything = hasBookings || hasSaved || hasPast;
   // Warn anonymous users that anything here lives only in this browser.
   const showAnonWarning = isAnon && hasAnything;
 
@@ -119,7 +132,7 @@ export function SavedList({
 
       {hasSaved && (
         <section className="px-5">
-          {hasBookings && (
+          {(hasBookings || hasPast) && (
             <h2 className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
               Saved spots
             </h2>
@@ -128,6 +141,45 @@ export function SavedList({
             {saved.map((v) => (
               <VenueCard key={v.id} venue={v} variant="wide" />
             ))}
+          </div>
+        </section>
+      )}
+
+      {hasPast && (
+        <section className="px-5 pt-6">
+          <h2 className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
+            Been there
+          </h2>
+          <div className="flex flex-col gap-2">
+            {past.map((b) => {
+              const venue = allVenues.find((v) => v.slug === b.venueSlug);
+              if (!venue) return null;
+              return (
+                <Link
+                  key={b.id}
+                  href={`/venue/${b.venueSlug}`}
+                  className="flex items-center gap-3 p-3 rounded-2xl bg-card border border-border opacity-75"
+                >
+                  <div className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 grayscale">
+                    <Image
+                      src={venue.imgUrl}
+                      alt={venue.name}
+                      fill
+                      sizes="56px"
+                      className="object-cover"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-extrabold text-heading truncate">
+                      {venue.name}
+                    </div>
+                    <div className="text-[11px] text-muted-fg mt-0.5">
+                      {b.dateLabel} · Party of {b.partySize}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </section>
       )}
