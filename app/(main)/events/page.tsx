@@ -18,10 +18,7 @@ function todayInLondon(): string {
 }
 
 export default async function EventsPage() {
-  const [events, authUser] = await Promise.all([
-    fetchEvents(),
-    getAuthUser(),
-  ]);
+  const [events, authUser] = await Promise.all([fetchEvents(), getAuthUser()]);
   return (
     <EventsFeed
       events={events}

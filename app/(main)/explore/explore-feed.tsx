@@ -384,40 +384,41 @@ export function ExploreFeed({
         </div>
       ) : (
         <>
-        <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
-          {(signedIn ? items : items.slice(0, PREVIEW_COUNT)).map((item, index) =>
-            item.kind === "venue" ? (
-              <VenueCard
-                key={`venue-${item.data.id}`}
-                venue={item.data}
-                variant="wide"
-                showCategoryTag={showCategoryTag}
-                priority={index === 0}
-                distanceLabel={
-                  nearestFirst &&
-                  userGeo &&
-                  item.data.lat != null &&
-                  item.data.lng != null
-                    ? distanceLabel(
-                        haversineKm(userGeo, {
-                          lat: item.data.lat,
-                          lng: item.data.lng,
-                        }),
-                      )
-                    : undefined
-                }
-              />
-            ) : (
-              <EventCard
-                key={`event-${item.data.id}`}
-                event={item.data}
-                showCategoryTag={showCategoryTag}
-                priority={index === 0}
-              />
-            ),
-          )}
-        </div>
-        {!signedIn && <SignupWall returnTo="/explore" />}
+          <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
+            {(signedIn ? items : items.slice(0, PREVIEW_COUNT)).map(
+              (item, index) =>
+                item.kind === "venue" ? (
+                  <VenueCard
+                    key={`venue-${item.data.id}`}
+                    venue={item.data}
+                    variant="wide"
+                    showCategoryTag={showCategoryTag}
+                    priority={index === 0}
+                    distanceLabel={
+                      nearestFirst &&
+                      userGeo &&
+                      item.data.lat != null &&
+                      item.data.lng != null
+                        ? distanceLabel(
+                            haversineKm(userGeo, {
+                              lat: item.data.lat,
+                              lng: item.data.lng,
+                            }),
+                          )
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <EventCard
+                    key={`event-${item.data.id}`}
+                    event={item.data}
+                    showCategoryTag={showCategoryTag}
+                    priority={index === 0}
+                  />
+                ),
+            )}
+          </div>
+          {!signedIn && <SignupWall returnTo="/explore" />}
         </>
       )}
 

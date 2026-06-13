@@ -18,7 +18,7 @@ import { Users } from "lucide-react";
 export function AuthWall({
   signedIn,
   title = "Sign up to keep exploring",
-  body = "Save your spots, plan the whole night, and get picks near you — free.",
+  body = "Save your spots, plan the whole night, and get picks near you. Free.",
   mainShell = false,
 }: {
   signedIn: boolean;

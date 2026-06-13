@@ -12,11 +12,7 @@
 import Link from "next/link";
 import { ShieldCheck, ArrowRight } from "lucide-react";
 
-export function SignupWall({
-  returnTo = "/explore",
-}: {
-  returnTo?: string;
-}) {
+export function SignupWall({ returnTo = "/explore" }: { returnTo?: string }) {
   const href = `/sign-in?return=${encodeURIComponent(returnTo)}`;
   return (
     // Pulled up under the last preview cards so they fade into the wall — the
@@ -34,12 +30,11 @@ export function SignupWall({
           </span>
 
           <h2 className="mt-4 text-[26px] font-extrabold leading-tight tracking-tight text-heading">
-            See all of independent{" "}
-            <span className="fl-grad-text">London</span>
+            See all of independent <span className="fl-grad-text">London</span>
           </h2>
           <p className="mt-2 text-[14px] leading-relaxed text-muted-fg">
             You&apos;re seeing a taste. Sign up free to unlock every bar,
-            restaurant and event near you — and save the ones you love.
+            restaurant and event near you, and save the ones you love.
           </p>
 
           <Link

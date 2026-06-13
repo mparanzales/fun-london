@@ -107,10 +107,11 @@ export function SignInForm({
 
     if (otpError) {
       const rateLimited =
-        otpError.status === 429 || /rate|too many|limit/i.test(otpError.message);
+        otpError.status === 429 ||
+        /rate|too many|limit/i.test(otpError.message);
       if (rateLimited) {
         setError(
-          "too many email requests for now — try Google or Apple above, or wait a minute and retry.",
+          "too many email requests for now. Try Google or Apple above, or wait a minute and retry.",
         );
         setCooldown(MAGIC_LINK_COOLDOWN_S);
       } else {

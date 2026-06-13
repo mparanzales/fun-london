@@ -29,8 +29,7 @@ export function SavedList({
       return !Number.isNaN(d.getTime()) && d >= startOfToday;
     })
     .sort(
-      (a, b) =>
-        new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+      (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
     );
 
   // Past reminders → a "Been there" history (most recent first). Foundation for
@@ -41,8 +40,7 @@ export function SavedList({
       return !Number.isNaN(d.getTime()) && d < startOfToday;
     })
     .sort(
-      (a, b) =>
-        new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
+      (a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
     );
 
   const hasBookings = upcoming.length > 0;
