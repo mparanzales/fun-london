@@ -1,13 +1,14 @@
 "use client";
 
-// Renders Vercel Analytics UNLESS the visitor has explicitly declined in the
-// cookie banner. Vercel Analytics is cookieless, so we load it by default
+// Renders Vercel Analytics + Speed Insights UNLESS the visitor has explicitly
+// declined in the cookie banner. Both are cookieless, so we load them by default
 // (implied basis) and honour an explicit opt-out — matching the consent gate
 // in lib/analytics.ts. Re-reads on the custom "fl-consent-change" event the
 // banner dispatches, so declining takes effect without a reload.
 
 import { useEffect, useState } from "react";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const CONSENT_KEY = "fl.consent.v1";
 
@@ -30,5 +31,10 @@ export function AnalyticsGate() {
     return () => window.removeEventListener("fl-consent-change", onChange);
   }, []);
 
-  return on ? <Analytics /> : null;
+  return on ? (
+    <>
+      <Analytics />
+      <SpeedInsights />
+    </>
+  ) : null;
 }
