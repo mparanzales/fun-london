@@ -28,13 +28,11 @@ export async function getAuthUser(): Promise<User | null> {
 // grows past one.
 // ─────────────────────────────────────────────────────────────────────────
 
-// Fail CLOSED in production: if FL_ADMIN_EMAILS is unset there, nobody is an
-// admin (an env misconfiguration can't silently grant access to a hardcoded
-// address). FL_ADMIN_EMAILS is set in Vercel (Production + Preview). In local
-// dev we fall back to the owner email so /admin is usable without extra setup.
-const RAW_ADMIN_EMAILS =
-  process.env.FL_ADMIN_EMAILS ??
-  (process.env.NODE_ENV === "production" ? "" : "admin@funldn.example");
+// Fail CLOSED: if FL_ADMIN_EMAILS is unset, nobody is an admin (an env
+// misconfiguration can't silently grant access). FL_ADMIN_EMAILS is set in the
+// host env (Production + Preview); for local /admin access, set it in your
+// .env.local (see .env.example). Comma-separated list of admin emails.
+const RAW_ADMIN_EMAILS = process.env.FL_ADMIN_EMAILS ?? "";
 
 const ADMIN_EMAILS = new Set(
   RAW_ADMIN_EMAILS.split(",")

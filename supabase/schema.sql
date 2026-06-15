@@ -230,7 +230,9 @@ create policy "events admin update popups" on public.events for update
   using (
     source = 'popup'
     -- auth.jwt() wrapped in a subselect so it's evaluated once per query, not
-    -- per row (Supabase Auth RLS InitPlan advisory).
+    -- per row (Supabase Auth RLS InitPlan advisory). Admin email is
+    -- environment-specific and kept out of source (public repo) — set it for
+    -- your own deploy. The live prod policy already carries the real address.
     and ((select auth.jwt()) ->> 'email') = 'admin@funldn.example'
   )
   with check (source = 'popup');
