@@ -186,8 +186,8 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         </h1>
 
         <div className="flex items-center gap-1.5 mt-2 text-sm text-muted-fg">
-          {/* Amber star — Tailwind's amber-500 is theme-stable (warm on both bgs).
-              No brand --coral token defined in globals.css; flagged in report. */}
+          {/* Amber star — Tailwind's amber-500 is theme-stable (warm on both
+              bgs), the right warm tone for a rating without a second brand hue. */}
           <Star
             className="w-4 h-4 text-amber-500 fill-current"
             strokeWidth={0}

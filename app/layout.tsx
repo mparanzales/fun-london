@@ -60,7 +60,7 @@ export const viewport: Viewport = {
   // chrome legible at install time before the JS theme provider mounts.
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f0eee9" },
-    { media: "(prefers-color-scheme: dark)", color: "#14110d" },
+    { media: "(prefers-color-scheme: dark)", color: "#14121a" },
   ],
 };
 
