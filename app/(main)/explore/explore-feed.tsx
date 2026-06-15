@@ -17,6 +17,7 @@ import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
 import { SignupWall } from "@/components/signup-wall";
+import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
 import { hasPrefs, scoreVenue, scoreEvent } from "@/lib/ranking";
 import {
@@ -42,6 +43,15 @@ type FilterKey =
   | "music"
   | "events";
 
+// Anon-only: which thing a soft AuthWall is gating. The CATEGORY chips are NOT
+// here — for anon they filter to a 4-card preview + the sign-up wall, just like
+// For You. Only search and the Near-you sort raise the blur wall.
+type WallTarget = "search" | "near";
+const WALL_TITLES: Record<WallTarget, string> = {
+  search: "Sign up to search",
+  near: "Sign up to sort by distance",
+};
+
 type FeedItem = { kind: "venue"; data: Venue } | { kind: "event"; data: Event };
 
 // Bars chip — bar-family venue types (the brief's `type === "bar"` is the
@@ -62,8 +72,9 @@ function getEyebrow(): "today in" | "tonight in" {
 }
 
 // How many general spots a signed-out visitor sees before the sign-up wall.
-// Kept short on purpose — a taste, not the catalogue.
-const PREVIEW_COUNT = 4;
+// Kept short on purpose — a taste, not the catalogue. Exported so the Server
+// Component slices the anonymous preview to the SAME count in the DB.
+export const PREVIEW_COUNT = 4;
 
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
@@ -74,16 +85,25 @@ export function ExploreFeed({
   greetingName,
   preferences,
   signedIn,
+  totalVenues,
 }: {
   venues: Venue[];
   events: Event[];
   greetingName: string;
   preferences: UserPreferences | null;
   signedIn: boolean;
+  // Real catalogue size for the hero trust strip. For anon, `allVenues` is
+  // only the trimmed preview, so the count must be passed separately.
+  totalVenues: number;
 }) {
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
   const [searchOpen, setSearchOpen] = useState(false);
   const eyebrow = getEyebrow();
+  // Anon: clicking a category chip, search, or "Near you" raises a soft blur
+  // wall (sign-in on top) over the For You preview — never a redirect, and never
+  // catalogue data behind it (the backdrop stays the 4 public preview cards).
+  // null = no wall.
+  const [wallFor, setWallFor] = useState<WallTarget | null>(null);
 
   // Preferences come only from a signed-in profile now — the anonymous taste
   // quiz was removed. Anonymous visitors therefore have no taste signal: the
@@ -271,7 +291,9 @@ export function ExploreFeed({
           <button
             type="button"
             aria-label="Search"
-            onClick={() => setSearchOpen(true)}
+            onClick={
+              signedIn ? () => setSearchOpen(true) : () => setWallFor("search")
+            }
             className="p-2 -mr-2 text-fg"
           >
             <Search className="w-6 h-6" strokeWidth={2} />
@@ -288,7 +310,7 @@ export function ExploreFeed({
           <span className="text-heading">worth leaving the house for.</span>
         </h1>
         <div className="mt-5 flex items-center gap-3 text-[13px] font-bold uppercase tracking-wider text-muted-fg">
-          <span>{allVenues.length} independent venues</span>
+          <span>{totalVenues} independent venues</span>
           <span className="text-border">/</span>
           <span>cross-checked in 2+ sources</span>
           <span className="text-border">/</span>
@@ -296,13 +318,16 @@ export function ExploreFeed({
         </div>
       </section>
 
+      {/* Category chips filter the feed for everyone. For anon each category
+          shows its own first 4 (from the per-category preview) + the sign-up
+          wall, exactly like For You. */}
       <FilterChipRow selected={selectedFilter} onSelect={setSelectedFilter} />
 
       {/* "Near you" sort + taste status line. */}
       <div className="px-5 lg:px-6 pt-1.5 flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          onClick={toggleNearest}
+          onClick={signedIn ? toggleNearest : () => setWallFor("near")}
           aria-pressed={nearestFirst}
           disabled={geoStatus === "locating"}
           className={
@@ -422,11 +447,22 @@ export function ExploreFeed({
         </>
       )}
 
-      {searchOpen && (
+      {searchOpen && signedIn && (
         <SearchOverlay
           venues={allVenues}
           events={allEvents}
           onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {/* Anon soft wall: a chip / search / Near-you tap blurs the preview and
+          puts sign-in on top, with a "Keep browsing" back out. */}
+      {!signedIn && wallFor && (
+        <AuthWall
+          signedIn={false}
+          mainShell
+          title={WALL_TITLES[wallFor]}
+          onBack={() => setWallFor(null)}
         />
       )}
     </div>

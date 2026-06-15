@@ -182,12 +182,174 @@ export async function fetchVenues(): Promise<Venue[]> {
     .from("venues")
     .select("*")
     .not("google_place_id", "is", null)
+    // Never surface a venue on a stock (Unsplash) fallback or with no real
+    // photo. Show a real Google Places photo (mirrored to our storage), or
+    // nothing.
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
     // Curated (hand-picked) venues first — "curated" sorts before "discovered"
     // ascending — then stable by created_at.
     .order("curation_tier", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) throw new Error(`fetchVenues: ${error.message}`);
   return (data as VenueRow[]).map(mapVenue);
+}
+
+// ── Anonymous metered preview ───────────────────────────────────────────
+//
+// The signed-out feed is a metered TEASER, not the catalogue. These two
+// helpers exist so a Server Component can ship anonymous visitors ONLY a
+// short, card-level slice — never the full catalogue and never the
+// detail/"moat" fields (long_description, editorial_sources, creator_coverage,
+// critical_flags, booking_links, phone, website_url, instagram_handle,
+// address, google_place_id, opening_hours). That closes the hole where the
+// whole catalogue shipped in the anonymous RSC payload.
+
+// The safe subset the feed cards actually render. Excludes every sensitive /
+// detail-only column on purpose. (google_place_id is filtered on below but not
+// selected — PostgREST allows filtering an unselected column.)
+const VENUE_CARD_COLUMNS =
+  "id, slug, name, type, vibe, neighbourhood, price, time_of_day, rating, review_count, img_url, lat, lng, curation_tier, created_at";
+
+type VenueCardRow = Pick<
+  VenueRow,
+  | "id"
+  | "slug"
+  | "name"
+  | "type"
+  | "vibe"
+  | "neighbourhood"
+  | "price"
+  | "time_of_day"
+  | "rating"
+  | "review_count"
+  | "img_url"
+  | "lat"
+  | "lng"
+  | "curation_tier"
+  | "created_at"
+>;
+
+// Map a card-only row to a Venue with every omitted field set to a safe
+// empty/null default, so the Venue type holds without ever inventing data.
+function mapVenuePreview(r: VenueCardRow): Venue {
+  return {
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    type: r.type as VenueType,
+    vibe: tidyDashes(r.vibe),
+    longDescription: "",
+    neighbourhood: r.neighbourhood,
+    address: "",
+    lat: r.lat,
+    lng: r.lng,
+    price: r.price as PriceTier,
+    timeOfDay: r.time_of_day as TimeOfDay,
+    rating: Number(r.rating),
+    reviewCount: r.review_count,
+    walkingMins: 0,
+    tablesFree: 0,
+    nextSlotLabel: "",
+    imgUrl: r.img_url,
+    moodTags: [],
+    vibeTags: [],
+    googlePlaceId: null,
+    bookingLinks: null,
+    websiteUrl: null,
+    phone: null,
+    instagramHandle: null,
+    editorialSources: null,
+    creatorCoverage: null,
+    criticalFlags: null,
+    openingHours: null,
+    curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
+    createdAt: r.created_at,
+  };
+}
+
+// Card-level preview of the catalogue's first `limit` venues (same default
+// order as fetchVenues: curated first, then by created_at). Sliced in the DB.
+export async function fetchVenuePreview(limit: number): Promise<Venue[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("venues")
+    .select(VENUE_CARD_COLUMNS)
+    .not("google_place_id", "is", null)
+    // Never surface a venue on a stock (Unsplash) fallback or with no real
+    // photo. Show a real Google Places photo (mirrored to our storage), or
+    // nothing.
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
+    .order("curation_tier", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`fetchVenuePreview: ${error.message}`);
+  return (data as VenueCardRow[]).map(mapVenuePreview);
+}
+
+// Per-CATEGORY anonymous preview. So a signed-out visitor can switch the
+// Explore chips (Eats / Bars / Cafés / Music) and each shows its own first few
+// cards + the sign-up wall — like the For You preview — WITHOUT shipping the
+// whole catalogue. We fetch only `perCategory` rows per category-group (plus a
+// general curated head for For You), card-level fields only.
+export async function fetchVenueCategoryPreview(
+  perCategory: number,
+): Promise<Venue[]> {
+  const supabase = createClient();
+  const base = () =>
+    supabase
+      .from("venues")
+      .select(VENUE_CARD_COLUMNS)
+      .not("google_place_id", "is", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .order("curation_tier", { ascending: true })
+      .order("created_at", { ascending: true });
+  const [general, restaurants, bars, cafes, music] = await Promise.all([
+    base().limit(perCategory), // For You head (curated first)
+    base().eq("type", "Restaurant").limit(perCategory),
+    base()
+      .in("type", ["Bar", "Wine Bar", "Pub", "Listening Bar"])
+      .limit(perCategory),
+    base().eq("type", "Cafe").limit(perCategory),
+    base().eq("type", "Live Music").limit(perCategory),
+  ]);
+  const groups = [general, restaurants, bars, cafes, music];
+  for (const g of groups) {
+    if (g.error)
+      throw new Error(`fetchVenueCategoryPreview: ${g.error.message}`);
+  }
+  // Dedupe by id, keeping the general (curated) head first so For You is
+  // unchanged, then the category buckets.
+  const seen = new Set<string>();
+  const out: VenueCardRow[] = [];
+  for (const g of groups) {
+    for (const row of (g.data as VenueCardRow[]) ?? []) {
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        out.push(row);
+      }
+    }
+  }
+  return out.map(mapVenuePreview);
+}
+
+// Total catalogue size — for the hero trust strip ("N independent venues"),
+// so the anonymous teaser can show the real count without fetching the rows.
+export async function fetchVenueCount(): Promise<number> {
+  const supabase = createClient();
+  const { count, error } = await supabase
+    .from("venues")
+    .select("id", { count: "exact", head: true })
+    .not("google_place_id", "is", null)
+    // Never surface a venue on a stock (Unsplash) fallback or with no real
+    // photo. Show a real Google Places photo (mirrored to our storage), or
+    // nothing.
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "");
+  if (error) throw new Error(`fetchVenueCount: ${error.message}`);
+  return count ?? 0;
 }
 
 export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {
@@ -197,6 +359,11 @@ export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {
     .select("*")
     .eq("slug", slug)
     .not("google_place_id", "is", null)
+    // Never surface a venue on a stock (Unsplash) fallback or with no real
+    // photo. Show a real Google Places photo (mirrored to our storage), or
+    // nothing.
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
     .maybeSingle();
   if (error) throw new Error(`fetchVenueBySlug(${slug}): ${error.message}`);
   return data ? mapVenue(data as VenueRow) : null;
@@ -209,6 +376,11 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
     .select("*")
     .eq("id", id)
     .not("google_place_id", "is", null)
+    // Never surface a venue on a stock (Unsplash) fallback or with no real
+    // photo. Show a real Google Places photo (mirrored to our storage), or
+    // nothing.
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
     .maybeSingle();
   if (error) throw new Error(`fetchVenueById(${id}): ${error.message}`);
   return data ? mapVenue(data as VenueRow) : null;
@@ -260,6 +432,13 @@ export async function fetchEvents(): Promise<Event[]> {
     .from("events")
     .select("*")
     .is("cancelled_at", null) // hide cancelled events / hidden pop-ups
+    // Real images only. An event without its OWN image must never surface: we
+    // never show a generic stock photo that isn't the event (a wrong photo is
+    // a wrong "fact", against the cross-checked promise). Stock fallbacks were
+    // Unsplash URLs; exclude those and any empty value. Ingestion now skips
+    // image-less events at the source, so this is defence-in-depth.
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
     // Normal events: keep from the start of today onward. Pop-ups: ALSO keep
     // while their run is still on (they may have started in the past but
     // ends_at is today or later). cancelled_at doubles as the pop-up "hide".
@@ -271,12 +450,123 @@ export async function fetchEvents(): Promise<Event[]> {
   return (data as EventRow[]).map(mapEvent);
 }
 
+// ── Anonymous event preview (mirror of the venue preview) ───────────────
+// Card-level columns only — never the sourceUrl/description detail. Same
+// real-image + cancelled + date-window gates as fetchEvents.
+const EVENT_CARD_COLUMNS =
+  "id, name, venue_name, venue_id, area, date_label, time_label, starts_at, price, category, img_url, source, ends_at";
+
+type EventCardRow = Pick<
+  EventRow,
+  | "id"
+  | "name"
+  | "venue_name"
+  | "venue_id"
+  | "area"
+  | "date_label"
+  | "time_label"
+  | "starts_at"
+  | "price"
+  | "category"
+  | "img_url"
+  | "source"
+  | "ends_at"
+>;
+
+function mapEventPreview(r: EventCardRow): Event {
+  return {
+    id: r.id,
+    name: tidyDashes(r.name),
+    venueName: r.venue_name,
+    venueId: r.venue_id,
+    area: r.area,
+    dateLabel: r.date_label as DateLabel,
+    timeLabel: r.time_label,
+    startsAt: r.starts_at,
+    price: r.price,
+    category: r.category as EventCategory,
+    imgUrl: r.img_url,
+    sourceUrl: null,
+    isPopup: r.source === "popup",
+    endsAt: r.ends_at,
+    description: null,
+  };
+}
+
+export async function fetchEventPreview(limit: number): Promise<Event[]> {
+  const supabase = createClient();
+  const startOfToday = startOfLondonDayUtc();
+  const { data, error } = await supabase
+    .from("events")
+    .select(EVENT_CARD_COLUMNS)
+    .is("cancelled_at", null)
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
+    .or(
+      `starts_at.gte.${startOfToday.toISOString()},ends_at.gte.${startOfToday.toISOString()}`,
+    )
+    .order("starts_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`fetchEventPreview: ${error.message}`);
+  return (data as EventCardRow[]).map(mapEventPreview);
+}
+
+// Per-CATEGORY anonymous event preview — same idea as the venue version, so the
+// What's On category chips (Music / Food / Art / Comedy / Club / Pop-ups) each
+// show their own first few cards + the wall, like the "All" view, without
+// shipping the whole events catalogue.
+export async function fetchEventCategoryPreview(
+  perCategory: number,
+): Promise<Event[]> {
+  const supabase = createClient();
+  const startOfToday = startOfLondonDayUtc();
+  const base = () =>
+    supabase
+      .from("events")
+      .select(EVENT_CARD_COLUMNS)
+      .is("cancelled_at", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .or(
+        `starts_at.gte.${startOfToday.toISOString()},ends_at.gte.${startOfToday.toISOString()}`,
+      )
+      .order("starts_at", { ascending: true });
+  const cats: EventCategory[] = ["Music", "Food", "Art", "Comedy", "Club"];
+  const groups = await Promise.all([
+    base().limit(perCategory), // "All" head
+    ...cats.map((c) => base().eq("category", c).limit(perCategory)),
+    base().eq("source", "popup").limit(perCategory), // Pop-ups
+  ]);
+  for (const g of groups) {
+    if (g.error)
+      throw new Error(`fetchEventCategoryPreview: ${g.error.message}`);
+  }
+  const seen = new Set<string>();
+  const out: EventCardRow[] = [];
+  for (const g of groups) {
+    for (const row of (g.data as EventCardRow[]) ?? []) {
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        out.push(row);
+      }
+    }
+  }
+  return out.map(mapEventPreview);
+}
+
 export async function fetchEventById(id: string): Promise<Event | null> {
   const supabase = createClient();
+  // Same gates as the feed: a hidden (cancelled) or stock-image (Unsplash /
+  // empty) event must not be reachable by a direct /event/[id] link or bake
+  // its stock photo into an OG image. maybeSingle() then returns null →
+  // the detail page calls notFound().
   const { data, error } = await supabase
     .from("events")
     .select("*")
     .eq("id", id)
+    .is("cancelled_at", null)
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
     .maybeSingle();
   if (error) throw new Error(`fetchEventById(${id}): ${error.message}`);
   return data ? mapEvent(data as EventRow) : null;

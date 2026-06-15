@@ -9,15 +9,19 @@ import {
   Laugh,
   Disc3,
   Store,
+  Search,
   type LucideIcon,
 } from "lucide-react";
 import { EventCard } from "@/components/event-card";
+import { SearchOverlay } from "@/components/search-overlay";
 import { SignupWall } from "@/components/signup-wall";
+import { AuthWall } from "@/components/auth-wall";
 import type { Event, EventCategory } from "@/lib/types";
 
 // How many events a signed-out visitor sees before the sign-up wall (mirrors
-// the Explore feed's metered preview).
-const PREVIEW_COUNT = 4;
+// the Explore feed's metered preview). Exported so the Server Component slices
+// the anonymous preview to the SAME count in the DB.
+export const PREVIEW_COUNT = 4;
 
 // ── Filter shapes ───────────────────────────────────────────────────────
 
@@ -36,6 +40,14 @@ const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
 // "popup" is a pseudo-category (it filters to temporary pop-up listings rather
 // than an EventCategory), so it lives in this row next to the real categories.
 type CategoryFilter = "all" | EventCategory | "popup";
+
+// Anon-only: which chrome interaction a soft AuthWall is gating. The CATEGORY
+// chips are NOT here — for anon they filter to a 4-card preview + the wall, just
+// like the "All" view. Only search and the date pills raise the blur wall.
+type EventsWallTarget = "search" | "date";
+function eventsWallTitle(t: EventsWallTarget): string {
+  return t === "search" ? "Sign up to search" : "Sign up to filter by date";
+}
 
 // Every category chip we COULD show, in display order. Which ones actually
 // render is decided per-load from the events present (see categoryChips) — a
@@ -104,6 +116,10 @@ export function EventsFeed({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Anon: a search / date / category interaction raises a soft blur wall
+  // (sign-in on top) over the preview — never a redirect. null = no wall.
+  const [wallFor, setWallFor] = useState<EventsWallTarget | null>(null);
 
   const filtered = useMemo(() => {
     const now = new Date();
@@ -180,11 +196,23 @@ export function EventsFeed({
 
   return (
     <div className="pt-4 pb-6">
-      <header className="px-5 pb-3">
-        <h1 className="text-[28px] font-extrabold tracking-tight text-primary">
-          What&apos;s On
-        </h1>
-        <div className="text-xs text-muted-fg mt-0.5">{todayLabel}</div>
+      <header className="px-5 pb-3 flex justify-between items-start">
+        <div>
+          <h1 className="text-[28px] font-extrabold tracking-tight text-primary">
+            What&apos;s On
+          </h1>
+          <div className="text-xs text-muted-fg mt-0.5">{todayLabel}</div>
+        </div>
+        <button
+          type="button"
+          aria-label="Search"
+          onClick={
+            signedIn ? () => setSearchOpen(true) : () => setWallFor("search")
+          }
+          className="p-2 -mr-2 text-fg"
+        >
+          <Search className="w-6 h-6" strokeWidth={2} />
+        </button>
       </header>
 
       {/* Quick date pills — flex-wrap so they wrap to a second row if a
@@ -195,7 +223,13 @@ export function EventsFeed({
           return (
             <button
               key={f.id}
-              onClick={() => setQuick(f.id)}
+              onClick={
+                signedIn
+                  ? () => setQuick(f.id)
+                  : f.id === "all"
+                    ? () => setQuick("all")
+                    : () => setWallFor("date")
+              }
               className={
                 "px-3 py-2.5 rounded-full text-[11px] font-extrabold uppercase tracking-[0.06em] whitespace-nowrap transition " +
                 (on ? "bg-primary text-primary-fg" : "bg-muted text-muted-fg")
@@ -290,6 +324,25 @@ export function EventsFeed({
         )}
       </div>
       {!signedIn && filtered.length > 0 && <SignupWall returnTo="/events" />}
+
+      {searchOpen && signedIn && (
+        <SearchOverlay
+          venues={[]}
+          events={events}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {/* Anon soft wall: search / date / category tap blurs the preview and
+          puts sign-in on top, with a "Keep browsing" back out. */}
+      {!signedIn && wallFor && (
+        <AuthWall
+          signedIn={false}
+          mainShell
+          title={eventsWallTitle(wallFor)}
+          onBack={() => setWallFor(null)}
+        />
+      )}
     </div>
   );
 }

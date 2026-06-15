@@ -1,6 +1,6 @@
-import { fetchEvents } from "@/lib/queries";
+import { fetchEvents, fetchEventCategoryPreview } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
-import { EventsFeed } from "./events-feed";
+import { EventsFeed, PREVIEW_COUNT } from "./events-feed";
 
 // Force dynamic so the header date stays fresh across midnight rather
 // than getting baked into a static build at deploy time.
@@ -18,7 +18,12 @@ function todayInLondon(): string {
 }
 
 export default async function EventsPage() {
-  const [events, authUser] = await Promise.all([fetchEvents(), getAuthUser()]);
+  const authUser = await getAuthUser();
+  // Anonymous visitors get only a trimmed, metered preview — never the full
+  // events catalogue in the RSC payload (mirrors /explore).
+  const events = authUser
+    ? await fetchEvents()
+    : await fetchEventCategoryPreview(PREVIEW_COUNT);
   return (
     <EventsFeed
       events={events}
