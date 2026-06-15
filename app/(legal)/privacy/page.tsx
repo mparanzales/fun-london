@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   description: "How Fun London collects, uses and protects your personal data.",
 };
 
-// NOTE FOR THE MAINTAINER: this is an honest, accurate TEMPLATE that reflects what the
+// MAINTAINER NOTE: this is an honest, accurate TEMPLATE that reflects what the
 // app actually does today. Have a solicitor review it before you rely on it,
 // and replace the placeholder contact email with a real monitored inbox.
 export default function PrivacyPage() {

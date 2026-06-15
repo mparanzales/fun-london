@@ -19,7 +19,7 @@ pnpm dev        # http://localhost:3000
 ```
 
 No `.env.local` is required for current development. Supabase middleware
-is in bypass mode — see [STATE.md](./STATE.md) for the full picture.
+is in bypass mode.
 
 ---
 
@@ -73,7 +73,7 @@ explicitly over an image or gradient** (e.g. card photo overlays, hero
 banners). They're never OK on a page-background surface — they'd
 disappear in day theme.
 
-Token reference: see [STATE.md → Key design tokens](./STATE.md).
+Token reference: see `app/globals.css` (the `--fl-*` tokens).
 
 ### 3. Server components by default; client only when needed
 

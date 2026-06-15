@@ -12,16 +12,15 @@
 // FL_PHOTO_BUCKET — when it is unset, callers get the keyless fallback (not a
 // keyed URL), so a missing bucket degrades to a placeholder, never a leak.
 //
-// THE MAINTAINER — to switch it on (closes the exposed-key security issue for good):
+// To enable photo mirroring:
 //   1. Supabase dashboard → Storage → New bucket → name "venue-photos",
 //      make it PUBLIC.
 //   2. Add FL_PHOTO_BUCKET=venue-photos to .env.local AND to the GitHub
 //      Actions secrets used by the ingest/discover/maintenance workflows.
 //   3. Run `pnpm ingest` (and let the discovery/refresh crons run) to rewrite
 //      img_url on every venue to the keyless Storage URL.
-//   4. Once `curl https://www.funldn.com/explore | grep AIza` returns nothing,
-//      ROTATE the old key in Google Cloud and apply an API restriction +
-//      daily quota cap.
+//   4. Rotate the previous Google Cloud key and apply an API/referrer
+//      restriction + daily quota cap.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 

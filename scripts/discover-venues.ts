@@ -324,7 +324,6 @@ async function londonLocationCount(name: string): Promise<number> {
   }
 }
 
-
 // ── Gemini (validation via grounding + editorial) ────────────────────────
 
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -356,7 +355,10 @@ async function geminiFetch(body: unknown): Promise<Response> {
     });
 
     // 429 = rate-limited, 503 = transient overload. Back off and retry.
-    if ((res.status === 429 || res.status === 503) && attempt < GEMINI_MAX_RETRIES) {
+    if (
+      (res.status === 429 || res.status === 503) &&
+      attempt < GEMINI_MAX_RETRIES
+    ) {
       const retryAfter = Number(res.headers.get("retry-after"));
       const backoff =
         Number.isFinite(retryAfter) && retryAfter > 0

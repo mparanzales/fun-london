@@ -69,7 +69,7 @@ create table if not exists public.venues (
   instagram_handle text,
   editorial_sources jsonb,                 -- [{publication, url, title, date}]
   -- Phase 4.5 — creator coverage + critical flags (the "Real Talk" UI
-  -- surface). Both nullable. See project-product-thesis memory.
+  -- surface). Both nullable.
   creator_coverage jsonb,                  -- [{creator, handle, platform, url, verdict, follower_count?}]
   critical_flags jsonb,                    -- [{label, body}] — "Expect 20-min queue"
   -- Phase 5 (Tier 1 maintenance) — sync metadata, written by
@@ -164,10 +164,10 @@ create table if not exists public.plans (
 );
 create index if not exists plans_user_idx on public.plans(user_id);
 
--- Partner prospects (Phase 4.5) — venues that pass editorial curation but
--- have no major-platform booking (OpenTable/Resy/SevenRooms/TheFork/Quandoo).
--- These are the highest-likelihood targets for Fun London's partner-side
--- BD pipeline. Locked tight via RLS — internal-only, no anon read.
+-- Partner prospects — venues that pass editorial curation but have no
+-- major-platform booking link (OpenTable/Resy/SevenRooms/TheFork/Quandoo).
+-- Internal-only working table; locked tight via RLS (service-role only,
+-- no anon/authenticated read).
 create table if not exists public.partner_prospects (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -184,12 +184,52 @@ create table if not exists public.partner_prospects (
   creator_coverage jsonb,
   critical_flags jsonb,
   bd_status text not null default 'prospect',  -- prospect | contacted | in_conversation | partnered | declined | passed
-  notes text,                              -- the maintainer's freeform BD notes
+  notes text,                              -- the maintainer's freeform notes
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create index if not exists partner_prospects_status_idx on public.partner_prospects(bd_status);
 create index if not exists partner_prospects_place_id_idx on public.partner_prospects(google_place_id);
+
+-- Candidate queue — venues the discovery scout has found and pre-filled drafts
+-- for, awaiting review before promotion to the public catalogue. Internal-only
+-- working table, written by scripts/scout-candidates.ts through the service-role
+-- key. Locked tight via RLS: NO anon/authenticated access at all (every read +
+-- write goes through the service-role key, which bypasses RLS). Documented here
+-- so the gate is reviewable in source, not only in the live database.
+create table if not exists public.pending_candidates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  neighbourhood text,
+  type_guess text,
+  google_place_id text,
+  sources jsonb not null default '[]'::jsonb,
+  sources_count integer not null default 0,
+  first_seen_at timestamptz not null default now(),
+  vibe_draft text,
+  long_description_draft text,
+  vibe_tags_draft text[],
+  real_talk_drafts jsonb,
+  creator_coverage_drafts jsonb,
+  filter_results jsonb,
+  chain_risk_score numeric,
+  status text not null default 'pending',   -- pending | approved | rejected | snoozed
+  reviewed_at timestamptz,
+  reviewed_notes text,
+  snoozed_until timestamptz,
+  matches_venue_slug text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists pending_candidates_status_idx on public.pending_candidates(status);
+
+alter table public.pending_candidates enable row level security;
+-- Deny ALL access to anon + authenticated: a leaked or ordinary signed-in
+-- session can never read or mutate the candidate queue. The admin tooling uses
+-- the service-role key, which bypasses RLS. Mirrors partner_prospects.
+drop policy if exists "pending_candidates deny all" on public.pending_candidates;
+create policy "pending_candidates deny all" on public.pending_candidates
+  for all to anon, authenticated using (false) with check (false);
 
 -- ─────────────────────────────────────────────────────────
 -- Row-Level Security

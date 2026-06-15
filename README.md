@@ -83,7 +83,6 @@ fun-london-app/
 ├─ package.json                     # pnpm 9.0.0; scripts: dev / build / check / format
 ├─ DEPLOY.md                        # Deployment walkthrough
 ├─ CONTRIBUTING.md                  # Conventions (read before first PR)
-└─ STATE.md                         # Point-in-time snapshot — read this first
 ```
 
 ## Data flow at a glance
@@ -110,7 +109,6 @@ Auth — two paths to /auth/callback:       Pass data + authUserId as props     
 
 | For | Open |
 |---|---|
-| Current state of the build | [STATE.md](./STATE.md) |
 | Code conventions before your first PR | [CONTRIBUTING.md](./CONTRIBUTING.md) |
 | Deployment walkthrough | [DEPLOY.md](./DEPLOY.md) |
 | Schema + RLS policies | [supabase/schema.sql](./supabase/schema.sql) |

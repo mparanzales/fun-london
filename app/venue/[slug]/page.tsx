@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { fetchVenueBySlug } from "@/lib/queries";
+import { fetchVenueBySlug, fetchVenuePreviewBySlug } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { VenueDetail } from "./venue-detail";
@@ -47,10 +47,14 @@ export default async function VenuePage({
 }: {
   params: { slug: string };
 }) {
-  const [venue, authUser] = await Promise.all([
-    fetchVenueBySlug(params.slug),
-    getAuthUser(),
-  ]);
+  const authUser = await getAuthUser();
+  // Signed-out visitors get a CARD-LEVEL preview only — never the moat fields
+  // (full editorial, sources, creator coverage, flags, booking links, phone,
+  // address, opening hours). The AuthWall overlays a sign-up prompt; the
+  // sensitive data simply never reaches the anonymous client payload.
+  const venue = authUser
+    ? await fetchVenueBySlug(params.slug)
+    : await fetchVenuePreviewBySlug(params.slug);
   if (!venue) notFound();
 
   // Structured data → rich results in Google (rating stars, price, area).

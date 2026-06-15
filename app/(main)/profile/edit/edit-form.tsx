@@ -127,7 +127,7 @@ export function EditForm({
           value={displayName}
           maxLength={DISPLAY_NAME_MAX}
           onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="e.g. the maintainer"
+          placeholder="e.g. Alex"
           className="w-full bg-card border border-border rounded-2xl px-4 py-3 text-fg text-[15px] font-semibold placeholder:text-muted-fg/60 outline-none focus:border-accent"
         />
       </div>

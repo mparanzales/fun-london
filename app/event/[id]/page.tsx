@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { fetchEventById, fetchVenueById } from "@/lib/queries";
+import {
+  fetchEventById,
+  fetchVenueById,
+  fetchEventPreviewById,
+  fetchVenuePreviewById,
+} from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { EventDetail } from "./event-detail";
@@ -37,16 +42,23 @@ export default async function EventDetailPage({
 }: {
   params: { id: string };
 }) {
-  const [event, authUser] = await Promise.all([
-    fetchEventById(params.id),
-    getAuthUser(),
-  ]);
+  const authUser = await getAuthUser();
+  // Signed-out visitors get a CARD-LEVEL preview only (no sourceUrl /
+  // description / moat fields); the AuthWall overlays the sign-up prompt.
+  const event = authUser
+    ? await fetchEventById(params.id)
+    : await fetchEventPreviewById(params.id);
   if (!event) notFound();
 
-  // Pull the linked venue when we have one. Gives the detail page
-  // access to neighbourhood vibe + booking-link metadata for richer
-  // context. Null is fine — the UI degrades gracefully.
-  const venue = event.venueId ? await fetchVenueById(event.venueId) : null;
+  // Pull the linked venue when we have one. Gives the detail page access to
+  // neighbourhood vibe for richer context. Null is fine — the UI degrades
+  // gracefully. Anonymous visitors get the card-level venue preview, not the
+  // full row.
+  const venue = event.venueId
+    ? authUser
+      ? await fetchVenueById(event.venueId)
+      : await fetchVenuePreviewById(event.venueId)
+    : null;
 
   const jsonLd = {
     "@context": "https://schema.org",

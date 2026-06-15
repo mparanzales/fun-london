@@ -284,7 +284,10 @@ function diffRow(
   // Opening hours — backfill + keep fresh. Write whenever Google returns
   // hours that differ from what's stored (also catches the initial null).
   const newHours = normalizeOpeningHours(details.regularOpeningHours);
-  if (newHours && JSON.stringify(newHours) !== JSON.stringify(row.opening_hours)) {
+  if (
+    newHours &&
+    JSON.stringify(newHours) !== JSON.stringify(row.opening_hours)
+  ) {
     update.opening_hours = newHours;
     // No diff entry — hours JSON is noise in the summary.
   }

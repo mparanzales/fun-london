@@ -386,6 +386,44 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
   return data ? mapVenue(data as VenueRow) : null;
 }
 
+// Card-level preview of a SINGLE venue for the signed-out detail page. Mirrors
+// fetchVenueBySlug's gates but selects only VENUE_CARD_COLUMNS, so the moat
+// fields (long_description, editorial_sources, creator_coverage, critical_flags,
+// booking_links, phone, website_url, instagram_handle, address, google_place_id,
+// opening_hours) never reach the anonymous client. The AuthWall covers the rest.
+export async function fetchVenuePreviewBySlug(
+  slug: string,
+): Promise<Venue | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("venues")
+    .select(VENUE_CARD_COLUMNS)
+    .eq("slug", slug)
+    .not("google_place_id", "is", null)
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
+    .maybeSingle();
+  if (error)
+    throw new Error(`fetchVenuePreviewBySlug(${slug}): ${error.message}`);
+  return data ? mapVenuePreview(data as VenueCardRow) : null;
+}
+
+// By-id variant — used for the linked venue card on the event detail page so a
+// signed-out visitor never receives that venue's moat fields either.
+export async function fetchVenuePreviewById(id: string): Promise<Venue | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("venues")
+    .select(VENUE_CARD_COLUMNS)
+    .eq("id", id)
+    .not("google_place_id", "is", null)
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
+    .maybeSingle();
+  if (error) throw new Error(`fetchVenuePreviewById(${id}): ${error.message}`);
+  return data ? mapVenuePreview(data as VenueCardRow) : null;
+}
+
 // Start of "today" in Europe/London, returned as a UTC Date. Uses Intl to read
 // London's wall-clock for `now` (handles GMT/BST automatically) and derives the
 // UTC instant of London midnight — no timezone library needed.
@@ -570,6 +608,23 @@ export async function fetchEventById(id: string): Promise<Event | null> {
     .maybeSingle();
   if (error) throw new Error(`fetchEventById(${id}): ${error.message}`);
   return data ? mapEvent(data as EventRow) : null;
+}
+
+// Card-level preview of a SINGLE event for the signed-out detail page. Same
+// gates as fetchEventById but selects only EVENT_CARD_COLUMNS — no source_url
+// or description reaches the anonymous client.
+export async function fetchEventPreviewById(id: string): Promise<Event | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("events")
+    .select(EVENT_CARD_COLUMNS)
+    .eq("id", id)
+    .is("cancelled_at", null)
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
+    .maybeSingle();
+  if (error) throw new Error(`fetchEventPreviewById(${id}): ${error.message}`);
+  return data ? mapEventPreview(data as EventCardRow) : null;
 }
 
 /**

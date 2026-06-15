@@ -1,17 +1,11 @@
 // Affiliate / attribution tagging for outbound booking + ticket links.
 //
-// THE WHY: Fun London's pitched primary revenue path is affiliate commission
-// on the bookings/tickets it sends out. Today every outbound click earns £0
-// because the links carry no affiliate id. This module is the single place
-// that rewrites an outbound URL with (a) harmless UTM attribution (always, so
-// partners can see traffic came from us even before a deal exists) and (b) a
-// per-platform affiliate id (ONLY when configured via env — otherwise a no-op).
-//
-// IMPORTANT FOR THE MAINTAINER: this is the *plumbing*. It does nothing financially
-// until you have an approved publisher/affiliate account and paste its id into
-// the env var below. Each programme has its own exact id + param name (and some
-// require routing through a tracking domain rather than a query param) — wire
-// the precise spec once approved. The ids are public by design (they live in
+// The single place that rewrites an outbound URL with (a) harmless UTM
+// attribution (always) and (b) a per-platform affiliate id (ONLY when
+// configured via env — otherwise a no-op). It is plumbing: with no id set it
+// changes nothing functional. Each platform has its own id + param name (some
+// route through a tracking domain rather than a query param), wired per the
+// platform's spec when configured. The ids are public by design (they live in
 // the outbound URL), so NEXT_PUBLIC_* is correct.
 //
 //   NEXT_PUBLIC_AFFILIATE_OPENTABLE     e.g. "funlondon"   → ?ref=
@@ -19,10 +13,6 @@
 //   NEXT_PUBLIC_AFFILIATE_SEVENROOMS                        → ?ref=
 //   NEXT_PUBLIC_AFFILIATE_THEFORK                           → ?partner=
 //   NEXT_PUBLIC_AFFILIATE_TICKETMASTER  (Awin/Impact id)    → ?awc= / partner param
-//
-// Approval timelines are weeks (OpenTable Partner Program, Awin for
-// Ticketmaster), so building the plumbing now means revenue starts the day the
-// id lands — no further code change.
 
 import type { BookingLink } from "@/lib/types";
 

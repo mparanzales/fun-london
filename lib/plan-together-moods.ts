@@ -9,7 +9,7 @@
 //
 // This file is pure data + helpers (no engine change). Phase B threads the
 // per-role venue-type intent (derived from hearted moods) into the planner so
-// the mood actually narrows the pick. See PLAN-mood-deck.md.
+// the mood actually narrows the pick.
 
 import type { PlanRole } from "@/lib/plan-engine";
 import type { VenueType } from "@/lib/types";

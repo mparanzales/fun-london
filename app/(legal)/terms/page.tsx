@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   description: "The terms for using Fun London.",
 };
 
-// NOTE FOR THE MAINTAINER: plain-English TEMPLATE terms reflecting how the app works
+// MAINTAINER NOTE: plain-English TEMPLATE terms reflecting how the app works
 // (a discovery + deep-link product that does NOT take bookings itself).
 // Have a solicitor review before relying on it.
 export default function TermsPage() {

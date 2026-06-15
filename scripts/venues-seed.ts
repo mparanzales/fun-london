@@ -2062,7 +2062,8 @@ export const VENUE_SEEDS: VenueSeed[] = [
       {
         publication: "Hot Dinners",
         url: "https://www.hot-dinners.com/Gastroblog/Test-drive/test-driving-plaquemine-lock-a-cajun-and-creole-pub-in-islington",
-        title: "Test Driving Plaquemine Lock, a Cajun and Creole pub in Islington",
+        title:
+          "Test Driving Plaquemine Lock, a Cajun and Creole pub in Islington",
         date: "2018-09-06",
       },
       {
@@ -2330,7 +2331,8 @@ export const VENUE_SEEDS: VenueSeed[] = [
   // ── 42. Frank's Café (Bold Tendencies) ───────────────────────────────
   {
     slug: "franks-cafe-bold-tendencies",
-    searchQuery: "Frank's Cafe Bold Tendencies 95A Rye Lane Peckham London SE15",
+    searchQuery:
+      "Frank's Cafe Bold Tendencies 95A Rye Lane Peckham London SE15",
     neighbourhood: "Peckham",
     vibe: "Summer-only rooftop Negronis on a Peckham car park, since 2009.",
     longDescription:

@@ -60,7 +60,7 @@ jobs:
       - name: Refresh venues + write summary
         env:
           # Service role key — required for UPDATE on public.venues. Stored
-          # ONLY in GitHub Actions secrets (NOT in Vercel — see STATE.md).
+          # ONLY in GitHub Actions secrets.
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
