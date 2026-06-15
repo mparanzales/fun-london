@@ -111,7 +111,7 @@ export function SignInForm({
         /rate|too many|limit/i.test(otpError.message);
       if (rateLimited) {
         setError(
-          "too many email requests for now. Try Google or Apple above, or wait a minute and retry.",
+          "too many email requests for now. Try Google above, or wait a minute and retry.",
         );
         setCooldown(MAGIC_LINK_COOLDOWN_S);
       } else {
