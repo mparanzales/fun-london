@@ -89,50 +89,12 @@ const TRUSTED_PUBLICATIONS = [
 
 const CATEGORIES: EventCategory[] = ["Music", "Food", "Art", "Comedy", "Club"];
 
-// Pop-ups rarely ship a usable photo URL, and scraping Instagram is off-limits
-// (no API). So each gets a tasteful stock image from a per-category POOL,
-// picked deterministically by the pop-up's id so two pop-ups (even in the same
-// category) don't share a photo. images.unsplash.com is whitelisted by the
-// events read path. Every id below was verified to resolve (HTTP 200).
-const POPUP_IMAGES: Record<EventCategory, string[]> = {
-  Food: [
-    "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1600&q=80",
-    "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80",
-    "https://images.unsplash.com/photo-1424847651672-bf20a4b0982b?w=1600&q=80",
-    "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1600&q=80",
-  ],
-  Art: [
-    "https://images.unsplash.com/photo-1531058020387-3be344556be6?w=1600&q=80",
-    "https://images.unsplash.com/photo-1460661419201-fd4cecdf8a8b?w=1600&q=80",
-    "https://images.unsplash.com/photo-1536924940846-227afb31e2a5?w=1600&q=80",
-    "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=1600&q=80",
-  ],
-  Music: [
-    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=1600&q=80",
-    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=1600&q=80",
-    "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=1600&q=80",
-    "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=1600&q=80",
-  ],
-  Club: [
-    "https://images.unsplash.com/photo-1566737236500-c8ac43014a67?w=1600&q=80",
-    "https://images.unsplash.com/photo-1545128485-c400e7702796?w=1600&q=80",
-  ],
-  Comedy: [
-    "https://images.unsplash.com/photo-1585699324551-f6c309eedeca?w=1600&q=80",
-    "https://images.unsplash.com/photo-1527224538127-2104bb71c51b?w=1600&q=80",
-    "https://images.unsplash.com/photo-1610890716171-6b1bb98ffd09?w=1600&q=80",
-  ],
-};
-
-// Deterministic image pick: hash the seed (the pop-up's source_id) so adjacent
-// same-category pop-ups get different photos, but the same pop-up is stable
-// across runs.
-function pickImage(category: EventCategory, seed: string): string {
-  const pool = POPUP_IMAGES[category];
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return pool[h % pool.length];
-}
+// Real images only. A pop-up must carry its OWN promo image — the official
+// page's og:image, mirrored to Supabase Storage — to be published. We used to
+// fall back to per-category Unsplash stock photos, but a generic photo that
+// isn't the event is a wrong "fact" against the cross-checked promise, and it
+// made unrelated pop-ups share the same image. A pop-up with no real,
+// mirrorable image is now SKIPPED, not published (see the build loop below).
 
 // ── Gemini (discovery + validation via Google Search grounding) ────────────
 // Pacing + retry mirrors scripts/discover-venues.ts (free-tier safe).
@@ -297,9 +259,7 @@ function normCategory(c: string | undefined): EventCategory {
   if (/(food|drink|dining|restaurant|supper|bar|wine|market|tasting)/.test(v))
     return "Food";
   // art / immersive / exhibition / installation / design / fashion / retail
-  return CATEGORIES.includes(c as EventCategory)
-    ? (c as EventCategory)
-    : "Art";
+  return CATEGORIES.includes(c as EventCategory) ? (c as EventCategory) : "Art";
 }
 
 // Parse a YYYY-MM-DD (tolerant) to a UTC Date at a given hour, or null.
@@ -341,15 +301,26 @@ async function main() {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
-  // Existing pop-up source_ids (dedupe) — only when we have DB access.
+  // Existing pop-up source_ids + normalized name keys (dedupe) — only when we
+  // have DB access. The name key catches NEAR-duplicates the source_id misses
+  // (e.g. "Citizens of Soil" vs "Citizens of Soil's", "X" vs "X by Y") that
+  // discovery surfaces under slightly different names across runs.
   const existing = new Set<string>();
+  const seenNameKeys = new Set<string>();
+  const nameKey = (n: string) =>
+    n
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .slice(0, 14);
   if (supabase) {
     const { data } = await supabase
       .from("events")
-      .select("source_id")
+      .select("source_id, name")
       .eq("source", "popup");
-    for (const r of data ?? [])
+    for (const r of data ?? []) {
       if (r.source_id) existing.add(r.source_id as string);
+      if (r.name) seenNameKeys.add(nameKey(r.name as string));
+    }
   }
 
   let candidates: RawPopup[] = [];
@@ -386,6 +357,12 @@ async function main() {
       console.log(`  ↺ already have: ${name}`);
       continue;
     }
+    const key = nameKey(name);
+    if (seenNameKeys.has(key)) {
+      console.log(`  ↺ near-duplicate name: ${name}`);
+      continue;
+    }
+    seenNameKeys.add(key);
     scanned++;
 
     // Guardrail: must be recognised by >= 1 trusted publication.
@@ -404,17 +381,21 @@ async function main() {
     const category = normCategory(c.category);
     const officialUrl = (c.url ?? "").trim() || null;
 
-    // Image: prefer the REAL promo image (og:image) from the official page,
-    // mirrored to Supabase Storage for a keyless, allowlisted URL. Only a
-    // genuine fall-through (no page, no og tag, or mirror disabled/failed)
-    // lands on a category stock image. Skipped on dry runs (no writes).
-    let imgUrl = pickImage(category, source_id);
+    // Image: the pop-up's OWN promo image (official page og:image), mirrored to
+    // Supabase Storage for a keyless, allowlisted URL. No real image → the
+    // pop-up is NOT published (no stock fallback). On dry runs we can't mirror,
+    // so the skip is enforced only for real writes.
+    let imgUrl: string | null = null;
     if (!DRY_RUN && supabase && officialUrl) {
       const og = await fetchOgImage(officialUrl);
       if (og) {
         const mirrored = await mirrorImageUrlToStorage(og, source_id, supabase);
         if (mirrored) imgUrl = mirrored;
       }
+    }
+    if (!imgUrl && !DRY_RUN) {
+      console.log(`  ✗ ${name}: no real image, skipping (not published)`);
+      continue;
     }
 
     const row = {

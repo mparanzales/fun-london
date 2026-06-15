@@ -25,15 +25,23 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export const PHOTO_BUCKET = process.env.FL_PHOTO_BUCKET ?? "";
+// Read the bucket LAZILY (not at module load). Scripts call dotenv.config()
+// AFTER their imports, and ES modules evaluate imported modules first — so a
+// module-level `process.env.FL_PHOTO_BUCKET` read here saw it empty and made the
+// backfill scripts wrongly report "FL_PHOTO_BUCKET not set". Reading it on each
+// call fixes that.
+function photoBucket(): string {
+  return process.env.FL_PHOTO_BUCKET ?? "";
+}
 
-// Keyless stock image used when a venue's real photo cannot be mirrored. This
-// is the ONLY fallback callers may persist — it is never a keyed Google URL.
-export const FALLBACK_IMG_URL =
-  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
+// Sentinel for "no real photo" — EMPTY, never a stock image. A venue without
+// its OWN photo is then hidden by the read-side `img_url <> ''` filter rather
+// than shown on a generic picture. (Was an Unsplash URL; purged so we never
+// display an image that isn't the real place.)
+export const FALLBACK_IMG_URL = "";
 
 export function photoStorageEnabled(): boolean {
-  return PHOTO_BUCKET.length > 0;
+  return photoBucket().length > 0;
 }
 
 // True if a URL points at Google's Places media endpoint, which embeds the API
@@ -53,7 +61,10 @@ function sleep(ms: number): Promise<void> {
 // blips, Google 5xx/429, Storage upload errors). Returns null only after every
 // attempt fails — so a momentary hiccup never makes a caller persist a keyed
 // fallback, which was the root cause of keyed URLs creeping back in.
-async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+): Promise<T | null> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MIRROR_ATTEMPTS; attempt++) {
     try {
@@ -96,11 +107,11 @@ export async function mirrorPhotoToStorage(
     const path = `${slug}.${ext}`;
 
     const { error } = await supabase.storage
-      .from(PHOTO_BUCKET)
+      .from(photoBucket())
       .upload(path, buffer, { contentType, upsert: true });
     if (error) throw new Error(`upload: ${error.message}`);
 
-    const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
     if (!data?.publicUrl) throw new Error("no public URL returned");
     return data.publicUrl;
   });
@@ -163,13 +174,13 @@ export async function mirrorImageUrlToStorage(
     const buffer = b;
     const path = `${key}.${ext}`;
     const { error } = await supabase.storage
-      .from(PHOTO_BUCKET)
+      .from(photoBucket())
       .upload(path, buffer, { contentType, upsert: true });
     if (error) {
       console.error(`  [photo] upload ${key}: ${error.message}`);
       return null;
     }
-    const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+    const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
     return data?.publicUrl ?? null;
   } catch (e) {
     console.error(`  [photo] mirror ${key}: ${(e as Error).message}`);

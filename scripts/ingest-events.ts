@@ -100,19 +100,15 @@ function dateLabelFor(
   return "This Week";
 }
 
-// Generic placeholder when a provider doesn't return an image and the
-// venue itself has no img_url. public.events.img_url is NOT NULL.
-const FALLBACK_IMG_URL =
-  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1600&q=80";
-
 // Image hosts the Next.js <Image> optimizer is allowed to load — must
 // stay in sync with the remotePatterns allowlist in next.config.js.
 // Providers (especially the London-wide Ticketmaster discovery pull)
 // return poster URLs from a grab-bag of CDNs; anything not on this
 // list would render as a broken-image icon, so we drop it at ingest
-// time and let the FALLBACK_IMG_URL take over instead.
+// time. An event left with no real image is then NOT published — no stock
+// fallback (a generic photo that isn't the event breaks the cross-checked
+// promise, and made unrelated events share one image).
 const ALLOWED_IMG_HOSTS = [
-  "images.unsplash.com",
   "places.googleapis.com",
   "lh3.googleusercontent.com",
   "images.universe.com",
@@ -182,7 +178,10 @@ const LONDON_DISCOVERY_TARGET = 15; // how many we keep stocked in the feed
 // categories present, taking the soonest event from each in turn. Keeps
 // the London-wide slice from being all-theatre. `events` is assumed
 // already sorted soonest-first, so per-category order is preserved.
-function selectBalanced(events: FetchedEvent[], target: number): FetchedEvent[] {
+function selectBalanced(
+  events: FetchedEvent[],
+  target: number,
+): FetchedEvent[] {
   const byCategory = new Map<string, FetchedEvent[]>();
   for (const e of events) {
     const list = byCategory.get(e.category) ?? [];
@@ -312,6 +311,12 @@ async function fetchLondonDiscovery(): Promise<FetchedEvent[]> {
   horizon.setDate(horizon.getDate() + EVENT_HORIZON_DAYS);
 
   const byId = new Map<string, FetchedEvent>();
+  // Ticketmaster returns the ATTRACTION/SERIES image, not a per-event poster —
+  // so an artist's Early/Late shows, a venue's "+ Restaurant" package listings,
+  // and a comedy/club SERIES all carry the SAME picture. Keep one event per
+  // image so the feed never shows the same photo (and effectively the same
+  // event) twice.
+  const seenImages = new Set<string>();
   let first = true;
   for (const venue of LONDON_VENUES) {
     // Ticketmaster enforces a 5-requests/second "spike arrest". We fire
@@ -343,6 +348,8 @@ async function fetchLondonDiscovery(): Promise<FetchedEvent[]> {
       if (!base) continue;
       if (!base.img_url) continue; // drop poster-less events
       if (byId.has(base.source_id)) continue;
+      if (seenImages.has(base.img_url)) continue; // one event per image
+      seenImages.add(base.img_url);
       byId.set(base.source_id, {
         ...base,
         venue_name: venue.name,
@@ -567,24 +574,32 @@ async function processSubscription(sub: EventSubscription): Promise<{
   // rating / time / price / etc. as the provider's data drifts.
 
   const nowIso = new Date().toISOString();
-  const eventRows = fetched.map((e) => ({
-    name: e.name,
-    venue_name: venueName,
-    venue_id: venueId,
-    area: venueArea,
-    date_label: dateLabelFor(new Date(e.starts_at)),
-    time_label: e.time_label,
-    starts_at: e.starts_at,
-    price: e.price,
-    category: e.category,
-    img_url: e.img_url || venueImgUrl || FALLBACK_IMG_URL,
-    source: sub.source,
-    source_id: e.source_id,
-    source_url: e.source_url,
-    description: e.description,
-    last_synced_at: nowIso,
-    sold_out: e.sold_out,
-  }));
+  // Real image only: the event's own provider poster, else the curated venue's
+  // own (real) photo. No real image → the event is skipped, never a stock photo.
+  const eventRows = fetched
+    .map((e) => ({ e, img: e.img_url || venueImgUrl || "" }))
+    .filter(({ e, img }) => {
+      if (!img) console.log(`  ✗ ${e.name}: no real image, skipping`);
+      return !!img;
+    })
+    .map(({ e, img }) => ({
+      name: e.name,
+      venue_name: venueName,
+      venue_id: venueId,
+      area: venueArea,
+      date_label: dateLabelFor(new Date(e.starts_at)),
+      time_label: e.time_label,
+      starts_at: e.starts_at,
+      price: e.price,
+      category: e.category,
+      img_url: img,
+      source: sub.source,
+      source_id: e.source_id,
+      source_url: e.source_url,
+      description: e.description,
+      last_synced_at: nowIso,
+      sold_out: e.sold_out,
+    }));
 
   let upserted = 0;
   if (eventRows.length > 0) {
@@ -770,7 +785,9 @@ async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
           toRemove.map((e) => e.id),
         );
       if (delErr) {
-        throw new Error(`London discovery cleanup delete failed: ${delErr.message}`);
+        throw new Error(
+          `London discovery cleanup delete failed: ${delErr.message}`,
+        );
       }
       removed = toRemove.length;
       console.log(`  ★ removed ${removed} rotated-out London events`);

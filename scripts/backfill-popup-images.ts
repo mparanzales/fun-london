@@ -33,7 +33,11 @@ async function main() {
   const { data, error } = await supabase
     .from("events")
     .select("id, name, source_id, source_url, img_url")
-    .eq("source", "popup");
+    .eq("source", "popup")
+    // Only rows still on a stock (Unsplash) image — the ones that need a real
+    // promo image. Pop-ups that already carry a real mirrored image are left
+    // untouched. Includes hidden (cancelled) rows so recovery can re-publish.
+    .ilike("img_url", "%unsplash%");
   if (error) {
     console.error(`read failed: ${error.message}`);
     process.exit(1);
