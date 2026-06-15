@@ -136,6 +136,9 @@ create table if not exists public.saved_venues (
   created_at timestamptz not null default now(),
   primary key (user_id, venue_id)
 );
+-- Index the venue_id FK: the composite PK covers user_id-leading lookups but
+-- not venue_id alone (needed for "who saved this venue" + FK-cascade perf).
+create index if not exists saved_venues_venue_id_idx on public.saved_venues(venue_id);
 
 -- Bookings — backs the `Booking` type (consumer side; partners read via RLS)
 create table if not exists public.bookings (
@@ -429,6 +432,8 @@ create table if not exists public.feedback (
   created_at timestamptz not null default now()
 );
 create index if not exists feedback_created_idx on public.feedback(created_at desc);
+-- Cover the user_id FK (perf advisor: unindexed foreign key).
+create index if not exists feedback_user_id_idx on public.feedback(user_id);
 
 alter table public.feedback enable row level security;
 
