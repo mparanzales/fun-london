@@ -85,7 +85,11 @@ export default async function EventDetailPage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <EventDetail event={event} venue={venue} />
-      <AuthWall signedIn={!!authUser} title={`Sign up to see ${event.name}`} />
+      <AuthWall
+        signedIn={!!authUser}
+        title={`Sign up to see ${event.name}`}
+        backHref="/explore"
+      />
     </>
   );
 }

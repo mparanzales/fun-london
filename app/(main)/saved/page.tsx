@@ -22,6 +22,7 @@ export default async function SavedPage() {
         signedIn={!!authUser}
         title="Sign up to save your spots"
         mainShell
+        backHref="/explore"
       />
     </>
   );

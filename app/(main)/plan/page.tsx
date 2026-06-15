@@ -14,6 +14,7 @@ export default async function PlanPage() {
         signedIn={!!authUser}
         title="Sign up to plan your night"
         mainShell
+        backHref="/explore"
       />
     </div>
   );

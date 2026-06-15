@@ -13,13 +13,16 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users } from "lucide-react";
+import { Users, ArrowLeft } from "lucide-react";
 
 export function AuthWall({
   signedIn,
   title = "Sign up to keep exploring",
   body = "Save your spots, plan the whole night, and get picks near you. Free.",
   mainShell = false,
+  onBack,
+  backHref,
+  backLabel = "Keep browsing",
 }: {
   signedIn: boolean;
   title?: string;
@@ -28,21 +31,34 @@ export function AuthWall({
   // page title (top) and the bottom nav stay sharp + usable — only the content
   // between them is blurred. Detail pages (venue/event) blur full-screen.
   mainShell?: boolean;
+  // Escape hatch so the wall is never a no-exit trap. `onBack` (a callback) is
+  // for in-page overlay use from a Client Component (explore/events chips +
+  // search) — it also enables Esc + tap-the-blur to dismiss. `backHref` (a
+  // route) is for Server-Component detail pages that can't pass a function.
+  onBack?: () => void;
+  backHref?: string;
+  backLabel?: string;
 }) {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
-  // Lock background scroll while the wall is showing.
+  // Lock background scroll while the wall is showing. When it's a dismissable
+  // overlay (onBack set), Esc also closes it — matching the tap-the-blur exit.
   useEffect(() => {
     if (signedIn) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onBack?.();
+    };
+    if (onBack) window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
     };
-  }, [signedIn]);
+  }, [signedIn, onBack]);
 
   if (signedIn || !mounted) return null;
 
@@ -71,7 +87,8 @@ export function AuthWall({
           softens the blur without fading the card. */}
       <div
         aria-hidden
-        className="absolute inset-0"
+        onClick={onBack}
+        className={`absolute inset-0 ${onBack ? "cursor-pointer" : ""}`}
         style={{
           backdropFilter: "blur(8px)",
           WebkitBackdropFilter: "blur(8px)",
@@ -111,6 +128,27 @@ export function AuthWall({
             Privacy Policy
           </Link>
         </div>
+
+        {/* Escape hatch — never a no-exit trap. Subordinate to the sign-up CTA. */}
+        {(onBack || backHref) &&
+          (onBack ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="mt-4 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {backLabel}
+            </button>
+          ) : (
+            <Link
+              href={backHref!}
+              className="mt-4 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {backLabel}
+            </Link>
+          ))}
       </div>
     </div>,
     document.body,

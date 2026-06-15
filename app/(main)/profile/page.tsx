@@ -24,6 +24,7 @@ export default async function ProfilePage() {
         signedIn={!!authUser}
         title="Sign up to make it yours"
         mainShell
+        backHref="/explore"
       />
     </>
   );
