@@ -17,6 +17,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { scoreVenue, hasPrefs } from "./ranking";
+import { FEED_PAGE_SIZE } from "./feed-constants";
 import type {
   Venue,
   Event,
@@ -460,10 +461,21 @@ export async function feedPage(args: {
       .map((x) => x.r);
   }
 
-  const page = rows.slice(args.offset, args.offset + args.limit);
+  // Clamp offset/limit so a bad value (e.g. an undefined limit) can never
+  // silently empty the feed via slice(0, NaN).
+  const offset =
+    Number.isFinite(args.offset) && args.offset > 0
+      ? Math.floor(args.offset)
+      : 0;
+  const limit =
+    Number.isFinite(args.limit) && args.limit > 0
+      ? Math.floor(args.limit)
+      : FEED_PAGE_SIZE;
+
+  const page = rows.slice(offset, offset + limit);
   return {
     venues: page.map(mapVenuePreview),
-    hasMore: args.offset + args.limit < rows.length,
+    hasMore: offset + limit < rows.length,
   };
 }
 

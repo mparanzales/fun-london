@@ -19,6 +19,7 @@ import { SearchOverlay } from "@/components/search-overlay";
 import { searchCatalog } from "@/lib/search-action";
 import { loadFeedPage } from "@/lib/feed-action";
 import type { FeedFilter, FeedSort } from "@/lib/queries";
+import { FEED_PAGE_SIZE } from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
@@ -79,10 +80,9 @@ function getEyebrow(): "today in" | "tonight in" {
 // Component slices the anonymous preview to the SAME count in the DB.
 export const PREVIEW_COUNT = 4;
 
-// The signed-in feed loads a page of cards at a time (cursor pagination) from
-// the server instead of the whole catalogue. Exported so the Server Component
-// renders the same-size first page.
-export const FEED_PAGE_SIZE = 24;
+// FEED_PAGE_SIZE lives in @/lib/feed-constants (a neutral module) so the server
+// page can import the same value — importing it FROM this "use client" module
+// into a Server Component resolved to undefined at runtime and emptied the feed.
 
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";

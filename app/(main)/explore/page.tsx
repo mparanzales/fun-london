@@ -7,7 +7,8 @@ import {
   fetchEventCategoryPreview,
   fetchVenueCount,
 } from "@/lib/queries";
-import { ExploreFeed, PREVIEW_COUNT, FEED_PAGE_SIZE } from "./explore-feed";
+import { ExploreFeed, PREVIEW_COUNT } from "./explore-feed";
+import { FEED_PAGE_SIZE } from "@/lib/feed-constants";
 
 // Server Component. Two distinct paths so the wall is enforced HERE, not in
 // the client:
