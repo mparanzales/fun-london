@@ -9,7 +9,7 @@
 // re-revalidate the page so the decided card disappears.
 
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/admin";
 import { getAuthUser, isAdminEmail } from "@/lib/auth";
 import { decideCandidate } from "./actions";
 
@@ -34,7 +34,10 @@ export default async function AdminCandidatesPage() {
     return <NotAuthorised email={user.email ?? ""} />;
   }
 
-  const supabase = createClient();
+  const supabase = createServiceClient();
+  if (!supabase) {
+    return <Shell><p className="text-sm text-[hsl(0_70%_55%)]">Service role key not configured.</p></Shell>;
+  }
   const { data: rows, error } = await supabase
     .from("pending_candidates")
     .select(
