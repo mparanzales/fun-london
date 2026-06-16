@@ -11,7 +11,8 @@
 //    anon client.
 //
 // Matching (apostrophe/accent-insensitive) is shared with the server via
-// lib/search-match, so both modes behave identically.
+// lib/search-match. Signed-in additionally matches in-memory vibe/mood tags;
+// signed-out matches the card-level fields only.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";

@@ -46,10 +46,10 @@ type FilterKey =
 
 // Anon-only: which thing a soft AuthWall is gating. The CATEGORY chips are NOT
 // here — for anon they filter to a 4-card preview + the sign-up wall, just like
-// For You. Only search and the Near-you sort raise the blur wall.
-type WallTarget = "search" | "near";
+// For You. Search is open to everyone now (signed-out search is server-side and
+// card-level); only the Near-you sort still raises the blur wall.
+type WallTarget = "near";
 const WALL_TITLES: Record<WallTarget, string> = {
-  search: "Sign up to search",
   near: "Sign up to sort by distance",
 };
 

@@ -39,8 +39,9 @@ async function getIndex() {
 
 // Server-side catalogue search for SIGNED-OUT visitors. Returns ONLY card-level
 // matches, so the full catalogue never reaches the browser, while search still
-// works across all ~2,000 venues. Uses the same matcher as the signed-in
-// in-memory overlay, so results are identical.
+// works across all ~2,000 venues. Matches over name + neighbourhood + type +
+// vibe (the card-level fields); the signed-in path also matches vibe/mood tags
+// it holds in memory, so signed-out results are a touch narrower by design.
 export async function searchCatalog(
   query: string,
 ): Promise<{ venues: Venue[]; events: Event[] }> {

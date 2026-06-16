@@ -1,7 +1,8 @@
 // Shared, pure search-matching helpers, used by BOTH the client SearchOverlay
 // (signed-in, in-memory over the full catalogue) and the server search action
-// (signed-out, server-side card-level search). Keeping one implementation means
-// signed-in and signed-out search behave identically.
+// (signed-out, server-side card-level search). The matcher is identical; the
+// haystacks are not — the signed-in path additionally matches the in-memory
+// vibe/mood tags that the card-level signed-out path doesn't carry.
 
 // Normalise text for search: lowercase, strip accents, DROP apostrophes (so
 // "dont" matches "Don't"), turn & into "and", collapse all other punctuation to
