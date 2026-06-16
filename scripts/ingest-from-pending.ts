@@ -330,6 +330,32 @@ function deriveMoodTags(candidate: Candidate): string[] {
   return Array.from(moods);
 }
 
+// Normalised key for tag dedup: case-, whitespace- and punctuation-insensitive,
+// so "Date Night"/"Date night" and "Nose-to-tail"/"nose to tail" collapse to one.
+function tagKey(t: string): string {
+  return t
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Dedup a tag list by normalised key while KEEPING the first-seen, prettier-
+// cased original (trimmed). We deliberately do NOT route through
+// tag-vocabulary's canonicaliser: mapRawTag returns [] for unknown tags, which
+// would drop everything not in its map — and the point here is to carry the
+// venue's FULL tag set. So we only fold true duplicates, never canonicalise.
+function dedupeTags(raw: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of raw) {
+    const key = tagKey(t);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(t.trim());
+  }
+  return out;
+}
+
 // Carry the FULL onezone tag set onto the venue, deduped. vibe_tags_draft holds
 // the rich raw "Tags" column (Date Night, Cosy, Tasting Menu, ...) plus the
 // Vibes lists; `source` carries the remaining curated lists. We insert ALL of
@@ -337,14 +363,13 @@ function deriveMoodTags(candidate: Candidate): string[] {
 function deriveVibeTags(candidate: Candidate): string[] {
   const source = candidate.sources.find((s) => s.source === "onezone");
 
-  const tags = new Set<string>();
-  for (const t of candidate.vibe_tags_draft ?? []) tags.add(t);
-  for (const c of source?.cuisine_lists ?? []) tags.add(c);
-  for (const o of source?.occasion_lists ?? []) tags.add(o);
-  for (const v of source?.vibe_lists ?? []) tags.add(v);
-  for (const t of source?.top_lists ?? []) tags.add(t);
-
-  return Array.from(tags);
+  return dedupeTags([
+    ...(candidate.vibe_tags_draft ?? []),
+    ...(source?.cuisine_lists ?? []),
+    ...(source?.occasion_lists ?? []),
+    ...(source?.vibe_lists ?? []),
+    ...(source?.top_lists ?? []),
+  ]);
 }
 
 // ── Row builders ─────────────────────────────────────────────────────────────
@@ -432,6 +457,28 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Drain a candidate to a terminal status. A failed OR no-op status write is
+// FATAL for that candidate: if it isn't moved off 'approved', the main loop
+// re-selects it next pass and re-bills Google (text search + place details)
+// before the quality gate — unbounded, with no self-heal. So throw on error,
+// and ALSO assert exactly one row moved: a 0-row update returns error:null and
+// would otherwise read as success. The caller's catch routes the throw to
+// 'ingest_failed' (out of the default re-fetch set).
+async function drainCandidate(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  if (!supabase) throw new Error("Supabase client not initialised");
+  const { data, error } = await supabase
+    .from("pending_candidates")
+    .update(patch)
+    .eq("id", id)
+    .select("id");
+  if (error) throw new Error(`status write failed: ${error.message}`);
+  if (!data || data.length !== 1)
+    throw new Error(`status write moved ${data?.length ?? 0} rows, expected 1`);
+}
+
 // ── Quality gate ──────────────────────────────────────────────────────────────
 // onezone restaurant names that are also street addresses ("64 Goodge Street")
 // frequently match a junk Google listing with no rating. Only AUTO-PUBLISH
@@ -488,24 +535,27 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
       // editorial chips — never overwrite those with raw onezone labels.
       let added = 0;
       if (existing.curation_tier === "discovered") {
-        const existingSet = new Set<string>(existing.vibe_tags ?? []);
-        const mergedSet = new Set<string>([
-          ...existingSet,
+        const existingTags = (existing.vibe_tags ?? []) as string[];
+        const existingKeys = new Set(existingTags.map(tagKey));
+        // Merge normalised so case/punctuation variants ("Date Night" vs
+        // "Date night") don't accumulate as separate chips. Count "added" by
+        // normalised key so a pre-existing duplicate can't make a genuinely-new
+        // tag look like "nothing added".
+        const merged = dedupeTags([
+          ...existingTags,
           ...deriveVibeTags(candidate),
         ]);
-        // Count by set difference so a pre-existing duplicate in the stored
-        // array can't make a genuinely-new tag look like "nothing added".
-        added = mergedSet.size - existingSet.size;
+        added = merged.filter((t) => !existingKeys.has(tagKey(t))).length;
         if (added > 0) {
           const { error: enrichErr } = await supabase
             .from("venues")
-            .update({ vibe_tags: Array.from(mergedSet) })
+            .update({ vibe_tags: merged })
             .eq("id", existing.id);
           if (enrichErr)
             console.warn(`  ⚠ tag enrich failed: ${enrichErr.message}`);
           else
             console.log(
-              `  ↩ already in venues as "${existing.slug}" — +${added} missing tags (now ${mergedSet.size})`,
+              `  ↩ already in venues as "${existing.slug}" — +${added} missing tags (now ${merged.length})`,
             );
         } else {
           console.log(
@@ -517,20 +567,14 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
           `  ↩ already in venues as "${existing.slug}" (curated — tags left untouched)`,
         );
       }
-      const { error: skipErr } = await supabase
-        .from("pending_candidates")
-        .update({
-          // No google_place_id stamp: it is UNIQUE on pending_candidates and
-          // many onezone candidates map to one venue, so only the published
-          // ("ingested") candidate holds the link. The matched venue slug is
-          // recorded in reviewed_notes instead.
-          status: "skipped",
-          reviewed_at: new Date().toISOString(),
-          reviewed_notes: `Already in venues as "${existing.slug}"${added > 0 ? ` (+${added} tags)` : ""}`,
-        })
-        .eq("id", candidate.id);
-      if (skipErr)
-        console.warn(`  ⚠ skip status update failed: ${skipErr.message}`);
+      // No google_place_id stamp: it is UNIQUE on pending_candidates and many
+      // onezone candidates map to one venue, so only the published ("ingested")
+      // candidate holds the link. The matched venue slug goes in reviewed_notes.
+      await drainCandidate(candidate.id, {
+        status: "skipped",
+        reviewed_at: new Date().toISOString(),
+        reviewed_notes: `Already in venues as "${existing.slug}"${added > 0 ? ` (+${added} tags)` : ""}`,
+      });
       return { status: "skipped" as const };
     }
   }
@@ -545,31 +589,26 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   if (!gate.ok) {
     console.log(`  ⏸ needs review — ${gate.reason} (not published)`);
     if (!DRY_RUN && supabase) {
-      const { error: qErr } = await supabase
-        .from("pending_candidates")
-        .update({
-          status: "needs_review",
-          reviewed_at: new Date().toISOString(),
-          reviewed_notes: `Auto-gate: ${gate.reason}`,
-          // Do NOT stamp google_place_id here: pending_candidates.google_place_id
-          // is UNIQUE, and several onezone candidates can resolve to the same
-          // Google place. Only the candidate that actually publishes (the
-          // "ingested" path) holds the 1:1 link. The match is preserved in
-          // filter_results below for the reviewer.
-          filter_results: {
-            gate: "failed",
-            reason: gate.reason,
-            matched_name: details.displayName.text,
-            matched_address: details.formattedAddress,
-            rating: details.rating ?? null,
-            reviews: details.userRatingCount ?? 0,
-            business_status: details.businessStatus ?? null,
-            website: details.websiteUri ?? null,
-          },
-        })
-        .eq("id", candidate.id);
-      if (qErr)
-        console.warn(`  ⚠ needs_review status update failed: ${qErr.message}`);
+      await drainCandidate(candidate.id, {
+        status: "needs_review",
+        reviewed_at: new Date().toISOString(),
+        reviewed_notes: `Auto-gate: ${gate.reason}`,
+        // Do NOT stamp google_place_id here: pending_candidates.google_place_id
+        // is UNIQUE, and several onezone candidates can resolve to the same
+        // Google place. Only the candidate that actually publishes (the
+        // "ingested" path) holds the 1:1 link. The match is preserved in
+        // filter_results below for the reviewer.
+        filter_results: {
+          gate: "failed",
+          reason: gate.reason,
+          matched_name: details.displayName.text,
+          matched_address: details.formattedAddress,
+          rating: details.rating ?? null,
+          reviews: details.userRatingCount ?? 0,
+          business_status: details.businessStatus ?? null,
+          website: details.websiteUri ?? null,
+        },
+      });
     }
     return { status: "needs_review" as const };
   }
@@ -616,16 +655,11 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
 
   // Mark candidate ingested + stamp the matched place_id so the venue can be
   // linked back to its candidate (e.g. for tag backfills / personalisation).
-  const { error: ingErr } = await supabase
-    .from("pending_candidates")
-    .update({
-      status: "ingested",
-      reviewed_at: new Date().toISOString(),
-      google_place_id: details.id,
-    })
-    .eq("id", candidate.id);
-  if (ingErr)
-    console.warn(`  ⚠ ingested status update failed: ${ingErr.message}`);
+  await drainCandidate(candidate.id, {
+    status: "ingested",
+    reviewed_at: new Date().toISOString(),
+    google_place_id: details.id,
+  });
 
   return { status: "ingested" as const };
 }
@@ -710,6 +744,7 @@ async function main() {
     skipped: 0,
     needsReview: 0,
     failed: [] as { name: string; error: string }[],
+    stuck: [] as { name: string; error: string }[],
   };
 
   for (const candidate of candidates) {
@@ -723,19 +758,24 @@ async function main() {
       console.error(`  ✗ FAILED: ${msg}`);
       results.failed.push({ name: candidate.name, error: msg });
 
-      // Mark as failed so --retry-failed can target them
+      // Mark as failed so --retry-failed can target them. This is the terminal
+      // safety-net write; if it ALSO fails we can't route the candidate
+      // anywhere, so surface it loudly and tally it rather than swallow — it is
+      // still 'approved' and would be retried (and re-billed) next pass.
       if (supabase && !DRY_RUN) {
-        const { error: fErr } = await supabase
-          .from("pending_candidates")
-          .update({
+        try {
+          await drainCandidate(candidate.id, {
             status: "ingest_failed",
             reviewed_notes: msg.slice(0, 500),
-          })
-          .eq("id", candidate.id);
-        if (fErr)
-          console.warn(
-            `  ⚠ ingest_failed status update failed: ${fErr.message}`,
+          });
+        } catch (markErr) {
+          const mm =
+            markErr instanceof Error ? markErr.message : String(markErr);
+          console.error(
+            `  ✗✗ could not mark "${candidate.name}" ingest_failed (still 'approved'): ${mm}`,
           );
+          results.stuck.push({ name: candidate.name, error: mm });
+        }
       }
     }
 
@@ -751,6 +791,12 @@ async function main() {
   if (results.failed.length > 0) {
     results.failed.forEach((f) => console.log(`  ✗ ${f.name}: ${f.error}`));
     console.log("\nRe-run with --retry-failed to retry only the failed ones.");
+  }
+  if (results.stuck.length > 0) {
+    console.log(
+      `\n⚠ STUCK (status write failed — still 'approved', will re-bill): ${results.stuck.length}`,
+    );
+    results.stuck.forEach((s) => console.log(`  ✗✗ ${s.name}: ${s.error}`));
   }
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Done."}`);
 }
