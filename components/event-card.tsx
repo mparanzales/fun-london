@@ -36,6 +36,8 @@ export function EventCard({
           : `View details for ${event.name}`
       }
       className="relative block w-full transition-transform duration-300 ease-out lg:hover:-translate-y-1"
+      // See VenueCard: don't prefetch every card's dynamic detail page.
+      prefetch={false}
     >
       <div
         className="relative w-full rounded-2xl overflow-hidden shadow-card group"
