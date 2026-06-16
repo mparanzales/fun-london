@@ -444,15 +444,66 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     `  found: ${searchResult.displayName.text} · ${searchResult.formattedAddress}`,
   );
 
-  // Check if this place_id is already in venues
+  // Already in venues? Don't re-publish — but reconcile first. The onezone
+  // candidate may carry tags this venue was imported without (e.g. venues
+  // ingested before the all-tags fix, or matched by a different candidate).
+  // Union the candidate's full tag set into the existing venue so nothing the
+  // spreadsheet knows is lost, then mark the candidate "skipped" (stamping the
+  // matched place_id) so it drains and never re-bills Google next pass.
   if (!DRY_RUN && supabase) {
     const { data: existing } = await supabase
       .from("venues")
-      .select("slug")
+      .select("id, slug, vibe_tags, curation_tier")
       .eq("google_place_id", searchResult.id)
       .maybeSingle();
     if (existing) {
-      console.log(`  ↩ already in venues as "${existing.slug}" — skipping`);
+      // Only enrich DISCOVERED venues. Curated venues carry hand-picked
+      // editorial chips — never overwrite those with raw onezone labels.
+      let added = 0;
+      if (existing.curation_tier === "discovered") {
+        const existingSet = new Set<string>(existing.vibe_tags ?? []);
+        const mergedSet = new Set<string>([
+          ...existingSet,
+          ...deriveVibeTags(candidate),
+        ]);
+        // Count by set difference so a pre-existing duplicate in the stored
+        // array can't make a genuinely-new tag look like "nothing added".
+        added = mergedSet.size - existingSet.size;
+        if (added > 0) {
+          const { error: enrichErr } = await supabase
+            .from("venues")
+            .update({ vibe_tags: Array.from(mergedSet) })
+            .eq("id", existing.id);
+          if (enrichErr)
+            console.warn(`  ⚠ tag enrich failed: ${enrichErr.message}`);
+          else
+            console.log(
+              `  ↩ already in venues as "${existing.slug}" — +${added} missing tags (now ${mergedSet.size})`,
+            );
+        } else {
+          console.log(
+            `  ↩ already in venues as "${existing.slug}" — tags already complete`,
+          );
+        }
+      } else {
+        console.log(
+          `  ↩ already in venues as "${existing.slug}" (curated — tags left untouched)`,
+        );
+      }
+      const { error: skipErr } = await supabase
+        .from("pending_candidates")
+        .update({
+          // No google_place_id stamp: it is UNIQUE on pending_candidates and
+          // many onezone candidates map to one venue, so only the published
+          // ("ingested") candidate holds the link. The matched venue slug is
+          // recorded in reviewed_notes instead.
+          status: "skipped",
+          reviewed_at: new Date().toISOString(),
+          reviewed_notes: `Already in venues as "${existing.slug}"${added > 0 ? ` (+${added} tags)` : ""}`,
+        })
+        .eq("id", candidate.id);
+      if (skipErr)
+        console.warn(`  ⚠ skip status update failed: ${skipErr.message}`);
       return { status: "skipped" as const };
     }
   }
@@ -467,15 +518,17 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   if (!gate.ok) {
     console.log(`  ⏸ needs review — ${gate.reason} (not published)`);
     if (!DRY_RUN && supabase) {
-      await supabase
+      const { error: qErr } = await supabase
         .from("pending_candidates")
         .update({
           status: "needs_review",
           reviewed_at: new Date().toISOString(),
           reviewed_notes: `Auto-gate: ${gate.reason}`,
-          google_place_id: searchResult.id,
-          // Keep the Google match so a reviewer can judge if it's the right
-          // place (and approve / fix the name) without re-querying.
+          // Do NOT stamp google_place_id here: pending_candidates.google_place_id
+          // is UNIQUE, and several onezone candidates can resolve to the same
+          // Google place. Only the candidate that actually publishes (the
+          // "ingested" path) holds the 1:1 link. The match is preserved in
+          // filter_results below for the reviewer.
           filter_results: {
             gate: "failed",
             reason: gate.reason,
@@ -488,6 +541,8 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
           },
         })
         .eq("id", candidate.id);
+      if (qErr)
+        console.warn(`  ⚠ needs_review status update failed: ${qErr.message}`);
     }
     return { status: "needs_review" as const };
   }
@@ -530,7 +585,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
 
   // Mark candidate ingested + stamp the matched place_id so the venue can be
   // linked back to its candidate (e.g. for tag backfills / personalisation).
-  await supabase
+  const { error: ingErr } = await supabase
     .from("pending_candidates")
     .update({
       status: "ingested",
@@ -538,6 +593,8 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
       google_place_id: details.id,
     })
     .eq("id", candidate.id);
+  if (ingErr)
+    console.warn(`  ⚠ ingested status update failed: ${ingErr.message}`);
 
   return { status: "ingested" as const };
 }
@@ -595,13 +652,27 @@ async function main() {
     return;
   }
 
-  // Pre-fetch existing slugs to avoid collisions
-  const { data: existingSlugs } = supabase
-    ? await supabase.from("venues").select("slug")
-    : { data: [] };
-  const usedSlugs = new Set<string>(
-    (existingSlugs ?? []).map((r: { slug: string }) => r.slug),
-  );
+  // Pre-fetch ALL existing slugs (paginated). PostgREST caps a plain select at
+  // 1000 rows and there are well over 1000 venues, so an unpaginated fetch
+  // would miss slugs and let the slugify loop below collide with the
+  // venues_slug_key UNIQUE constraint (a 23505 that would strand the candidate
+  // in ingest_failed and silently never publish it).
+  const usedSlugs = new Set<string>();
+  if (supabase) {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: slugErr } = await supabase
+        .from("venues")
+        .select("slug")
+        .range(from, from + PAGE - 1);
+      if (slugErr) {
+        console.error("Failed to pre-fetch slugs:", slugErr.message);
+        process.exit(1);
+      }
+      for (const r of page ?? []) usedSlugs.add((r as { slug: string }).slug);
+      if (!page || page.length < PAGE) break;
+    }
+  }
 
   const results = {
     ingested: 0,
@@ -623,13 +694,17 @@ async function main() {
 
       // Mark as failed so --retry-failed can target them
       if (supabase && !DRY_RUN) {
-        await supabase
+        const { error: fErr } = await supabase
           .from("pending_candidates")
           .update({
             status: "ingest_failed",
             reviewed_notes: msg.slice(0, 500),
           })
           .eq("id", candidate.id);
+        if (fErr)
+          console.warn(
+            `  ⚠ ingest_failed status update failed: ${fErr.message}`,
+          );
       }
     }
 

@@ -216,7 +216,17 @@ create table if not exists public.pending_candidates (
   creator_coverage_drafts jsonb,
   filter_results jsonb,
   chain_risk_score numeric,
-  status text not null default 'pending',   -- pending | approved | rejected | snoozed
+  -- Allowed status values are enforced by the CHECK below. Keep this list in
+  -- sync with scripts/ingest-from-pending.ts and app/admin/candidates/actions.ts.
+  -- pending | approved | rejected | snoozed | ingested | needs_review |
+  -- ingest_failed | skipped
+  status text not null default 'pending'
+    check (
+      status in (
+        'pending', 'approved', 'rejected', 'snoozed',
+        'ingested', 'needs_review', 'ingest_failed', 'skipped'
+      )
+    ),
   reviewed_at timestamptz,
   reviewed_notes text,
   snoozed_until timestamptz,
