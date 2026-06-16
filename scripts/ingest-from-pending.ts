@@ -405,6 +405,33 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// ── Quality gate ──────────────────────────────────────────────────────────────
+// onezone restaurant names that are also street addresses ("64 Goodge Street")
+// frequently match a junk Google listing with no rating. Only AUTO-PUBLISH
+// high-confidence matches: operational, with a real rating and enough reviews.
+// Everything else is quarantined (status="needs_review") for a human to judge —
+// it is NOT lost, just kept out of the live catalogue.
+const MIN_REVIEWS = 20;
+
+function qualityCheck(d: PlaceDetails): { ok: boolean; reason?: string } {
+  if (d.businessStatus !== "OPERATIONAL")
+    return {
+      ok: false,
+      reason: `not operational (status=${d.businessStatus ?? "unknown"})`,
+    };
+  if (d.rating == null)
+    return {
+      ok: false,
+      reason: "no Google rating (likely an address / wrong match)",
+    };
+  if ((d.userRatingCount ?? 0) < MIN_REVIEWS)
+    return {
+      ok: false,
+      reason: `only ${d.userRatingCount ?? 0} reviews (min ${MIN_REVIEWS})`,
+    };
+  return { ok: true };
+}
+
 async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   const searchQuery = `${candidate.name} ${candidate.neighbourhood ?? ""} London`;
   console.log(`\n→ "${candidate.name}" (${candidate.neighbourhood ?? "?"})`);
@@ -435,8 +462,34 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     `  rating: ${details.rating ?? "n/a"} · reviews: ${details.userRatingCount ?? 0} · status: ${details.businessStatus ?? "?"}`,
   );
 
-  if (details.businessStatus === "CLOSED_PERMANENTLY") {
-    throw new Error(`Place is permanently closed`);
+  // ── Quality gate: auto-publish only confident matches; quarantine the rest ──
+  const gate = qualityCheck(details);
+  if (!gate.ok) {
+    console.log(`  ⏸ needs review — ${gate.reason} (not published)`);
+    if (!DRY_RUN && supabase) {
+      await supabase
+        .from("pending_candidates")
+        .update({
+          status: "needs_review",
+          reviewed_at: new Date().toISOString(),
+          reviewed_notes: `Auto-gate: ${gate.reason}`,
+          google_place_id: searchResult.id,
+          // Keep the Google match so a reviewer can judge if it's the right
+          // place (and approve / fix the name) without re-querying.
+          filter_results: {
+            gate: "failed",
+            reason: gate.reason,
+            matched_name: details.displayName.text,
+            matched_address: details.formattedAddress,
+            rating: details.rating ?? null,
+            reviews: details.userRatingCount ?? 0,
+            business_status: details.businessStatus ?? null,
+            website: details.websiteUri ?? null,
+          },
+        })
+        .eq("id", candidate.id);
+    }
+    return { status: "needs_review" as const };
   }
 
   const bookingLinks = detectBookingLinks(details.websiteUri);
@@ -548,6 +601,7 @@ async function main() {
   const results = {
     ingested: 0,
     skipped: 0,
+    needsReview: 0,
     failed: [] as { name: string; error: string }[],
   };
 
@@ -556,6 +610,7 @@ async function main() {
       const r = await processCandidate(candidate, usedSlugs);
       if (r.status === "ingested") results.ingested++;
       else if (r.status === "skipped") results.skipped++;
+      else if (r.status === "needs_review") results.needsReview++;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ✗ FAILED: ${msg}`);
@@ -578,9 +633,10 @@ async function main() {
   }
 
   console.log("\n─────────── SUMMARY ───────────");
-  console.log(`Ingested:  ${results.ingested}`);
+  console.log(`Ingested (published):        ${results.ingested}`);
+  console.log(`Needs review (quarantined):  ${results.needsReview}`);
   console.log(`Skipped (already in venues): ${results.skipped}`);
-  console.log(`Failed:    ${results.failed.length}`);
+  console.log(`Failed (lookup error):       ${results.failed.length}`);
   if (results.failed.length > 0) {
     results.failed.forEach((f) => console.log(`  ✗ ${f.name}: ${f.error}`));
     console.log("\nRe-run with --retry-failed to retry only the failed ones.");
