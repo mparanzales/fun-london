@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Flame,
   UtensilsCrossed,
@@ -76,6 +76,11 @@ function getEyebrow(): "today in" | "tonight in" {
 // Kept short on purpose — a taste, not the catalogue. Exported so the Server
 // Component slices the anonymous preview to the SAME count in the DB.
 export const PREVIEW_COUNT = 4;
+
+// The signed-in feed renders a page of cards at a time (infinite scroll) instead
+// of the whole catalogue. Mounting 2,000+ image cards on a single load was the
+// main driver of poor LCP / FCP / INP on /explore.
+const FEED_PAGE_SIZE = 24;
 
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
@@ -256,6 +261,28 @@ export function ExploreFeed({
     userGeo,
   ]);
 
+  // Infinite scroll: render FEED_PAGE_SIZE cards at a time and grow as the user
+  // nears the bottom, instead of mounting the entire catalogue at once. Reset to
+  // the first page whenever the view (category or nearest-first) changes.
+  const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(FEED_PAGE_SIZE);
+  }, [selectedFilter, nearestFirst]);
+
+  const ioRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
+    ioRef.current?.disconnect();
+    if (!node) return;
+    ioRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting)
+          setVisibleCount((c) => c + FEED_PAGE_SIZE);
+      },
+      { rootMargin: "800px" },
+    );
+    ioRef.current.observe(node);
+  }, []);
+
   // Smart category-tag visibility:
   //   For You / Music / Events → mixed sources or subtypes → show tags
   //   Restaurants / Bars / Cafés → single category → hide tags
@@ -409,39 +436,44 @@ export function ExploreFeed({
       ) : (
         <>
           <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
-            {(signedIn ? items : items.slice(0, PREVIEW_COUNT)).map(
-              (item, index) =>
-                item.kind === "venue" ? (
-                  <VenueCard
-                    key={`venue-${item.data.id}`}
-                    venue={item.data}
-                    variant="wide"
-                    showCategoryTag={showCategoryTag}
-                    priority={index === 0}
-                    distanceLabel={
-                      nearestFirst &&
-                      userGeo &&
-                      item.data.lat != null &&
-                      item.data.lng != null
-                        ? distanceLabel(
-                            haversineKm(userGeo, {
-                              lat: item.data.lat,
-                              lng: item.data.lng,
-                            }),
-                          )
-                        : undefined
-                    }
-                  />
-                ) : (
-                  <EventCard
-                    key={`event-${item.data.id}`}
-                    event={item.data}
-                    showCategoryTag={showCategoryTag}
-                    priority={index === 0}
-                  />
-                ),
+            {(signedIn
+              ? items.slice(0, visibleCount)
+              : items.slice(0, PREVIEW_COUNT)
+            ).map((item, index) =>
+              item.kind === "venue" ? (
+                <VenueCard
+                  key={`venue-${item.data.id}`}
+                  venue={item.data}
+                  variant="wide"
+                  showCategoryTag={showCategoryTag}
+                  priority={index === 0}
+                  distanceLabel={
+                    nearestFirst &&
+                    userGeo &&
+                    item.data.lat != null &&
+                    item.data.lng != null
+                      ? distanceLabel(
+                          haversineKm(userGeo, {
+                            lat: item.data.lat,
+                            lng: item.data.lng,
+                          }),
+                        )
+                      : undefined
+                  }
+                />
+              ) : (
+                <EventCard
+                  key={`event-${item.data.id}`}
+                  event={item.data}
+                  showCategoryTag={showCategoryTag}
+                  priority={index === 0}
+                />
+              ),
             )}
           </div>
+          {signedIn && visibleCount < items.length && (
+            <div ref={loadMoreRef} aria-hidden className="h-8" />
+          )}
           {!signedIn && <SignupWall returnTo="/explore" />}
         </>
       )}
