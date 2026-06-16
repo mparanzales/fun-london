@@ -254,6 +254,7 @@ function ResultRow({
       <Link
         href={href}
         onClick={onNavigate}
+        prefetch={false}
         className="flex items-center gap-3 py-2.5 border-b border-border last:border-0"
       >
         <div className="relative w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-muted">

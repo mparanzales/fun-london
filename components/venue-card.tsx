@@ -59,6 +59,10 @@ export function VenueCard({
         href={`/venue/${venue.slug}`}
         aria-label={`View ${venue.name}`}
         className="block"
+        // Don't prefetch: a feed of 24+ cards would each fire a full RSC
+        // prefetch of a DYNAMIC detail page (~1.5s server render apiece),
+        // congesting the network + server. The detail loads on tap instead.
+        prefetch={false}
       >
         <div
           className="relative w-full rounded-2xl overflow-hidden shadow-card group"
