@@ -14,7 +14,7 @@
 // internal admin tool.
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/admin";
 import { getAdminUser } from "@/lib/auth";
 
 export type Decision = "approve" | "reject" | "snooze";
@@ -59,7 +59,8 @@ export async function decideCandidate(formData: FormData): Promise<void> {
       return;
   }
 
-  const supabase = createClient();
+  const supabase = createServiceClient();
+  if (!supabase) return;
   const { error } = await supabase
     .from("pending_candidates")
     .update({

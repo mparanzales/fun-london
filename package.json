@@ -19,6 +19,8 @@
     "refresh-venues": "tsx scripts/refresh-venues.ts",
     "ingest-events:dry": "tsx scripts/ingest-events.ts --dry-run",
     "ingest-events": "tsx scripts/ingest-events.ts",
+    "ingest:from-pending:dry": "tsx scripts/ingest-from-pending.ts --dry-run",
+    "ingest:from-pending": "tsx scripts/ingest-from-pending.ts",
     "scout-candidates:dry": "tsx scripts/scout-candidates.ts --dry-run",
     "scout-candidates": "tsx scripts/scout-candidates.ts",
     "discover-venues:dry": "tsx scripts/discover-venues.ts --dry-run",
