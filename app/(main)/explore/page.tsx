@@ -1,13 +1,13 @@
 import { getAuthUser } from "@/lib/auth";
 import {
-  fetchVenueFeed,
+  feedPage,
   fetchEvents,
   fetchProfile,
   fetchVenueCategoryPreview,
   fetchEventCategoryPreview,
   fetchVenueCount,
 } from "@/lib/queries";
-import { ExploreFeed, PREVIEW_COUNT } from "./explore-feed";
+import { ExploreFeed, PREVIEW_COUNT, FEED_PAGE_SIZE } from "./explore-feed";
 
 // Server Component. Two distinct paths so the wall is enforced HERE, not in
 // the client:
@@ -41,23 +41,33 @@ export default async function ExplorePage() {
     );
   }
 
-  // Profile first so we can rank the feed by the user's taste ON THE SERVER,
-  // then ship only light, pre-ranked cards (no heavy tag arrays).
+  // Profile first so we can rank by taste ON THE SERVER, then ship only the
+  // FIRST PAGE of light cards. The rest paginate in via loadFeedPage on scroll,
+  // so the whole catalogue never reaches the browser.
   const profile = await fetchProfile(authUser.id);
-  const [venues, events] = await Promise.all([
-    fetchVenueFeed(profile?.preferences ?? null),
+  const prefs = profile?.preferences ?? null;
+  const [first, events, totalVenues] = await Promise.all([
+    feedPage({
+      prefs,
+      filter: "for-you",
+      offset: 0,
+      limit: FEED_PAGE_SIZE,
+      sort: "taste",
+    }),
     fetchEvents(),
+    fetchVenueCount(),
   ]);
   const greetingName =
     profile?.displayName ?? authUser.email?.split("@")[0] ?? "there";
   return (
     <ExploreFeed
-      venues={venues}
+      venues={first.venues}
       events={events}
       greetingName={greetingName}
-      preferences={profile?.preferences ?? null}
+      preferences={prefs}
       signedIn
-      totalVenues={venues.length}
+      totalVenues={totalVenues}
+      initialHasMore={first.hasMore}
     />
   );
 }
