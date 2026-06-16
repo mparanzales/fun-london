@@ -28,6 +28,13 @@ export type Plan = {
   budget: PlanBudget;
   steps: PlanStep[];
   totalMins: number; // dwell + walking across the whole night
+  // Telemetry (not rendered) — how the candidate pool was resolved, so
+  // analytics can see when the engine had to compromise to fill a night:
+  //   "area"   = honoured the chosen area + budget
+  //   "budget" = dropped the area (kept budget) to find enough venues
+  //   "all"    = last resort: ignored area AND budget
+  poolStage: "area" | "budget" | "all";
+  poolSize: number; // candidates considered after widening
 };
 
 // ── Budget ───────────────────────────────────────────────────────────────
@@ -264,12 +271,23 @@ export function computePlan(
   const { area, vibe, budget, offset = 0 } = opts;
 
   // Prefer venues in the chosen area + budget; widen gracefully if too thin.
+  // poolStage records which rung of the ladder we landed on (see Plan type).
   const inArea = venues.filter(
     (v) => v.neighbourhood === area && withinBudget(v.price, budget),
   );
   const inBudget = venues.filter((v) => withinBudget(v.price, budget));
-  let pool = inArea.length >= 3 ? inArea : inBudget;
-  if (pool.length < 3) pool = venues; // last resort: ignore budget too
+  let pool: Venue[];
+  let poolStage: Plan["poolStage"];
+  if (inArea.length >= 3) {
+    pool = inArea;
+    poolStage = "area";
+  } else if (inBudget.length >= 3) {
+    pool = inBudget;
+    poolStage = "budget";
+  } else {
+    pool = venues; // last resort: ignore area AND budget too
+    poolStage = "all";
+  }
 
   const used = new Set<string>();
   const usedTypes = new Set<VenueType>();
@@ -302,7 +320,15 @@ export function computePlan(
     0,
   );
 
-  return { area, vibe, budget, steps, totalMins };
+  return {
+    area,
+    vibe,
+    budget,
+    steps,
+    totalMins,
+    poolStage,
+    poolSize: pool.length,
+  };
 }
 
 // One-line rationale for the saved-plan record + the result header.
