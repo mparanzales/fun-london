@@ -221,11 +221,17 @@ function pick(
   role: PlanRole,
   vibe: PlanVibe,
   used: Set<string>,
+  usedTypes: Set<VenueType>,
   offset: number,
 ): Venue | null {
-  const ranked = pool
-    .filter((v) => !used.has(v.id) && roleMatches(v, role))
-    .sort((a, b) => vibeScore(b, vibe) - vibeScore(a, vibe));
+  const matches = pool.filter((v) => !used.has(v.id) && roleMatches(v, role));
+  // Keep the night varied: prefer a venue TYPE we haven't used yet, so we
+  // don't recommend e.g. a Pub then another Pub. Only relax to any role-match
+  // when every fresh type is already taken (a genuinely thin area).
+  const fresh = matches.filter((v) => !usedTypes.has(v.type));
+  const ranked = (fresh.length > 0 ? fresh : matches).sort(
+    (a, b) => vibeScore(b, vibe) - vibeScore(a, vibe),
+  );
   if (ranked.length === 0) return null;
   // offset rotates through the ranked list for "Try another", starting at
   // the best fit (offset 0).
@@ -238,11 +244,15 @@ function pickAny(
   pool: Venue[],
   vibe: PlanVibe,
   used: Set<string>,
+  usedTypes: Set<VenueType>,
   offset: number,
 ): Venue | null {
-  const ranked = pool
-    .filter((v) => !used.has(v.id))
-    .sort((a, b) => vibeScore(b, vibe) - vibeScore(a, vibe));
+  const avail = pool.filter((v) => !used.has(v.id));
+  // Same variety preference as pick(): a fresh type beats repeating one.
+  const fresh = avail.filter((v) => !usedTypes.has(v.type));
+  const ranked = (fresh.length > 0 ? fresh : avail).sort(
+    (a, b) => vibeScore(b, vibe) - vibeScore(a, vibe),
+  );
   if (ranked.length === 0) return null;
   return ranked[offset % ranked.length];
 }
@@ -262,14 +272,17 @@ export function computePlan(
   if (pool.length < 3) pool = venues; // last resort: ignore budget too
 
   const used = new Set<string>();
+  const usedTypes = new Set<VenueType>();
   const roles: PlanRole[] = ["Start", "Then", "Finish"];
   const chosen: Venue[] = [];
 
   for (const role of roles) {
     const v =
-      pick(pool, role, vibe, used, offset) ?? pickAny(pool, vibe, used, offset);
+      pick(pool, role, vibe, used, usedTypes, offset) ??
+      pickAny(pool, vibe, used, usedTypes, offset);
     if (v) {
       used.add(v.id);
+      usedTypes.add(v.type);
       chosen.push(v);
     }
   }

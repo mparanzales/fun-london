@@ -109,4 +109,39 @@ describe("computePlan", () => {
     expect(plan.steps.length).toBeLessThanOrEqual(3);
     expect(plan.area).toBe("Soho");
   });
+
+  it("does not repeat a venue type when the area has alternatives (no Pub then Pub)", () => {
+    const venues = [
+      makeVenue({
+        id: "cafe",
+        neighbourhood: "Notting Hill",
+        type: "Cafe" as Venue["type"],
+      }),
+      makeVenue({
+        id: "pub1",
+        neighbourhood: "Notting Hill",
+        type: "Pub" as Venue["type"],
+      }),
+      makeVenue({
+        id: "pub2",
+        neighbourhood: "Notting Hill",
+        type: "Pub" as Venue["type"],
+      }),
+      makeVenue({
+        id: "bar",
+        neighbourhood: "Notting Hill",
+        type: "Bar" as Venue["type"],
+      }),
+    ];
+    const plan = computePlan(venues, {
+      area: "Notting Hill",
+      vibe: "Lively",
+      budget: "Any",
+      offset: 0,
+    });
+    const types = plan.steps.map((s) => s.venue.type);
+    // Three distinct types are available, so the night should not repeat one.
+    expect(new Set(types).size).toBe(types.length);
+    expect(types.filter((t) => t === "Pub").length).toBeLessThanOrEqual(1);
+  });
 });
