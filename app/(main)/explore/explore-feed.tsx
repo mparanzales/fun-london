@@ -351,7 +351,11 @@ export function ExploreFeed({
         (entries) => {
           if (entries[0]?.isIntersecting) loadMore();
         },
-        { rootMargin: "1800px" }, // ~2 screens of runway
+        // Big runway: start fetching the next page ~3-4 screens before the
+        // tail is reached, and since the observer re-arms after each page it
+        // keeps that buffer full — so real scrolling lands on loaded cards, not
+        // the skeleton (which stays a fallback for an extreme flick only).
+        { rootMargin: "3000px" },
       );
       ioRef.current.observe(node);
     },
