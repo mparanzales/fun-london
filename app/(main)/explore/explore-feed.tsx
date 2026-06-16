@@ -16,6 +16,7 @@ import {
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
+import { searchCatalog } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
@@ -291,9 +292,7 @@ export function ExploreFeed({
           <button
             type="button"
             aria-label="Search"
-            onClick={
-              signedIn ? () => setSearchOpen(true) : () => setWallFor("search")
-            }
+            onClick={() => setSearchOpen(true)}
             className="p-2 -mr-2 text-fg"
           >
             <Search className="w-6 h-6" strokeWidth={2} />
@@ -447,10 +446,11 @@ export function ExploreFeed({
         </>
       )}
 
-      {searchOpen && signedIn && (
+      {searchOpen && (
         <SearchOverlay
-          venues={allVenues}
-          events={allEvents}
+          venues={signedIn ? allVenues : []}
+          events={signedIn ? allEvents : []}
+          searchAction={signedIn ? undefined : searchCatalog}
           onClose={() => setSearchOpen(false)}
         />
       )}

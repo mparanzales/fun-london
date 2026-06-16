@@ -1,45 +1,41 @@
 "use client";
 
-// Full-screen search overlay for /explore. Pure client-side filtering —
-// the Explore page already holds the entire catalog (venues + events) in
-// memory, so search is instant with no extra round-trip. Matches by name,
-// area, type, vibe tags (venues) and name, venue, area, category (events).
+// Full-screen search overlay for /explore.
 //
-// Opened from the Explore masthead search button. A route change (tapping
-// a result) unmounts this overlay automatically.
+// Two modes:
+//  • CLIENT (signed-in): the Explore page already holds the whole catalogue in
+//    memory, so we filter it instantly with no round-trip.
+//  • SERVER (signed-out): we don't ship the full catalogue to anonymous
+//    visitors, so search calls a server action that returns only card-level
+//    matches. Search works for everyone; the catalogue still never reaches the
+//    anon client.
+//
+// Matching (apostrophe/accent-insensitive) is shared with the server via
+// lib/search-match, so both modes behave identically.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { track } from "@/lib/analytics";
+import { normalize, scoreMatch } from "@/lib/search-match";
 import type { Venue, Event } from "@/lib/types";
 
 type Result =
   | { kind: "venue"; data: Venue; score: number }
   | { kind: "event"; data: Event; score: number };
 
-// 0 = name starts with query (best), 1 = name contains query,
-// 2 = some other field contains query (weakest). Lower sorts first.
-function scoreMatch(
-  name: string,
-  haystack: string[],
-  q: string,
-): number | null {
-  const n = name.toLowerCase();
-  if (n.startsWith(q)) return 0;
-  if (n.includes(q)) return 1;
-  if (haystack.some((h) => h.toLowerCase().includes(q))) return 2;
-  return null;
-}
-
 export function SearchOverlay({
   venues,
   events,
+  searchAction,
   onClose,
 }: {
   venues: Venue[];
   events: Event[];
+  // When provided (signed-out), search runs server-side and returns card-level
+  // results. When omitted (signed-in), search filters `venues`/`events` locally.
+  searchAction?: (q: string) => Promise<{ venues: Venue[]; events: Event[] }>;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -55,30 +51,93 @@ export function SearchOverlay({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // CLIENT MODE: normalise each item's name + haystack once, so each keystroke
+  // is two cheap substring checks instead of re-normalising the catalogue.
+  const venueIndex = useMemo(
+    () =>
+      venues.map((v) => ({
+        v,
+        name: normalize(v.name),
+        hay: normalize(
+          [v.neighbourhood, v.type, v.vibe, ...v.vibeTags, ...v.moodTags].join(
+            " ",
+          ),
+        ),
+      })),
+    [venues],
+  );
+  const eventIndex = useMemo(
+    () =>
+      events.map((e) => ({
+        e,
+        name: normalize(e.name),
+        hay: normalize([e.venueName, e.area, e.category].join(" ")),
+      })),
+    [events],
+  );
+
+  // SERVER MODE: debounce the query, call the action, hold its card-level rows.
+  const [serverResults, setServerResults] = useState<{
+    venues: Venue[];
+    events: Event[];
+  }>({ venues: [], events: [] });
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (!searchAction) return;
+    const q = query.trim();
+    if (q.length < 2) {
+      setServerResults({ venues: [], events: [] });
+      setPending(false);
+      return;
+    }
+    setPending(true);
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const r = await searchAction(q);
+        if (!cancelled) setServerResults(r);
+      } catch {
+        if (!cancelled) setServerResults({ venues: [], events: [] });
+      } finally {
+        if (!cancelled) setPending(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [query, searchAction]);
+
   const results = useMemo<Result[]>(() => {
-    const q = query.trim().toLowerCase();
+    const q = normalize(query);
     if (!q) return [];
 
-    const out: Result[] = [];
+    if (searchAction) {
+      // Server already ranked; show venues first, then events.
+      return [
+        ...serverResults.venues.map(
+          (v): Result => ({ kind: "venue", data: v, score: 0 }),
+        ),
+        ...serverResults.events.map(
+          (e): Result => ({ kind: "event", data: e, score: 1 }),
+        ),
+      ];
+    }
 
-    for (const v of venues) {
-      const score = scoreMatch(
-        v.name,
-        [v.neighbourhood, v.type, v.vibe, ...v.vibeTags, ...v.moodTags],
-        q,
-      );
+    const out: Result[] = [];
+    for (const { v, name, hay } of venueIndex) {
+      const score = scoreMatch(name, hay, q);
       if (score !== null) out.push({ kind: "venue", data: v, score });
     }
-    for (const e of events) {
-      const score = scoreMatch(e.name, [e.venueName, e.area, e.category], q);
+    for (const { e, name, hay } of eventIndex) {
+      const score = scoreMatch(name, hay, q);
       if (score !== null) out.push({ kind: "event", data: e, score });
     }
-
     return out.sort((a, b) => a.score - b.score);
-  }, [query, venues, events]);
+  }, [query, searchAction, serverResults, venueIndex, eventIndex]);
 
-  // Track searches, debounced, so we log the intent once the user pauses
-  // typing (not on every keystroke). Only meaningful queries (≥2 chars).
+  // Track searches, debounced, so we log the intent once the user pauses typing
+  // (not on every keystroke). Only meaningful queries (≥2 chars).
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) return;
@@ -90,6 +149,7 @@ export function SearchOverlay({
   }, [query, results.length]);
 
   const q = query.trim();
+  const showEmpty = q.length > 0 && results.length === 0 && !pending;
 
   return (
     <div
@@ -137,7 +197,7 @@ export function SearchOverlay({
             <p className="pt-8 text-center text-sm text-muted-fg">
               Find a place or an event by name, area, or vibe.
             </p>
-          ) : results.length === 0 ? (
+          ) : showEmpty ? (
             <div className="pt-10 text-center">
               <div className="text-2xl mb-1">🔍</div>
               <p className="text-sm text-muted-fg">
