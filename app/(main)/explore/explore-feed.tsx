@@ -16,6 +16,7 @@ import {
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
+import { searchCatalog } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
@@ -45,10 +46,10 @@ type FilterKey =
 
 // Anon-only: which thing a soft AuthWall is gating. The CATEGORY chips are NOT
 // here — for anon they filter to a 4-card preview + the sign-up wall, just like
-// For You. Only search and the Near-you sort raise the blur wall.
-type WallTarget = "search" | "near";
+// For You. Search is open to everyone now (signed-out search is server-side and
+// card-level); only the Near-you sort still raises the blur wall.
+type WallTarget = "near";
 const WALL_TITLES: Record<WallTarget, string> = {
-  search: "Sign up to search",
   near: "Sign up to sort by distance",
 };
 
@@ -291,9 +292,7 @@ export function ExploreFeed({
           <button
             type="button"
             aria-label="Search"
-            onClick={
-              signedIn ? () => setSearchOpen(true) : () => setWallFor("search")
-            }
+            onClick={() => setSearchOpen(true)}
             className="p-2 -mr-2 text-fg"
           >
             <Search className="w-6 h-6" strokeWidth={2} />
@@ -447,10 +446,11 @@ export function ExploreFeed({
         </>
       )}
 
-      {searchOpen && signedIn && (
+      {searchOpen && (
         <SearchOverlay
-          venues={allVenues}
-          events={allEvents}
+          venues={signedIn ? allVenues : []}
+          events={signedIn ? allEvents : []}
+          searchAction={signedIn ? undefined : searchCatalog}
           onClose={() => setSearchOpen(false)}
         />
       )}

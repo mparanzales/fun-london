@@ -288,6 +288,32 @@ export async function fetchVenuePreview(limit: number): Promise<Venue[]> {
   return (data as VenueCardRow[]).map(mapVenuePreview);
 }
 
+// Full card-level catalogue (every live venue, card columns only) for the
+// signed-out search action. Paginated past PostgREST's 1000-row cap. Mapped via
+// mapVenuePreview, so the moat/detail fields are blanked and never leave the
+// server, only matched cards are returned to the client.
+export async function fetchAllVenueCards(): Promise<Venue[]> {
+  const supabase = createClient();
+  const PAGE = 1000;
+  const rows: VenueCardRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("venues")
+      .select(VENUE_CARD_COLUMNS)
+      .not("google_place_id", "is", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .order("curation_tier", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchAllVenueCards: ${error.message}`);
+    const page = (data as VenueCardRow[]) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.map(mapVenuePreview);
+}
+
 // Per-CATEGORY anonymous preview. So a signed-out visitor can switch the
 // Explore chips (Eats / Bars / Cafés / Music) and each shows its own first few
 // cards + the sign-up wall — like the For You preview — WITHOUT shipping the
@@ -547,6 +573,32 @@ export async function fetchEventPreview(limit: number): Promise<Event[]> {
     .limit(limit);
   if (error) throw new Error(`fetchEventPreview: ${error.message}`);
   return (data as EventCardRow[]).map(mapEventPreview);
+}
+
+// Full card-level upcoming events for the signed-out search action (paginated).
+export async function fetchAllEventCards(): Promise<Event[]> {
+  const supabase = createClient();
+  const startOfToday = startOfLondonDayUtc();
+  const PAGE = 1000;
+  const rows: EventCardRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("events")
+      .select(EVENT_CARD_COLUMNS)
+      .is("cancelled_at", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .or(
+        `starts_at.gte.${startOfToday.toISOString()},ends_at.gte.${startOfToday.toISOString()}`,
+      )
+      .order("starts_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchAllEventCards: ${error.message}`);
+    const page = (data as EventCardRow[]) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.map(mapEventPreview);
 }
 
 // Per-CATEGORY anonymous event preview — same idea as the venue version, so the
