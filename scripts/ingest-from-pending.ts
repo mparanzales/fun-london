@@ -300,21 +300,21 @@ function deriveMoodTags(candidate: Candidate): string[] {
   return Array.from(moods);
 }
 
-// Build the subset of vibe_tags we can populate without a human editor
+// Carry the FULL onezone tag set onto the venue, deduped. vibe_tags_draft holds
+// the rich raw "Tags" column (Date Night, Cosy, Tasting Menu, ...) plus the
+// Vibes lists; `source` carries the remaining curated lists. We insert ALL of
+// them — the card decides how many chips to render.
 function deriveVibeTags(candidate: Candidate): string[] {
   const source = candidate.sources.find((s) => s.source === "onezone");
-  if (!source) return [];
 
   const tags = new Set<string>();
+  for (const t of candidate.vibe_tags_draft ?? []) tags.add(t);
+  for (const c of source?.cuisine_lists ?? []) tags.add(c);
+  for (const o of source?.occasion_lists ?? []) tags.add(o);
+  for (const v of source?.vibe_lists ?? []) tags.add(v);
+  for (const t of source?.top_lists ?? []) tags.add(t);
 
-  // Pull from vibe_lists (already curated by OneZone)
-  for (const v of source.vibe_lists ?? []) tags.add(v);
-  // Pull cuisine lists as display chips
-  for (const c of source.cuisine_lists ?? []) tags.add(c);
-  // Top lists add context
-  for (const t of source.top_lists ?? []) tags.add(t);
-
-  return Array.from(tags).slice(0, 8); // cap at 8 chips per card
+  return Array.from(tags);
 }
 
 // ── Row builders ─────────────────────────────────────────────────────────────
@@ -528,10 +528,15 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     else console.log(`  ★ partner_prospects`);
   }
 
-  // Mark candidate ingested
+  // Mark candidate ingested + stamp the matched place_id so the venue can be
+  // linked back to its candidate (e.g. for tag backfills / personalisation).
   await supabase
     .from("pending_candidates")
-    .update({ status: "ingested", reviewed_at: new Date().toISOString() })
+    .update({
+      status: "ingested",
+      reviewed_at: new Date().toISOString(),
+      google_place_id: details.id,
+    })
     .eq("id", candidate.id);
 
   return { status: "ingested" as const };
