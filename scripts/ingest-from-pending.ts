@@ -332,10 +332,12 @@ function buildVenueRow(
     slug,
     name: details.displayName.text,
     type: mapVenueType(candidate, details.types),
-    // vibe and long_description intentionally left minimal — the admin can
+    // vibe and long_description are intentionally minimal — the admin can
     // enrich these after ingestion, or a future AI pass can fill them in.
+    // NOTE: long_description / next_slot_label are "" and tables_free 0 (not
+    // null) because those columns are NOT NULL — a null would fail the insert.
     vibe: source?.cuisine_type ?? candidate.type_guess ?? "London favourite",
-    long_description: null,
+    long_description: "",
     neighbourhood: candidate.neighbourhood ?? "London",
     address: details.formattedAddress,
     lat: details.location?.latitude ?? null,
@@ -345,8 +347,8 @@ function buildVenueRow(
     rating: details.rating ?? 4.0,
     review_count: details.userRatingCount ?? 0,
     walking_mins: 12,
-    tables_free: null,
-    next_slot_label: null,
+    tables_free: 0,
+    next_slot_label: "",
     img_url: imgUrl,
     curation_tier: "discovered",
     mood_tags: deriveMoodTags(candidate),

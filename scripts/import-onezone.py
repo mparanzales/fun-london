@@ -27,9 +27,13 @@ import requests
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-EXCEL_PATH = Path(__file__).parent.parent / "scripts" / "onezone_restaurants.xlsx"
-# Also accept the file from Downloads if not copied yet
-FALLBACK_PATH = Path.home() / "Downloads" / "onezone_restaurants.xlsx"
+# Candidate locations / names for the OneZone export (newest name first).
+CANDIDATE_PATHS = [
+    Path(__file__).parent.parent / "scripts" / "onezone_restaurants_london.xlsx",
+    Path.home() / "Downloads" / "onezone_restaurants_london.xlsx",
+    Path(__file__).parent.parent / "scripts" / "onezone_restaurants.xlsx",
+    Path.home() / "Downloads" / "onezone_restaurants.xlsx",
+]
 
 AREA_WORDS = {
     "aldgate", "balham", "battersea", "belgravia", "bloomsbury",
@@ -173,20 +177,31 @@ def main():
     args = parser.parse_args()
 
     # Locate the Excel file
-    excel_path = Path(args.file) if args.file else (
-        EXCEL_PATH if EXCEL_PATH.exists() else FALLBACK_PATH
+    excel_path = Path(args.file) if args.file else next(
+        (p for p in CANDIDATE_PATHS if p.exists()), CANDIDATE_PATHS[0]
     )
     if not excel_path.exists():
-        print(f"ERROR: Excel file not found at {excel_path}")
-        print("Either copy it to scripts/onezone_restaurants.xlsx or pass --file <path>")
+        print("ERROR: OneZone Excel file not found. Looked in:")
+        for p in CANDIDATE_PATHS:
+            print(f"  - {p}")
+        print("Pass --file <path> to point at it.")
         sys.exit(1)
 
     print(f"Reading {excel_path} …")
-    df = pd.read_excel(excel_path, sheet_name="Restaurants")
+    xl = pd.ExcelFile(excel_path)
+    # OneZone exports vary: sheet is "All Restaurants" (london export) or
+    # "Restaurants" (earlier export).
+    sheet = next(
+        (s for s in ("All Restaurants", "Restaurants") if s in xl.sheet_names),
+        xl.sheet_names[0],
+    )
+    df = pd.read_excel(xl, sheet_name=sheet)
+    # ...and the area column is "Area (Sub-Zone)" (london) or "Area" (earlier).
+    df = df.rename(columns={"Area (Sub-Zone)": "Area"})
 
     # Only rows with complete location data
     complete = df[df["Area"].notna()].copy()
-    print(f"  Total rows: {len(df)} | With location data: {len(complete)}")
+    print(f"  Sheet: {sheet} | Total rows: {len(df)} | With location data: {len(complete)}")
 
     records = [build_record(row) for _, row in complete.iterrows()]
     print(f"  Records to insert: {len(records)}")
