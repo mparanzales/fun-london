@@ -20,7 +20,7 @@ import { searchCatalog } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
-import { hasPrefs, scoreVenue, scoreEvent } from "@/lib/ranking";
+import { hasPrefs } from "@/lib/ranking";
 import {
   readUserGeo,
   haversineKm,
@@ -115,8 +115,7 @@ export function ExploreFeed({
   // quiz was removed. Anonymous visitors therefore have no taste signal: the
   // feed keeps its default order and the "Sorted around your taste" label
   // stays off, so we never claim personalisation we don't have.
-  const prefs = preferences;
-  const personalized = hasPrefs(prefs);
+  const personalized = hasPrefs(preferences);
 
   // "Near you" — read any previously captured location and let the user sort
   // the current view by walking distance.
@@ -197,21 +196,13 @@ export function ExploreFeed({
     const base = ((): FeedItem[] => {
       switch (selectedFilter) {
         case "for-you": {
-          const all: FeedItem[] = [
+          // Venues arrive already taste-ranked from the server (fetchVenueFeed)
+          // and carry no tags to rank on, so we never re-rank client-side. The
+          // small set of events follows the venues.
+          return [
             ...allVenues.map<FeedItem>((v) => ({ kind: "venue", data: v })),
             ...allEvents.map<FeedItem>((e) => ({ kind: "event", data: e })),
           ];
-          // Rank by taste when we have prefs; otherwise keep the original
-          // order. Array.sort is stable, so equal-score items keep their
-          // relative order (venues before events).
-          if (prefs && personalized) {
-            const score = (it: FeedItem) =>
-              it.kind === "venue"
-                ? scoreVenue(it.data, prefs)
-                : scoreEvent(it.data, prefs);
-            return [...all].sort((a, b) => score(b) - score(a));
-          }
-          return all;
         }
         case "restaurants":
           return allVenues
@@ -251,15 +242,7 @@ export function ExploreFeed({
       return [...base].sort((a, b) => dist(a) - dist(b));
     }
     return base;
-  }, [
-    selectedFilter,
-    allVenues,
-    allEvents,
-    prefs,
-    personalized,
-    nearestFirst,
-    userGeo,
-  ]);
+  }, [selectedFilter, allVenues, allEvents, nearestFirst, userGeo]);
 
   // Infinite scroll: render FEED_PAGE_SIZE cards at a time and grow as the user
   // nears the bottom, instead of mounting the entire catalogue at once. Reset to
@@ -480,9 +463,9 @@ export function ExploreFeed({
 
       {searchOpen && (
         <SearchOverlay
-          venues={signedIn ? allVenues : []}
-          events={signedIn ? allEvents : []}
-          searchAction={signedIn ? undefined : searchCatalog}
+          venues={[]}
+          events={[]}
+          searchAction={searchCatalog}
           onClose={() => setSearchOpen(false)}
         />
       )}
