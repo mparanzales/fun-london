@@ -121,7 +121,8 @@ async function placesTextSearch(
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY!,
-      "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress",
+      "X-Goog-FieldMask":
+        "places.id,places.displayName,places.formattedAddress",
     },
     body: JSON.stringify({ textQuery: query }),
   });
@@ -247,24 +248,42 @@ function mapVenueType(candidate: Candidate, googleTypes?: string[]): string {
   )
     return "Pub";
 
-  if (typeGuess === "wine bar" || cuisine === "wine" || cuisine === "natural wine")
+  if (
+    typeGuess === "wine bar" ||
+    cuisine === "wine" ||
+    cuisine === "natural wine"
+  )
     return "Wine Bar";
 
   if (
     typeGuess === "bar" ||
     cuisine === "cocktail" ||
     cuisine === "craft beer" ||
-    venueLists.some((v) =>
-      v.toLowerCase().includes("cocktail") || v.toLowerCase().includes("bar"),
+    venueLists.some(
+      (v) =>
+        v.toLowerCase().includes("cocktail") || v.toLowerCase().includes("bar"),
     )
   )
     return "Bar";
 
   if (
     typeGuess === "cafe" ||
-    ["bakery", "pastries", "cake", "coffee", "matcha", "sandwiches",
-     "deli", "salads", "healthy", "smoothies", "juice", "ice cream",
-     "poke", "acai"].includes(cuisine)
+    [
+      "bakery",
+      "pastries",
+      "cake",
+      "coffee",
+      "matcha",
+      "sandwiches",
+      "deli",
+      "salads",
+      "healthy",
+      "smoothies",
+      "juice",
+      "ice cream",
+      "poke",
+      "acai",
+    ].includes(cuisine)
   )
     return "Cafe";
 
@@ -286,13 +305,24 @@ function deriveMoodTags(candidate: Candidate): string[] {
   const tags = (candidate.vibe_tags_draft ?? []).map((t) => t.toLowerCase());
   const all = [...occasions, ...vibes, ...tags];
 
-  const drinkKeywords = ["drinks", "bar", "cocktail", "beer", "wine", "pub", "boozers"];
+  const drinkKeywords = [
+    "drinks",
+    "bar",
+    "cocktail",
+    "beer",
+    "wine",
+    "pub",
+    "boozers",
+  ];
   const cultureKeywords = ["art", "culture", "museum", "gallery", "theatre"];
   const activityKeywords = ["market", "outdoor", "activity", "spa", "dancing"];
 
-  if (all.some((t) => drinkKeywords.some((k) => t.includes(k)))) moods.add("drinks");
-  if (all.some((t) => cultureKeywords.some((k) => t.includes(k)))) moods.add("culture");
-  if (all.some((t) => activityKeywords.some((k) => t.includes(k)))) moods.add("activity");
+  if (all.some((t) => drinkKeywords.some((k) => t.includes(k))))
+    moods.add("drinks");
+  if (all.some((t) => cultureKeywords.some((k) => t.includes(k))))
+    moods.add("culture");
+  if (all.some((t) => activityKeywords.some((k) => t.includes(k))))
+    moods.add("activity");
 
   // Default: dinner is always valid for a restaurant
   moods.add("dinner");
@@ -357,9 +387,7 @@ function buildVenueRow(
     booking_links: bookingLinks,
     website_url: details.websiteUri ?? null,
     phone:
-      details.nationalPhoneNumber ??
-      details.internationalPhoneNumber ??
-      null,
+      details.nationalPhoneNumber ?? details.internationalPhoneNumber ?? null,
     instagram_handle: null,
     editorial_sources: [],
     creator_coverage: [],
@@ -385,11 +413,10 @@ function buildProspectRow(candidate: Candidate, details: PlaceDetails) {
     address: details.formattedAddress,
     website_url: details.websiteUri ?? null,
     phone:
-      details.nationalPhoneNumber ??
-      details.internationalPhoneNumber ??
-      null,
+      details.nationalPhoneNumber ?? details.internationalPhoneNumber ?? null,
     instagram_handle: null,
-    why_qualified: "Approved from OneZone import. No major booking platform detected — added to BD pipeline.",
+    why_qualified:
+      "Approved from OneZone import. No major booking platform detected — added to BD pipeline.",
     current_booking_method: bookingMethod,
     editorial_sources: [],
     creator_coverage: [],
@@ -552,11 +579,14 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
 
   let slug = slugify(details.displayName.text);
   let n = 2;
-  while (usedSlugs.has(slug)) slug = `${slugify(details.displayName.text)}-${n++}`;
+  while (usedSlugs.has(slug))
+    slug = `${slugify(details.displayName.text)}-${n++}`;
   usedSlugs.add(slug);
 
   if (DRY_RUN) {
-    console.log(`  [dry-run] would upsert as slug="${slug}" · type=${mapVenueType(candidate, details.types)} · booking=${bookingLinks[0]?.platform ?? "none"}`);
+    console.log(
+      `  [dry-run] would upsert as slug="${slug}" · type=${mapVenueType(candidate, details.types)} · booking=${bookingLinks[0]?.platform ?? "none"}`,
+    );
     return { status: "dry" as const };
   }
 
@@ -569,8 +599,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   const { error: venueErr } = await supabase
     .from("venues")
     .upsert(venueRow, { onConflict: "google_place_id" });
-  if (venueErr)
-    throw new Error(`venues upsert failed: ${venueErr.message}`);
+  if (venueErr) throw new Error(`venues upsert failed: ${venueErr.message}`);
   console.log(`  ✓ venues · slug="${slug}"`);
 
   if (!hasMajor) {
@@ -579,7 +608,9 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
       .from("partner_prospects")
       .upsert(prospectRow, { onConflict: "google_place_id" });
     if (prospectErr)
-      console.warn(`  ⚠ partner_prospects upsert failed: ${prospectErr.message}`);
+      console.warn(
+        `  ⚠ partner_prospects upsert failed: ${prospectErr.message}`,
+      );
     else console.log(`  ★ partner_prospects`);
   }
 
@@ -609,9 +640,7 @@ async function main() {
   if (!supabase && !DRY_RUN) throw new Error("No Supabase client");
 
   // Fetch approved candidates
-  const statuses = RETRY_FAILED
-    ? ["approved", "ingest_failed"]
-    : ["approved"];
+  const statuses = RETRY_FAILED ? ["approved", "ingest_failed"] : ["approved"];
 
   let query = supabase
     ? supabase
@@ -633,7 +662,9 @@ async function main() {
       },
     );
     const candidates = (await res.json()) as Candidate[];
-    console.log(`Found ${candidates.length} approved candidates (dry-run fetch)`);
+    console.log(
+      `Found ${candidates.length} approved candidates (dry-run fetch)`,
+    );
     return;
   }
 
