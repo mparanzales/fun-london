@@ -153,7 +153,7 @@ export const TAG_COUNT = ALL_TAGS.length;
 
 // Tag index for fast vector construction (tag → position in vector)
 export const TAG_INDEX: Readonly<Record<Tag, number>> = Object.fromEntries(
-  ALL_TAGS.map((t, i) => [t, i])
+  ALL_TAGS.map((t, i) => [t, i]),
 ) as Readonly<Record<Tag, number>>;
 
 // ── OneZone tag → canonical tag mapping ──────────────────────────────────────
@@ -289,30 +289,30 @@ export const ONEZONE_TAG_MAP: Record<string, Tag[]> = {
   "sharing style": ["small-plates"],
   "wine bar": ["wine-bar-vibes"],
   "cocktail bar": ["cocktail-bar"],
-  "speakeasy": ["speakeasy", "hidden-gem"],
-  "rooftop": ["rooftop"],
+  speakeasy: ["speakeasy", "hidden-gem"],
+  rooftop: ["rooftop"],
   "outdoor seating": ["outdoor-seating"],
   "outside seating": ["outdoor-seating"],
-  "terrace": ["outdoor-seating", "garden-terrace"],
+  terrace: ["outdoor-seating", "garden-terrace"],
   "beer garden": ["beer-garden", "outdoor-seating"],
-  "cosy": ["cosy"],
-  "intimate": ["cosy", "romantic"],
-  "romantic": ["romantic", "date-night"],
-  "elegant": ["fancy"],
-  "upscale": ["fancy"],
-  "luxury": ["fancy", "fine-dining"],
-  "casual": ["casual"],
-  "neighbourhood": ["neighbourhood"],
-  "buzzy": ["buzzy"],
-  "vibrant": ["buzzy", "lively"],
-  "lively": ["lively", "buzzy"],
-  "quirky": ["quirky", "hidden-gem"],
-  "unique": ["quirky"],
+  cosy: ["cosy"],
+  intimate: ["cosy", "romantic"],
+  romantic: ["romantic", "date-night"],
+  elegant: ["fancy"],
+  upscale: ["fancy"],
+  luxury: ["fancy", "fine-dining"],
+  casual: ["casual"],
+  neighbourhood: ["neighbourhood"],
+  buzzy: ["buzzy"],
+  vibrant: ["buzzy", "lively"],
+  lively: ["lively", "buzzy"],
+  quirky: ["quirky", "hidden-gem"],
+  unique: ["quirky"],
   "hidden gem": ["hidden-gem"],
-  "stunning": ["beautiful-interiors", "wow-factor"],
-  "beautiful": ["beautiful-interiors"],
-  "minimalist": ["minimalist"],
-  "sleek": ["minimalist", "fancy"],
+  stunning: ["beautiful-interiors", "wow-factor"],
+  beautiful: ["beautiful-interiors"],
+  minimalist: ["minimalist"],
+  sleek: ["minimalist", "fancy"],
   "good for groups": ["good-for-groups"],
   "dog friendly": ["dog-friendly"],
   "child friendly": ["child-friendly"],
@@ -325,22 +325,22 @@ export const ONEZONE_TAG_MAP: Record<string, Tag[]> = {
   "work spot": ["laptop-friendly"],
   "laptop friendly": ["laptop-friendly"],
   "coffee shop": ["coffee"],
-  "bakery": ["bakery"],
-  "brunch": ["brunch"],
-  "breakfast": ["breakfast"],
+  bakery: ["bakery"],
+  brunch: ["brunch"],
+  breakfast: ["breakfast"],
   "sunday roast": ["sunday-roast"],
-  "healthy": ["healthy"],
-  "vegan": ["vegan"],
+  healthy: ["healthy"],
+  vegan: ["vegan"],
   "good vegan options": ["vegan"],
-  "vegetarian": ["vegetarian"],
+  vegetarian: ["vegetarian"],
   "good vegetarian options": ["vegetarian"],
   "gluten free": ["gluten-free"],
   "natural wine": ["natural-wine", "wine-bar-vibes"],
   "biodynamic wines": ["natural-wine", "wine-bar-vibes"],
   "craft beer": ["craft-beer"],
-  "music": ["music-djs"],
-  "djs": ["music-djs", "late-night"],
-  "dancing": ["music-djs", "late-night"],
+  music: ["music-djs"],
+  djs: ["music-djs", "late-night"],
+  dancing: ["music-djs", "late-night"],
 } as const;
 
 // ── Vector helpers ────────────────────────────────────────────────────────────
@@ -358,7 +358,9 @@ export function tagsToVector(tags: Tag[]): number[] {
 /** Cosine similarity between two equal-length vectors. Returns 0 if either is zero. */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) return 0;
-  let dot = 0, magA = 0, magB = 0;
+  let dot = 0,
+    magA = 0,
+    magB = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     magA += a[i] * a[i];

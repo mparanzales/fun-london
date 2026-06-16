@@ -87,7 +87,9 @@ export default async function AdminCandidatesPage({
   if (tab === "needs_review") {
     const { data, error } = await supabase
       .from("pending_candidates")
-      .select("id, name, neighbourhood, type_guess, reviewed_notes, filter_results")
+      .select(
+        "id, name, neighbourhood, type_guess, reviewed_notes, filter_results",
+      )
       .eq("status", "needs_review")
       .order("reviewed_at", { ascending: false })
       .limit(100);
@@ -255,13 +257,15 @@ function ReviewCard({ it }: { it: ReviewItem }) {
         </div>
         <div className="text-xs text-muted-fg leading-relaxed">
           Google matched to{" "}
-          <span className="text-fg font-semibold">{fr.matched_name ?? "—"}</span>
+          <span className="text-fg font-semibold">
+            {fr.matched_name ?? "n/a"}
+          </span>
           {fr.matched_address ? (
             <span className="text-muted-fg/70"> · {fr.matched_address}</span>
           ) : null}
         </div>
         <div className="text-xs text-muted-fg mt-1">
-          Rating {fr.rating ?? "—"} · {fr.reviews ?? 0} reviews ·{" "}
+          Rating {fr.rating ?? "n/a"} · {fr.reviews ?? 0} reviews ·{" "}
           {fr.business_status ?? "status unknown"}
         </div>
         {fr.website ? (
