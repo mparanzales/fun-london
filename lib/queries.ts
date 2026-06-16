@@ -353,17 +353,9 @@ function scoreFeedRow(r: FeedRankRow, prefs: UserPreferences): number {
   );
 }
 
-// Cached card+tags index of the whole live catalogue, shared across requests
-// (10-min TTL). Each feed-page request then ranks + slices THIS in memory
-// instead of re-hitting the DB, so cursor pagination is cheap. Only card-level
-// fields + the two ranking tag arrays are held; the tags never leave the server.
-let venueIndexCache: { at: number; rows: FeedRankRow[] } | null = null;
-const VENUE_INDEX_TTL_MS = 10 * 60 * 1000;
-
-async function getVenueIndex(): Promise<FeedRankRow[]> {
-  if (venueIndexCache && Date.now() - venueIndexCache.at < VENUE_INDEX_TTL_MS) {
-    return venueIndexCache.rows;
-  }
+export async function fetchVenueFeed(
+  prefs: UserPreferences | null,
+): Promise<Venue[]> {
   const supabase = createClient();
   const PAGE = 1000;
   const rows: FeedRankRow[] = [];
@@ -377,94 +369,18 @@ async function getVenueIndex(): Promise<FeedRankRow[]> {
       .order("curation_tier", { ascending: true })
       .order("created_at", { ascending: true })
       .range(from, from + PAGE - 1);
-    if (error) throw new Error(`getVenueIndex: ${error.message}`);
+    if (error) throw new Error(`fetchVenueFeed: ${error.message}`);
     const page = (data as FeedRankRow[]) ?? [];
     rows.push(...page);
     if (page.length < PAGE) break;
   }
-  venueIndexCache = { at: Date.now(), rows };
-  return rows;
-}
 
-export type FeedFilter = "for-you" | "restaurants" | "bars" | "cafes" | "music";
-export type FeedSort = "taste" | "nearest";
-
-const FEED_BAR_TYPES = ["Bar", "Wine Bar", "Pub", "Listening Bar"];
-const FEED_MUSIC_TYPES = ["Live Music"];
-
-function matchesFeedFilter(type: string, filter: FeedFilter): boolean {
-  switch (filter) {
-    case "restaurants":
-      return type === "Restaurant";
-    case "bars":
-      return FEED_BAR_TYPES.includes(type);
-    case "cafes":
-      return type === "Cafe";
-    case "music":
-      return FEED_MUSIC_TYPES.includes(type);
-    case "for-you":
-      return true;
+  if (prefs && hasPrefs(prefs)) {
+    const scored = rows.map((r) => ({ r, s: scoreFeedRow(r, prefs) }));
+    scored.sort((a, b) => b.s - a.s); // V8 sort is stable: ties keep DB order
+    return scored.map((x) => mapVenuePreview(x.r));
   }
-}
-
-function haversineKm(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const la1 = (a.lat * Math.PI) / 180;
-  const la2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-// One page of the signed-in feed: filter by category, rank by taste (or sort by
-// distance), slice [offset, offset+limit), and return LIGHT cards. The whole
-// catalogue stays on the server; only one page of cards crosses the wire.
-export async function feedPage(args: {
-  prefs: UserPreferences | null;
-  filter: FeedFilter;
-  offset: number;
-  limit: number;
-  sort: FeedSort;
-  lat?: number | null;
-  lng?: number | null;
-}): Promise<{ venues: Venue[]; hasMore: boolean }> {
-  const idx = await getVenueIndex();
-  let rows = idx.filter((r) =>
-    matchesFeedFilter(r.type as string, args.filter),
-  );
-
-  if (args.sort === "nearest" && args.lat != null && args.lng != null) {
-    const g = { lat: args.lat, lng: args.lng };
-    rows = [...rows].sort((a, b) => {
-      const da =
-        a.lat != null && a.lng != null
-          ? haversineKm(g, { lat: a.lat, lng: a.lng })
-          : Infinity;
-      const db =
-        b.lat != null && b.lng != null
-          ? haversineKm(g, { lat: b.lat, lng: b.lng })
-          : Infinity;
-      return da - db;
-    });
-  } else if (args.prefs && hasPrefs(args.prefs)) {
-    const prefs = args.prefs;
-    rows = rows
-      .map((r) => ({ r, s: scoreFeedRow(r, prefs) }))
-      .sort((a, b) => b.s - a.s)
-      .map((x) => x.r);
-  }
-
-  const page = rows.slice(args.offset, args.offset + args.limit);
-  return {
-    venues: page.map(mapVenuePreview),
-    hasMore: args.offset + args.limit < rows.length,
-  };
+  return rows.map(mapVenuePreview);
 }
 
 // Per-CATEGORY anonymous preview. So a signed-out visitor can switch the

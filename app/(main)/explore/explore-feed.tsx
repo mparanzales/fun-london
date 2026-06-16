@@ -17,8 +17,6 @@ import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
 import { searchCatalog } from "@/lib/search-action";
-import { loadFeedPage } from "@/lib/feed-action";
-import type { FeedFilter, FeedSort } from "@/lib/queries";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
@@ -79,10 +77,10 @@ function getEyebrow(): "today in" | "tonight in" {
 // Component slices the anonymous preview to the SAME count in the DB.
 export const PREVIEW_COUNT = 4;
 
-// The signed-in feed loads a page of cards at a time (cursor pagination) from
-// the server instead of the whole catalogue. Exported so the Server Component
-// renders the same-size first page.
-export const FEED_PAGE_SIZE = 24;
+// The signed-in feed renders a page of cards at a time (infinite scroll) instead
+// of the whole catalogue. Mounting 2,000+ image cards on a single load was the
+// main driver of poor LCP / FCP / INP on /explore.
+const FEED_PAGE_SIZE = 24;
 
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
@@ -94,7 +92,6 @@ export function ExploreFeed({
   preferences,
   signedIn,
   totalVenues,
-  initialHasMore = false,
 }: {
   venues: Venue[];
   events: Event[];
@@ -104,8 +101,6 @@ export function ExploreFeed({
   // Real catalogue size for the hero trust strip. For anon, `allVenues` is
   // only the trimmed preview, so the count must be passed separately.
   totalVenues: number;
-  // Signed-in: whether page 0 (in `allVenues`) has more pages to paginate.
-  initialHasMore?: boolean;
 }) {
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -249,136 +244,27 @@ export function ExploreFeed({
     return base;
   }, [selectedFilter, allVenues, allEvents, nearestFirst, userGeo]);
 
-  // ── Signed-in feed: cursor pagination ───────────────────────────────────────
-  // Page 0 arrives server-rendered in `allVenues`; the rest paginate in via the
-  // server action as the user scrolls. The whole catalogue never ships, and the
-  // next batch is fetched ~2 screens early so it's there before you reach it.
-  const [loaded, setLoaded] = useState<Venue[]>(allVenues);
-  const [feedHasMore, setFeedHasMore] = useState(initialHasMore);
-  const loadingRef = useRef(false);
-  const reqIdRef = useRef(0);
-  const firstRun = useRef(true);
-  const lastKeyRef = useRef<string | null>(null);
-
-  // Reset + fetch page 0 whenever the view (category or nearest sort) changes.
+  // Infinite scroll: render FEED_PAGE_SIZE cards at a time and grow as the user
+  // nears the bottom, instead of mounting the entire catalogue at once. Reset to
+  // the first page whenever the view (category or nearest-first) changes.
+  const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE);
   useEffect(() => {
-    if (!signedIn) return;
-    const sort: FeedSort = nearestFirst ? "nearest" : "taste";
-    const filter =
-      selectedFilter === "events" ? null : (selectedFilter as FeedFilter);
-    const geoKey = userGeo
-      ? `${userGeo.lat.toFixed(3)},${userGeo.lng.toFixed(3)}`
-      : "";
-    const key = `${selectedFilter}|${sort}|${sort === "nearest" ? geoKey : ""}`;
-    // Page 0 of the default view is already server-rendered; don't re-fetch it.
-    if (firstRun.current) {
-      firstRun.current = false;
-      lastKeyRef.current = key;
-      return;
-    }
-    if (lastKeyRef.current === key) return; // e.g. geo loaded during taste sort
-    lastKeyRef.current = key;
-
-    if (!filter) {
-      setLoaded([]); // "Events" view has no venue pages
-      setFeedHasMore(false);
-      return;
-    }
-    const myReq = ++reqIdRef.current;
-    loadingRef.current = true;
-    setLoaded([]);
-    setFeedHasMore(true);
-    loadFeedPage({
-      filter,
-      offset: 0,
-      limit: FEED_PAGE_SIZE,
-      sort,
-      lat: userGeo?.lat ?? null,
-      lng: userGeo?.lng ?? null,
-    })
-      .then((res) => {
-        if (myReq !== reqIdRef.current) return;
-        setLoaded(res.venues);
-        setFeedHasMore(res.hasMore);
-      })
-      .finally(() => {
-        if (myReq === reqIdRef.current) loadingRef.current = false;
-      });
-  }, [signedIn, selectedFilter, nearestFirst, userGeo]);
-
-  const loadMore = useCallback(() => {
-    if (
-      !signedIn ||
-      loadingRef.current ||
-      !feedHasMore ||
-      selectedFilter === "events"
-    )
-      return;
-    const sort: FeedSort = nearestFirst ? "nearest" : "taste";
-    loadingRef.current = true;
-    const myReq = reqIdRef.current;
-    loadFeedPage({
-      filter: selectedFilter as FeedFilter,
-      offset: loaded.length,
-      limit: FEED_PAGE_SIZE,
-      sort,
-      lat: userGeo?.lat ?? null,
-      lng: userGeo?.lng ?? null,
-    })
-      .then((res) => {
-        if (myReq !== reqIdRef.current) return;
-        setLoaded((prev) => [...prev, ...res.venues]);
-        setFeedHasMore(res.hasMore);
-      })
-      .finally(() => {
-        loadingRef.current = false;
-      });
-  }, [
-    signedIn,
-    feedHasMore,
-    selectedFilter,
-    nearestFirst,
-    userGeo,
-    loaded.length,
-  ]);
+    setVisibleCount(FEED_PAGE_SIZE);
+  }, [selectedFilter, nearestFirst]);
 
   const ioRef = useRef<IntersectionObserver | null>(null);
-  const loadMoreRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      ioRef.current?.disconnect();
-      if (!node) return;
-      ioRef.current = new IntersectionObserver(
-        (entries) => {
-          if (entries[0]?.isIntersecting) loadMore();
-        },
-        { rootMargin: "1800px" }, // ~2 screens of runway
-      );
-      ioRef.current.observe(node);
-    },
-    [loadMore],
-  );
-
-  // The list actually rendered. Signed-in: the server-paginated `loaded` venues
-  // (plus events for the music / events views). Anon: the metered preview.
-  const displayItems: FeedItem[] = useMemo(() => {
-    if (!signedIn) return items;
-    if (selectedFilter === "events") {
-      return allEvents.map<FeedItem>((e) => ({ kind: "event", data: e }));
-    }
-    const venueItems = loaded.map<FeedItem>((v) => ({
-      kind: "venue",
-      data: v,
-    }));
-    if (selectedFilter === "music") {
-      return [
-        ...venueItems,
-        ...allEvents
-          .filter((e) => e.category === MUSIC_EVENT_CATEGORY)
-          .map<FeedItem>((e) => ({ kind: "event", data: e })),
-      ];
-    }
-    return venueItems;
-  }, [signedIn, items, loaded, selectedFilter, allEvents]);
+  const loadMoreRef = useCallback((node: HTMLDivElement | null) => {
+    ioRef.current?.disconnect();
+    if (!node) return;
+    ioRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting)
+          setVisibleCount((c) => c + FEED_PAGE_SIZE);
+      },
+      { rootMargin: "800px" },
+    );
+    ioRef.current.observe(node);
+  }, []);
 
   // Smart category-tag visibility:
   //   For You / Music / Events → mixed sources or subtypes → show tags
@@ -526,7 +412,7 @@ export function ExploreFeed({
         </div>
       )}
 
-      {displayItems.length === 0 ? (
+      {items.length === 0 ? (
         <div className="px-5 pt-10 text-center text-sm text-muted-fg">
           Nothing here yet. Check back soon.
         </div>
@@ -534,8 +420,8 @@ export function ExploreFeed({
         <>
           <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
             {(signedIn
-              ? displayItems
-              : displayItems.slice(0, PREVIEW_COUNT)
+              ? items.slice(0, visibleCount)
+              : items.slice(0, PREVIEW_COUNT)
             ).map((item, index) =>
               item.kind === "venue" ? (
                 <VenueCard
@@ -568,23 +454,8 @@ export function ExploreFeed({
               ),
             )}
           </div>
-          {signedIn && feedHasMore && (
-            // Sentinel + skeletons. The observer (rootMargin ~2 screens)
-            // prefetches the next page well before this is reached; the
-            // skeletons keep the feed from ever ending abruptly if a fast
-            // scroll outruns the fetch.
-            <div
-              ref={loadMoreRef}
-              className="px-5 lg:px-6 pt-4 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5"
-            >
-              {[0, 1].map((i) => (
-                <div
-                  key={i}
-                  aria-hidden
-                  className="aspect-[4/3] rounded-2xl bg-muted animate-pulse"
-                />
-              ))}
-            </div>
+          {signedIn && visibleCount < items.length && (
+            <div ref={loadMoreRef} aria-hidden className="h-8" />
           )}
           {!signedIn && <SignupWall returnTo="/explore" />}
         </>
