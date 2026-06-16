@@ -35,6 +35,23 @@ export type BookingStatus =
   | "completed"
   | "self_added";
 
+// Lifecycle states for an ingest candidate in public.pending_candidates.
+// Mirrors the status CHECK in supabase/schema.sql — keep the two in sync.
+// Shared so the admin actions + ingest script can type their status writes
+// against it: a wrong value becomes a compile error, not a silent DB reject.
+export const PENDING_CANDIDATE_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "snoozed",
+  "ingested",
+  "needs_review",
+  "ingest_failed",
+  "skipped",
+] as const;
+export type PendingCandidateStatus =
+  (typeof PENDING_CANDIDATE_STATUSES)[number];
+
 // ── Core entities ────────────────────────────────────────────────────────
 
 // A bookable platform's link for a venue. Phase 4 supports multiple

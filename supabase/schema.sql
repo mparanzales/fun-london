@@ -456,3 +456,35 @@ create policy "feedback anyone insert"
   on public.feedback for insert
   to anon, authenticated
   with check (user_id is null or user_id = (select auth.uid()));
+
+-- ── Enum value enforcement (defense-in-depth) ──────────────────────────────
+-- The ingest/admin writers (scripts/ingest-from-pending.ts, buildVenueRow /
+-- buildProspectRow) only emit values from the TS unions in lib/types.ts, and
+-- lib/queries.ts casts these columns blindly on read. Without a DB-level CHECK,
+-- a future mapping edit (e.g. a lowercased 'pub') would be silently stored and
+-- mis-ranked, with no error on write or read. These mirror the TS unions
+-- exactly. Guarded on pg_constraint so re-running schema.sql is safe; every
+-- existing row was verified to conform before these were added.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'venues_type_check') then
+    alter table public.venues add constraint venues_type_check
+      check (type in ('Restaurant','Cafe','Bar','Wine Bar','Pub','Listening Bar','Live Music','Culture','Market','Outdoors'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'venues_price_check') then
+    alter table public.venues add constraint venues_price_check
+      check (price in ('Free','£','££','£££'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'venues_time_of_day_check') then
+    alter table public.venues add constraint venues_time_of_day_check
+      check (time_of_day in ('Day','Evening','Night'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'venues_curation_tier_check') then
+    alter table public.venues add constraint venues_curation_tier_check
+      check (curation_tier in ('curated','discovered'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'partner_prospects_bd_status_check') then
+    alter table public.partner_prospects add constraint partner_prospects_bd_status_check
+      check (bd_status in ('prospect','contacted','in_conversation','partnered','declined','passed'));
+  end if;
+end $$;

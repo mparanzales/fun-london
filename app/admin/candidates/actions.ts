@@ -16,6 +16,7 @@
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/admin";
 import { getAdminUser } from "@/lib/auth";
+import type { PendingCandidateStatus } from "@/lib/types";
 
 export type Decision = "approve" | "reject" | "snooze";
 
@@ -36,7 +37,9 @@ export async function decideCandidate(formData: FormData): Promise<void> {
     return;
   }
 
-  let nextStatus: string;
+  // Typed against the allowed set (not bare `string`), so a wrong value here
+  // is a build error rather than a status the DB CHECK rejects at runtime.
+  let nextStatus: PendingCandidateStatus;
   let snoozedUntil: string | null = null;
 
   switch (decision) {
