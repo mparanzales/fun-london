@@ -178,21 +178,33 @@ function mapEvent(r: EventRow): Event {
 // surface a former demo venue, ingest it via scripts/ingest-venues.ts.
 export async function fetchVenues(): Promise<Venue[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("venues")
-    .select("*")
-    .not("google_place_id", "is", null)
-    // Never surface a venue on a stock (Unsplash) fallback or with no real
-    // photo. Show a real Google Places photo (mirrored to our storage), or
-    // nothing.
-    .not("img_url", "ilike", "%unsplash%")
-    .neq("img_url", "")
-    // Curated (hand-picked) venues first — "curated" sorts before "discovered"
-    // ascending — then stable by created_at.
-    .order("curation_tier", { ascending: true })
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(`fetchVenues: ${error.message}`);
-  return (data as VenueRow[]).map(mapVenue);
+  // Paginate past PostgREST's 1000-row cap. With >1000 live venues an
+  // unpaginated select silently dropped everything after row 1000 (the entire
+  // onezone import sorts last by created_at), so signed-in users were missing
+  // ~half the catalogue in BOTH the feed and the in-memory search.
+  const PAGE = 1000;
+  const rows: VenueRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("venues")
+      .select("*")
+      .not("google_place_id", "is", null)
+      // Never surface a venue on a stock (Unsplash) fallback or with no real
+      // photo. Show a real Google Places photo (mirrored to our storage), or
+      // nothing.
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      // Curated (hand-picked) venues first — "curated" sorts before "discovered"
+      // ascending — then stable by created_at.
+      .order("curation_tier", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchVenues: ${error.message}`);
+    const page = (data as VenueRow[]) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.map(mapVenue);
 }
 
 // ── Anonymous metered preview ───────────────────────────────────────────
@@ -492,26 +504,35 @@ export async function fetchEvents(): Promise<Event[]> {
   // wall-clock — during BST a UTC midnight is an hour off and drops
   // late-night events.
   const startOfToday = startOfLondonDayUtc();
-  const { data, error } = await supabase
-    .from("events")
-    .select("*")
-    .is("cancelled_at", null) // hide cancelled events / hidden pop-ups
-    // Real images only. An event without its OWN image must never surface: we
-    // never show a generic stock photo that isn't the event (a wrong photo is
-    // a wrong "fact", against the cross-checked promise). Stock fallbacks were
-    // Unsplash URLs; exclude those and any empty value. Ingestion now skips
-    // image-less events at the source, so this is defence-in-depth.
-    .not("img_url", "ilike", "%unsplash%")
-    .neq("img_url", "")
-    // Normal events: keep from the start of today onward. Pop-ups: ALSO keep
-    // while their run is still on (they may have started in the past but
-    // ends_at is today or later). cancelled_at doubles as the pop-up "hide".
-    .or(
-      `starts_at.gte.${startOfToday.toISOString()},ends_at.gte.${startOfToday.toISOString()}`,
-    )
-    .order("starts_at", { ascending: true });
-  if (error) throw new Error(`fetchEvents: ${error.message}`);
-  return (data as EventRow[]).map(mapEvent);
+  // Paginate past the 1000-row cap (same reason as fetchVenues).
+  const PAGE = 1000;
+  const rows: EventRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("events")
+      .select("*")
+      .is("cancelled_at", null) // hide cancelled events / hidden pop-ups
+      // Real images only. An event without its OWN image must never surface: we
+      // never show a generic stock photo that isn't the event (a wrong photo is
+      // a wrong "fact", against the cross-checked promise). Stock fallbacks were
+      // Unsplash URLs; exclude those and any empty value. Ingestion now skips
+      // image-less events at the source, so this is defence-in-depth.
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      // Normal events: keep from the start of today onward. Pop-ups: ALSO keep
+      // while their run is still on (they may have started in the past but
+      // ends_at is today or later). cancelled_at doubles as the pop-up "hide".
+      .or(
+        `starts_at.gte.${startOfToday.toISOString()},ends_at.gte.${startOfToday.toISOString()}`,
+      )
+      .order("starts_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchEvents: ${error.message}`);
+    const page = (data as EventRow[]) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.map(mapEvent);
 }
 
 // ── Anonymous event preview (mirror of the venue preview) ───────────────
