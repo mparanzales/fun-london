@@ -163,6 +163,8 @@ export function PlanFlow({
       vibe: computed.vibe,
       budget: computed.budget,
       stops: computed.steps.length,
+      poolStage: computed.poolStage,
+      poolSize: computed.poolSize,
     });
     void loadSavedPlans();
   };
@@ -298,6 +300,8 @@ export function PlanFlow({
                 budget,
                 stops: result.steps.length, // engine outcome: 0–3 stops filled
                 full: result.steps.length === 3, // did it fill a complete night?
+                poolStage: result.poolStage, // area | budget | all (had to widen?)
+                poolSize: result.poolSize, // candidates the engine chose from
               });
             }}
             className="w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
@@ -456,6 +460,8 @@ export function PlanFlow({
                 budget,
                 stops: result.steps.length,
                 full: result.steps.length === 3,
+                poolStage: result.poolStage,
+                poolSize: result.poolSize,
               });
             }}
             className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold"
