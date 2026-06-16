@@ -121,7 +121,8 @@ async function placesTextSearch(
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY!,
-      "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress",
+      "X-Goog-FieldMask":
+        "places.id,places.displayName,places.formattedAddress",
     },
     body: JSON.stringify({ textQuery: query }),
   });
@@ -247,24 +248,42 @@ function mapVenueType(candidate: Candidate, googleTypes?: string[]): string {
   )
     return "Pub";
 
-  if (typeGuess === "wine bar" || cuisine === "wine" || cuisine === "natural wine")
+  if (
+    typeGuess === "wine bar" ||
+    cuisine === "wine" ||
+    cuisine === "natural wine"
+  )
     return "Wine Bar";
 
   if (
     typeGuess === "bar" ||
     cuisine === "cocktail" ||
     cuisine === "craft beer" ||
-    venueLists.some((v) =>
-      v.toLowerCase().includes("cocktail") || v.toLowerCase().includes("bar"),
+    venueLists.some(
+      (v) =>
+        v.toLowerCase().includes("cocktail") || v.toLowerCase().includes("bar"),
     )
   )
     return "Bar";
 
   if (
     typeGuess === "cafe" ||
-    ["bakery", "pastries", "cake", "coffee", "matcha", "sandwiches",
-     "deli", "salads", "healthy", "smoothies", "juice", "ice cream",
-     "poke", "acai"].includes(cuisine)
+    [
+      "bakery",
+      "pastries",
+      "cake",
+      "coffee",
+      "matcha",
+      "sandwiches",
+      "deli",
+      "salads",
+      "healthy",
+      "smoothies",
+      "juice",
+      "ice cream",
+      "poke",
+      "acai",
+    ].includes(cuisine)
   )
     return "Cafe";
 
@@ -286,13 +305,24 @@ function deriveMoodTags(candidate: Candidate): string[] {
   const tags = (candidate.vibe_tags_draft ?? []).map((t) => t.toLowerCase());
   const all = [...occasions, ...vibes, ...tags];
 
-  const drinkKeywords = ["drinks", "bar", "cocktail", "beer", "wine", "pub", "boozers"];
+  const drinkKeywords = [
+    "drinks",
+    "bar",
+    "cocktail",
+    "beer",
+    "wine",
+    "pub",
+    "boozers",
+  ];
   const cultureKeywords = ["art", "culture", "museum", "gallery", "theatre"];
   const activityKeywords = ["market", "outdoor", "activity", "spa", "dancing"];
 
-  if (all.some((t) => drinkKeywords.some((k) => t.includes(k)))) moods.add("drinks");
-  if (all.some((t) => cultureKeywords.some((k) => t.includes(k)))) moods.add("culture");
-  if (all.some((t) => activityKeywords.some((k) => t.includes(k)))) moods.add("activity");
+  if (all.some((t) => drinkKeywords.some((k) => t.includes(k))))
+    moods.add("drinks");
+  if (all.some((t) => cultureKeywords.some((k) => t.includes(k))))
+    moods.add("culture");
+  if (all.some((t) => activityKeywords.some((k) => t.includes(k))))
+    moods.add("activity");
 
   // Default: dinner is always valid for a restaurant
   moods.add("dinner");
@@ -300,21 +330,21 @@ function deriveMoodTags(candidate: Candidate): string[] {
   return Array.from(moods);
 }
 
-// Build the subset of vibe_tags we can populate without a human editor
+// Carry the FULL onezone tag set onto the venue, deduped. vibe_tags_draft holds
+// the rich raw "Tags" column (Date Night, Cosy, Tasting Menu, ...) plus the
+// Vibes lists; `source` carries the remaining curated lists. We insert ALL of
+// them — the card decides how many chips to render.
 function deriveVibeTags(candidate: Candidate): string[] {
   const source = candidate.sources.find((s) => s.source === "onezone");
-  if (!source) return [];
 
   const tags = new Set<string>();
+  for (const t of candidate.vibe_tags_draft ?? []) tags.add(t);
+  for (const c of source?.cuisine_lists ?? []) tags.add(c);
+  for (const o of source?.occasion_lists ?? []) tags.add(o);
+  for (const v of source?.vibe_lists ?? []) tags.add(v);
+  for (const t of source?.top_lists ?? []) tags.add(t);
 
-  // Pull from vibe_lists (already curated by OneZone)
-  for (const v of source.vibe_lists ?? []) tags.add(v);
-  // Pull cuisine lists as display chips
-  for (const c of source.cuisine_lists ?? []) tags.add(c);
-  // Top lists add context
-  for (const t of source.top_lists ?? []) tags.add(t);
-
-  return Array.from(tags).slice(0, 8); // cap at 8 chips per card
+  return Array.from(tags);
 }
 
 // ── Row builders ─────────────────────────────────────────────────────────────
@@ -357,9 +387,7 @@ function buildVenueRow(
     booking_links: bookingLinks,
     website_url: details.websiteUri ?? null,
     phone:
-      details.nationalPhoneNumber ??
-      details.internationalPhoneNumber ??
-      null,
+      details.nationalPhoneNumber ?? details.internationalPhoneNumber ?? null,
     instagram_handle: null,
     editorial_sources: [],
     creator_coverage: [],
@@ -385,11 +413,10 @@ function buildProspectRow(candidate: Candidate, details: PlaceDetails) {
     address: details.formattedAddress,
     website_url: details.websiteUri ?? null,
     phone:
-      details.nationalPhoneNumber ??
-      details.internationalPhoneNumber ??
-      null,
+      details.nationalPhoneNumber ?? details.internationalPhoneNumber ?? null,
     instagram_handle: null,
-    why_qualified: "Approved from OneZone import. No major booking platform detected — added to BD pipeline.",
+    why_qualified:
+      "Approved from OneZone import. No major booking platform detected — added to BD pipeline.",
     current_booking_method: bookingMethod,
     editorial_sources: [],
     creator_coverage: [],
@@ -444,15 +471,66 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     `  found: ${searchResult.displayName.text} · ${searchResult.formattedAddress}`,
   );
 
-  // Check if this place_id is already in venues
+  // Already in venues? Don't re-publish — but reconcile first. The onezone
+  // candidate may carry tags this venue was imported without (e.g. venues
+  // ingested before the all-tags fix, or matched by a different candidate).
+  // Union the candidate's full tag set into the existing venue so nothing the
+  // spreadsheet knows is lost, then mark the candidate "skipped" (stamping the
+  // matched place_id) so it drains and never re-bills Google next pass.
   if (!DRY_RUN && supabase) {
     const { data: existing } = await supabase
       .from("venues")
-      .select("slug")
+      .select("id, slug, vibe_tags, curation_tier")
       .eq("google_place_id", searchResult.id)
       .maybeSingle();
     if (existing) {
-      console.log(`  ↩ already in venues as "${existing.slug}" — skipping`);
+      // Only enrich DISCOVERED venues. Curated venues carry hand-picked
+      // editorial chips — never overwrite those with raw onezone labels.
+      let added = 0;
+      if (existing.curation_tier === "discovered") {
+        const existingSet = new Set<string>(existing.vibe_tags ?? []);
+        const mergedSet = new Set<string>([
+          ...existingSet,
+          ...deriveVibeTags(candidate),
+        ]);
+        // Count by set difference so a pre-existing duplicate in the stored
+        // array can't make a genuinely-new tag look like "nothing added".
+        added = mergedSet.size - existingSet.size;
+        if (added > 0) {
+          const { error: enrichErr } = await supabase
+            .from("venues")
+            .update({ vibe_tags: Array.from(mergedSet) })
+            .eq("id", existing.id);
+          if (enrichErr)
+            console.warn(`  ⚠ tag enrich failed: ${enrichErr.message}`);
+          else
+            console.log(
+              `  ↩ already in venues as "${existing.slug}" — +${added} missing tags (now ${mergedSet.size})`,
+            );
+        } else {
+          console.log(
+            `  ↩ already in venues as "${existing.slug}" — tags already complete`,
+          );
+        }
+      } else {
+        console.log(
+          `  ↩ already in venues as "${existing.slug}" (curated — tags left untouched)`,
+        );
+      }
+      const { error: skipErr } = await supabase
+        .from("pending_candidates")
+        .update({
+          // No google_place_id stamp: it is UNIQUE on pending_candidates and
+          // many onezone candidates map to one venue, so only the published
+          // ("ingested") candidate holds the link. The matched venue slug is
+          // recorded in reviewed_notes instead.
+          status: "skipped",
+          reviewed_at: new Date().toISOString(),
+          reviewed_notes: `Already in venues as "${existing.slug}"${added > 0 ? ` (+${added} tags)` : ""}`,
+        })
+        .eq("id", candidate.id);
+      if (skipErr)
+        console.warn(`  ⚠ skip status update failed: ${skipErr.message}`);
       return { status: "skipped" as const };
     }
   }
@@ -467,15 +545,17 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   if (!gate.ok) {
     console.log(`  ⏸ needs review — ${gate.reason} (not published)`);
     if (!DRY_RUN && supabase) {
-      await supabase
+      const { error: qErr } = await supabase
         .from("pending_candidates")
         .update({
           status: "needs_review",
           reviewed_at: new Date().toISOString(),
           reviewed_notes: `Auto-gate: ${gate.reason}`,
-          google_place_id: searchResult.id,
-          // Keep the Google match so a reviewer can judge if it's the right
-          // place (and approve / fix the name) without re-querying.
+          // Do NOT stamp google_place_id here: pending_candidates.google_place_id
+          // is UNIQUE, and several onezone candidates can resolve to the same
+          // Google place. Only the candidate that actually publishes (the
+          // "ingested" path) holds the 1:1 link. The match is preserved in
+          // filter_results below for the reviewer.
           filter_results: {
             gate: "failed",
             reason: gate.reason,
@@ -488,6 +568,8 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
           },
         })
         .eq("id", candidate.id);
+      if (qErr)
+        console.warn(`  ⚠ needs_review status update failed: ${qErr.message}`);
     }
     return { status: "needs_review" as const };
   }
@@ -497,11 +579,14 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
 
   let slug = slugify(details.displayName.text);
   let n = 2;
-  while (usedSlugs.has(slug)) slug = `${slugify(details.displayName.text)}-${n++}`;
+  while (usedSlugs.has(slug))
+    slug = `${slugify(details.displayName.text)}-${n++}`;
   usedSlugs.add(slug);
 
   if (DRY_RUN) {
-    console.log(`  [dry-run] would upsert as slug="${slug}" · type=${mapVenueType(candidate, details.types)} · booking=${bookingLinks[0]?.platform ?? "none"}`);
+    console.log(
+      `  [dry-run] would upsert as slug="${slug}" · type=${mapVenueType(candidate, details.types)} · booking=${bookingLinks[0]?.platform ?? "none"}`,
+    );
     return { status: "dry" as const };
   }
 
@@ -514,8 +599,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   const { error: venueErr } = await supabase
     .from("venues")
     .upsert(venueRow, { onConflict: "google_place_id" });
-  if (venueErr)
-    throw new Error(`venues upsert failed: ${venueErr.message}`);
+  if (venueErr) throw new Error(`venues upsert failed: ${venueErr.message}`);
   console.log(`  ✓ venues · slug="${slug}"`);
 
   if (!hasMajor) {
@@ -524,15 +608,24 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
       .from("partner_prospects")
       .upsert(prospectRow, { onConflict: "google_place_id" });
     if (prospectErr)
-      console.warn(`  ⚠ partner_prospects upsert failed: ${prospectErr.message}`);
+      console.warn(
+        `  ⚠ partner_prospects upsert failed: ${prospectErr.message}`,
+      );
     else console.log(`  ★ partner_prospects`);
   }
 
-  // Mark candidate ingested
-  await supabase
+  // Mark candidate ingested + stamp the matched place_id so the venue can be
+  // linked back to its candidate (e.g. for tag backfills / personalisation).
+  const { error: ingErr } = await supabase
     .from("pending_candidates")
-    .update({ status: "ingested", reviewed_at: new Date().toISOString() })
+    .update({
+      status: "ingested",
+      reviewed_at: new Date().toISOString(),
+      google_place_id: details.id,
+    })
     .eq("id", candidate.id);
+  if (ingErr)
+    console.warn(`  ⚠ ingested status update failed: ${ingErr.message}`);
 
   return { status: "ingested" as const };
 }
@@ -547,9 +640,7 @@ async function main() {
   if (!supabase && !DRY_RUN) throw new Error("No Supabase client");
 
   // Fetch approved candidates
-  const statuses = RETRY_FAILED
-    ? ["approved", "ingest_failed"]
-    : ["approved"];
+  const statuses = RETRY_FAILED ? ["approved", "ingest_failed"] : ["approved"];
 
   let query = supabase
     ? supabase
@@ -571,7 +662,9 @@ async function main() {
       },
     );
     const candidates = (await res.json()) as Candidate[];
-    console.log(`Found ${candidates.length} approved candidates (dry-run fetch)`);
+    console.log(
+      `Found ${candidates.length} approved candidates (dry-run fetch)`,
+    );
     return;
   }
 
@@ -590,13 +683,27 @@ async function main() {
     return;
   }
 
-  // Pre-fetch existing slugs to avoid collisions
-  const { data: existingSlugs } = supabase
-    ? await supabase.from("venues").select("slug")
-    : { data: [] };
-  const usedSlugs = new Set<string>(
-    (existingSlugs ?? []).map((r: { slug: string }) => r.slug),
-  );
+  // Pre-fetch ALL existing slugs (paginated). PostgREST caps a plain select at
+  // 1000 rows and there are well over 1000 venues, so an unpaginated fetch
+  // would miss slugs and let the slugify loop below collide with the
+  // venues_slug_key UNIQUE constraint (a 23505 that would strand the candidate
+  // in ingest_failed and silently never publish it).
+  const usedSlugs = new Set<string>();
+  if (supabase) {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: slugErr } = await supabase
+        .from("venues")
+        .select("slug")
+        .range(from, from + PAGE - 1);
+      if (slugErr) {
+        console.error("Failed to pre-fetch slugs:", slugErr.message);
+        process.exit(1);
+      }
+      for (const r of page ?? []) usedSlugs.add((r as { slug: string }).slug);
+      if (!page || page.length < PAGE) break;
+    }
+  }
 
   const results = {
     ingested: 0,
@@ -618,13 +725,17 @@ async function main() {
 
       // Mark as failed so --retry-failed can target them
       if (supabase && !DRY_RUN) {
-        await supabase
+        const { error: fErr } = await supabase
           .from("pending_candidates")
           .update({
             status: "ingest_failed",
             reviewed_notes: msg.slice(0, 500),
           })
           .eq("id", candidate.id);
+        if (fErr)
+          console.warn(
+            `  ⚠ ingest_failed status update failed: ${fErr.message}`,
+          );
       }
     }
 

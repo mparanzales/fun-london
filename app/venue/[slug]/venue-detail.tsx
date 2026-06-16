@@ -98,7 +98,12 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   // booking product can't afford fake signals. Only the editorial vibe
   // tags (real, curated) are shown. (Real walk times return inside Plan
   // My Night, computed step-to-step from venue coordinates.)
-  const pills = venue.vibeTags;
+  //
+  // We store the full tag set on the venue (onezone imports can carry 20+),
+  // but only surface the top 6 here so the card stays readable. The rest
+  // stay in venue.vibeTags for search and the personalisation engine.
+  const PILL_LIMIT = 6;
+  const pills = venue.vibeTags.slice(0, PILL_LIMIT);
 
   return (
     // Mobile-shell constraint matches the (main) route group (max-w-md).
