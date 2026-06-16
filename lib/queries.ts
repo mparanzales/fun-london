@@ -16,6 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@/lib/supabase/server";
+import { scoreVenue, hasPrefs } from "./ranking";
 import type {
   Venue,
   Event,
@@ -322,6 +323,62 @@ export async function fetchAllVenueCards(): Promise<Venue[]> {
     const page = (data as VenueCardRow[]) ?? [];
     rows.push(...page);
     if (page.length < PAGE) break;
+  }
+  return rows.map(mapVenuePreview);
+}
+
+// Signed-in "For You" feed: card-level, RANKED ON THE SERVER. We fetch the card
+// columns plus the two tag arrays the ranker needs (mood_tags / vibe_tags),
+// score by the user's prefs here, then map to LIGHT cards. So the heavy tag
+// arrays (some venues carry 60+ tags) never ship to the browser, and the client
+// does no ranking and holds no tags. Paginated past PostgREST's 1000-row cap.
+type FeedRankRow = VenueCardRow & {
+  mood_tags: Mood[] | null;
+  vibe_tags: string[] | null;
+};
+
+function scoreFeedRow(r: FeedRankRow, prefs: UserPreferences): number {
+  // scoreVenue only reads moodTags / vibe / vibeTags / price / rating /
+  // curationTier, so a minimal shape is enough.
+  return scoreVenue(
+    {
+      moodTags: (r.mood_tags ?? []) as Mood[],
+      vibe: r.vibe,
+      vibeTags: r.vibe_tags ?? [],
+      price: r.price as PriceTier,
+      rating: Number(r.rating),
+      curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
+    } as Venue,
+    prefs,
+  );
+}
+
+export async function fetchVenueFeed(
+  prefs: UserPreferences | null,
+): Promise<Venue[]> {
+  const supabase = createClient();
+  const PAGE = 1000;
+  const rows: FeedRankRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("venues")
+      .select(`${VENUE_CARD_COLUMNS}, mood_tags, vibe_tags`)
+      .not("google_place_id", "is", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .order("curation_tier", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchVenueFeed: ${error.message}`);
+    const page = (data as FeedRankRow[]) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+
+  if (prefs && hasPrefs(prefs)) {
+    const scored = rows.map((r) => ({ r, s: scoreFeedRow(r, prefs) }));
+    scored.sort((a, b) => b.s - a.s); // V8 sort is stable: ties keep DB order
+    return scored.map((x) => mapVenuePreview(x.r));
   }
   return rows.map(mapVenuePreview);
 }

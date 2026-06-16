@@ -1,6 +1,6 @@
 import { getAuthUser } from "@/lib/auth";
 import {
-  fetchVenues,
+  fetchVenueFeed,
   fetchEvents,
   fetchProfile,
   fetchVenueCategoryPreview,
@@ -41,10 +41,12 @@ export default async function ExplorePage() {
     );
   }
 
-  const [venues, events, profile] = await Promise.all([
-    fetchVenues(),
+  // Profile first so we can rank the feed by the user's taste ON THE SERVER,
+  // then ship only light, pre-ranked cards (no heavy tag arrays).
+  const profile = await fetchProfile(authUser.id);
+  const [venues, events] = await Promise.all([
+    fetchVenueFeed(profile?.preferences ?? null),
     fetchEvents(),
-    fetchProfile(authUser.id),
   ]);
   const greetingName =
     profile?.displayName ?? authUser.email?.split("@")[0] ?? "there";
