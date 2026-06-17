@@ -31,6 +31,7 @@ import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
 } from "@/lib/opening-hours";
+import { rawTagsToCanonical, TAG_VERSION } from "@/lib/tag-vocabulary";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -408,6 +409,11 @@ function buildVenueRow(
     curation_tier: "discovered",
     mood_tags: deriveMoodTags(candidate),
     vibe_tags: deriveVibeTags(candidate),
+    // Canonical, shared-vocabulary version of the tags (for recommender +
+    // search). Stamped with TAG_VERSION so backfill-canonical-tags.ts can
+    // re-sync rows when the vocabulary changes.
+    canonical_tags: rawTagsToCanonical(deriveVibeTags(candidate)),
+    canonical_tags_version: TAG_VERSION,
     google_place_id: details.id,
     booking_links: bookingLinks,
     website_url: details.websiteUri ?? null,
@@ -549,7 +555,11 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
         if (added > 0) {
           const { error: enrichErr } = await supabase
             .from("venues")
-            .update({ vibe_tags: merged })
+            .update({
+              vibe_tags: merged,
+              canonical_tags: rawTagsToCanonical(merged),
+              canonical_tags_version: TAG_VERSION,
+            })
             .eq("id", existing.id);
           if (enrichErr)
             console.warn(`  ⚠ tag enrich failed: ${enrichErr.message}`);

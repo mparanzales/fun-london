@@ -396,6 +396,17 @@ export const ONEZONE_TAG_MAP: Record<string, Tag[]> = {
   striking: ["wow-factor", "beautiful-interiors"],
   fun: ["lively", "buzzy"],
   contemporary: ["minimalist"],
+
+  // Seed / editorial tags — the hand-curated venues use a more bespoke
+  // vocabulary than OneZone (the first canonical backfill showed many coming
+  // out empty). Map the common, clearly-canonical ones; truly bespoke labels
+  // ("Since 1959", neighbourhood names) stay unmapped by design.
+  chill: ["low-key", "casual"],
+  hidden: ["hidden-gem"],
+  cultural: ["culture-night"],
+  "speciality coffee": ["coffee"],
+  heritage: ["iconic"],
+  audiophile: ["music-djs"],
 } as const;
 
 // ── Vector helpers ────────────────────────────────────────────────────────────
