@@ -82,11 +82,20 @@ create table if not exists public.venues (
   -- "curated" = hand-picked seed venue, "discovered" = added by the robot.
   -- Curated venues rank first in the catalogue. Default discovered.
   curation_tier text not null default 'discovered',
+  -- Canonical tag layer (lib/tag-vocabulary.ts): the venue's raw vibe_tags
+  -- translated into the shared vocabulary, for the recommender + search.
+  -- Stamped with TAG_VERSION; re-run scripts/backfill-canonical-tags.ts when
+  -- the vocabulary changes. Populated by the ingest pipeline going forward.
+  canonical_tags text[] not null default '{}',
+  canonical_tags_version integer not null default 0,
   created_at timestamptz not null default now()
 );
 -- Idempotent for existing databases (see the profiles alter above).
 alter table public.venues
-  add column if not exists curation_tier text not null default 'discovered';
+  add column if not exists curation_tier text not null default 'discovered',
+  add column if not exists canonical_tags text[] not null default '{}',
+  add column if not exists canonical_tags_version integer not null default 0;
+create index if not exists venues_canonical_tags_idx on public.venues using gin (canonical_tags);
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
 create index if not exists venues_type_idx on public.venues(type);
 create index if not exists venues_slug_idx on public.venues(slug);
