@@ -86,6 +86,26 @@ export const REGION_OF: Record<string, Region> = {
   Archway: "North",
   "Tufnell Park": "North",
   "Muswell Hill": "North",
+
+  // Added during the postcode re-validation pass (lib/postcode-areas.ts targets).
+  "Covent Garden": "Central",
+  "King's Cross": "Central",
+  City: "Central",
+  Knightsbridge: "West",
+  Belgravia: "West",
+  Kensington: "West",
+  "South Kensington": "West",
+  "Earl's Court": "West",
+  Fulham: "West",
+  "Kensal Green": "West",
+  "St John's Wood": "West",
+  "Bethnal Green": "East",
+  "Canary Wharf": "East",
+  Bow: "East",
+  Wapping: "East",
+  "East Dulwich": "South",
+  Highgate: "North",
+  Tottenham: "North",
 };
 
 export function regionOf(neighbourhood: string): Region | null {
