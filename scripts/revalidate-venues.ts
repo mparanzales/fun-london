@@ -150,6 +150,7 @@ type Row = {
   lat: number | null;
   lng: number | null;
   google_place_id: string | null;
+  closed_at: string | null;
 };
 
 async function main() {
@@ -161,7 +162,9 @@ async function main() {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("venues")
-      .select("id, slug, name, neighbourhood, address, lat, lng, google_place_id")
+      .select(
+        "id, slug, name, neighbourhood, address, lat, lng, google_place_id, closed_at",
+      )
       .order("created_at", { ascending: true })
       .range(from, from + 999);
     if (error) {
@@ -259,6 +262,21 @@ async function main() {
       const { error } = await supabase.from("venues").update(update).eq("id", r.id);
       if (error) console.log(`    ✗ update failed: ${error.message}`);
       else updated++;
+    }
+
+    // Persist closure independently of the location safe-gate: a closed venue
+    // should be marked even if we leave its area alone.
+    if (
+      APPLY &&
+      !r.closed_at &&
+      d.businessStatus &&
+      d.businessStatus !== "OPERATIONAL"
+    ) {
+      await supabase
+        .from("venues")
+        .update({ closed_at: new Date().toISOString() })
+        .eq("id", r.id);
+      console.log(`    ⚰ marked closed_at (${d.businessStatus})`);
     }
   }
 
