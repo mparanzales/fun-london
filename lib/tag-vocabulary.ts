@@ -8,7 +8,7 @@
 // Removing or reordering tags invalidates existing vectors — do a full
 // backfill of experience_vector and taste_vector if you do.
 
-export const TAG_VERSION = 1;
+export const TAG_VERSION = 2; // bumped: map coverage pass + the type/mood fallback below
 
 // ── Cuisine tags ─────────────────────────────────────────────────────────────
 // What kind of food / drink the venue primarily serves.
@@ -408,6 +408,44 @@ export const ONEZONE_TAG_MAP: Record<string, Tag[]> = {
   heritage: ["iconic"],
   audiophile: ["music-djs"],
 } as const;
+
+// ── Type / mood fallback ──────────────────────────────────────────────────────
+// When a venue's raw tags yield no canonical tags (sparse, or bespoke labels the
+// map doesn't cover), derive a baseline from WHAT KIND of place it is, so no
+// venue is invisible to the recommender. Coarser than tag-derived tags — used
+// only as a floor. Keyed by the raw column strings (VenueType / Mood) so no type
+// import is needed; values are validated as Tag[] at compile time.
+export const VENUE_TYPE_FALLBACK: Record<string, Tag[]> = {
+  Restaurant: ["dinner"],
+  Cafe: ["coffee"],
+  Bar: ["cocktail-bar", "drinks"],
+  "Wine Bar": ["wine-bar-vibes", "natural-wine"],
+  Pub: ["neighbourhood"],
+  "Listening Bar": ["music-djs", "cocktail-bar"],
+  "Live Music": ["music-djs", "late-night"],
+  Culture: ["culture-night"],
+  Market: ["street-food"],
+  Outdoors: ["outdoor-seating"],
+};
+
+const MOOD_FALLBACK: Record<string, Tag[]> = {
+  dinner: ["dinner"],
+  drinks: ["drinks"],
+  culture: ["culture-night"],
+  activity: [], // no clean canonical concept for "activity"
+};
+
+// Baseline canonical tags from a venue's type + mood_tags. Used only when the
+// tag-derived canonical set is empty.
+export function fallbackCanonicalTags(
+  type: string,
+  moods: readonly string[] = [],
+): Tag[] {
+  const out = new Set<Tag>();
+  for (const t of VENUE_TYPE_FALLBACK[type] ?? []) out.add(t);
+  for (const m of moods) for (const t of MOOD_FALLBACK[m] ?? []) out.add(t);
+  return Array.from(out);
+}
 
 // ── Vector helpers ────────────────────────────────────────────────────────────
 

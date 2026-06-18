@@ -31,7 +31,11 @@ import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
 } from "@/lib/opening-hours";
-import { rawTagsToCanonical, TAG_VERSION } from "@/lib/tag-vocabulary";
+import {
+  rawTagsToCanonical,
+  fallbackCanonicalTags,
+  TAG_VERSION,
+} from "@/lib/tag-vocabulary";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -375,6 +379,18 @@ function deriveVibeTags(candidate: Candidate): string[] {
 
 // ── Row builders ─────────────────────────────────────────────────────────────
 
+// Canonical tags for a venue: derived from its raw tags, with a type/mood
+// baseline fallback so a tag-less venue is never invisible to the recommender
+// (mirrors the floor in scripts/backfill-canonical-tags.ts).
+function canonicalForCandidate(candidate: Candidate, details: PlaceDetails) {
+  const fromTags = rawTagsToCanonical(deriveVibeTags(candidate));
+  if (fromTags.length > 0) return fromTags;
+  return fallbackCanonicalTags(
+    mapVenueType(candidate, details.types),
+    deriveMoodTags(candidate),
+  );
+}
+
 function buildVenueRow(
   candidate: Candidate,
   details: PlaceDetails,
@@ -412,7 +428,7 @@ function buildVenueRow(
     // Canonical, shared-vocabulary version of the tags (for recommender +
     // search). Stamped with TAG_VERSION so backfill-canonical-tags.ts can
     // re-sync rows when the vocabulary changes.
-    canonical_tags: rawTagsToCanonical(deriveVibeTags(candidate)),
+    canonical_tags: canonicalForCandidate(candidate, details),
     canonical_tags_version: TAG_VERSION,
     google_place_id: details.id,
     booking_links: bookingLinks,
