@@ -266,17 +266,15 @@ async function main() {
 
     // Persist closure independently of the location safe-gate: a closed venue
     // should be marked even if we leave its area alone.
-    if (
-      APPLY &&
-      !r.closed_at &&
-      d.businessStatus &&
-      d.businessStatus !== "OPERATIONAL"
-    ) {
+    // Only PERMANENT closure sets closed_at. CLOSED_TEMPORARILY (renovation,
+    // Google data lag) is reported but not persisted — it shouldn't flag a
+    // venue as gone.
+    if (APPLY && !r.closed_at && d.businessStatus === "CLOSED_PERMANENTLY") {
       await supabase
         .from("venues")
         .update({ closed_at: new Date().toISOString() })
         .eq("id", r.id);
-      console.log(`    ⚰ marked closed_at (${d.businessStatus})`);
+      console.log(`    ⚰ marked closed_at (permanently closed)`);
     }
   }
 
