@@ -24,7 +24,11 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
-import { rawTagsToCanonical, TAG_VERSION } from "@/lib/tag-vocabulary";
+import {
+  rawTagsToCanonical,
+  fallbackCanonicalTags,
+  TAG_VERSION,
+} from "@/lib/tag-vocabulary";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const FORCE_ALL = process.argv.includes("--all");
@@ -48,7 +52,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 type VenueRow = {
   id: string;
   slug: string;
+  type: string;
   vibe_tags: string[] | null;
+  mood_tags: string[] | null;
   canonical_tags: string[] | null;
   canonical_tags_version: number | null;
 };
@@ -79,7 +85,9 @@ async function main() {
     // for --all / dry-run there's no such churn, so we page forward.
     let q = supabase
       .from("venues")
-      .select("id, slug, vibe_tags, canonical_tags, canonical_tags_version")
+      .select(
+        "id, slug, type, vibe_tags, mood_tags, canonical_tags, canonical_tags_version",
+      )
       .order("created_at", { ascending: true })
       .range(from, from + PAGE - 1);
     if (!FORCE_ALL) q = q.lt("canonical_tags_version", TAG_VERSION);
@@ -94,7 +102,11 @@ async function main() {
 
     for (const v of rows) {
       scanned++;
-      const canonical = rawTagsToCanonical(v.vibe_tags ?? []);
+      let canonical = rawTagsToCanonical(v.vibe_tags ?? []);
+      // Floor: a venue with no mappable tags still gets baseline tags from what
+      // KIND of place it is, so nothing is invisible to the recommender.
+      if (canonical.length === 0)
+        canonical = fallbackCanonicalTags(v.type, v.mood_tags ?? []);
       const stale =
         (v.canonical_tags_version ?? 0) !== TAG_VERSION ||
         !sameTags(v.canonical_tags ?? [], canonical);
