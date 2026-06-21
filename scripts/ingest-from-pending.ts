@@ -32,6 +32,7 @@ import {
   type GoogleOpeningHours,
 } from "@/lib/opening-hours";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
+import { areaFromPostcode } from "@/lib/postcode-areas";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const RETRY_FAILED = process.argv.includes("--retry-failed");
@@ -393,7 +394,13 @@ function buildVenueRow(
     // null) because those columns are NOT NULL — a null would fail the insert.
     vibe: source?.cuisine_type ?? candidate.type_guess ?? "London favourite",
     long_description: "",
-    neighbourhood: candidate.neighbourhood ?? "London",
+    // Neighbourhood comes from the venue's real Google postcode (validated),
+    // not the unreliable import — falls back to the import only when there's
+    // no usable postcode. See lib/postcode-areas.ts.
+    neighbourhood:
+      areaFromPostcode(details.formattedAddress) ??
+      candidate.neighbourhood ??
+      "London",
     address: details.formattedAddress,
     lat: details.location?.latitude ?? null,
     lng: details.location?.longitude ?? null,
@@ -434,7 +441,13 @@ function buildProspectRow(candidate: Candidate, details: PlaceDetails) {
     name: details.displayName.text,
     google_place_id: details.id,
     type: mapVenueType(candidate, details.types),
-    neighbourhood: candidate.neighbourhood ?? "London",
+    // Neighbourhood comes from the venue's real Google postcode (validated),
+    // not the unreliable import — falls back to the import only when there's
+    // no usable postcode. See lib/postcode-areas.ts.
+    neighbourhood:
+      areaFromPostcode(details.formattedAddress) ??
+      candidate.neighbourhood ??
+      "London",
     address: details.formattedAddress,
     website_url: details.websiteUri ?? null,
     phone:
