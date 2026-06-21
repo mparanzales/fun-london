@@ -10,7 +10,7 @@
 // authenticating.
 
 import Link from "next/link";
-import { ShieldCheck, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 export function SignupWall({ returnTo = "/explore" }: { returnTo?: string }) {
   const href = `/sign-in?return=${encodeURIComponent(returnTo)}`;
@@ -24,13 +24,8 @@ export function SignupWall({ returnTo = "/explore" }: { returnTo?: string }) {
 
       <div className="pointer-events-auto bg-bg px-6 pb-12 text-center">
         <div className="mx-auto max-w-sm">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider text-primary">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            No chains · cross-checked
-          </span>
-
-          <h2 className="mt-4 text-[26px] font-extrabold leading-tight tracking-tight text-heading">
-            See all of independent <span className="fl-grad-text">London</span>
+          <h2 className="text-[26px] font-extrabold leading-tight tracking-tight text-heading">
+            See all of <span className="fl-grad-text">London</span>
           </h2>
           <p className="mt-2 text-[14px] leading-relaxed text-muted-fg">
             You&apos;re seeing a taste. Sign up free to unlock every bar,

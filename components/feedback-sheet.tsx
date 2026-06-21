@@ -21,11 +21,6 @@ const Q2: Choice[] = [
   { id: "one_or_two", label: "One or two" },
   { id: "nothing", label: "Nothing grabbed me" },
 ];
-const Q3: Choice[] = [
-  { id: "love", label: "Love it, that's the point" },
-  { id: "nice", label: "Nice to have" },
-  { id: "not_fussed", label: "Not fussed" },
-];
 const Q4: Choice[] = [
   { id: "booking", label: "Booking in a couple of taps" },
   { id: "plans", label: "Plans for a whole night out" },
@@ -43,7 +38,6 @@ export function FeedbackSheet({
 }) {
   const [useIntent, setUseIntent] = useState<string | null>(null);
   const [foundSomething, setFoundSomething] = useState<string | null>(null);
-  const [differentiation, setDifferentiation] = useState<string | null>(null);
   const [wants, setWants] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState(defaultEmail ?? "");
@@ -69,7 +63,6 @@ export function FeedbackSheet({
   const hasContent =
     !!useIntent ||
     !!foundSomething ||
-    !!differentiation ||
     wants.length > 0 ||
     message.trim().length > 0;
 
@@ -84,7 +77,7 @@ export function FeedbackSheet({
     const res = await submitFeedback({
       useIntent,
       foundSomething,
-      differentiation,
+      differentiation: null,
       wants,
       message,
       email,
@@ -165,13 +158,6 @@ export function FeedbackSheet({
               value={foundSomething}
               onSelect={setFoundSomething}
             />
-            <Question
-              label="Independent spots only, no chains, cross checked. Does that matter to you?"
-              choices={Q3}
-              value={differentiation}
-              onSelect={setDifferentiation}
-            />
-
             <fieldset className="mb-5">
               <legend className="text-sm font-bold text-fg mb-2.5">
                 What would make this a must have?

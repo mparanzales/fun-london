@@ -209,21 +209,6 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           <span>{venue.reviewCount.toLocaleString()} reviews</span>
         </div>
 
-        {/* Trust badge — the differentiating thesis, made visible up-front
-            (not buried in the collapsed "Why this is here"). "Cross-checked"
-            is only claimed when we actually hold ≥2 editorial sources. */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3 text-[11px] font-bold text-accent">
-          <span>No chains</span>
-          {sourceCount >= 2 && (
-            <>
-              <span aria-hidden className="text-muted-fg/50">
-                ·
-              </span>
-              <span>Cross-checked</span>
-            </>
-          )}
-        </div>
-
         <p className="text-base leading-relaxed text-fg mt-5">
           {venue.longDescription}
         </p>

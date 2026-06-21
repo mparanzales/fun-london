@@ -26,9 +26,9 @@ export const dynamic = "force-dynamic";
 // Home-page metadata. The layout supplies sensible defaults; we set an
 // explicit canonical so the marketing landing is the indexed home URL.
 export const metadata: Metadata = {
-  title: `Fun ${CITY}: the independent ${CITY} worth leaving the house for`,
+  title: `Fun ${CITY}: the ${CITY} worth leaving the house for`,
   description:
-    "A curated guide to independent London. No chains, every bar, restaurant and event cross-checked in at least two trusted sources.",
+    "A curated guide to going out in London: bars, restaurants and what's on tonight. Plan a walkable night and book in a couple of taps.",
   alternates: { canonical: "/" },
 };
 

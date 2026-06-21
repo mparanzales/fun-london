@@ -19,19 +19,19 @@ import type { Venue } from "@/lib/types";
 
 const TRUST_POINTS = [
   {
-    icon: ShieldCheck,
-    title: "No chains, ever",
-    body: `Independent ${CITY} only. If it's a chain, it doesn't make the cut.`,
+    icon: Sparkles,
+    title: "What's on tonight",
+    body: `Bars, restaurants and one-off events happening near you in ${CITY}, tonight.`,
   },
   {
     icon: CheckCheck,
-    title: "Cross-checked",
-    body: "Every spot is verified in at least two trusted sources before it's listed.",
-  },
-  {
-    icon: Sparkles,
     title: "Plan the whole night",
     body: "Build a walkable night out and book a table in a couple of taps.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "All in one place",
+    body: "Discover somewhere new and save the spots you love.",
   },
 ];
 
@@ -59,9 +59,8 @@ export function LandingPage({ venues }: { venues: Venue[] }) {
           {TAGLINE}
         </h1>
         <p className="relative mt-4 text-[15px] text-muted-fg leading-relaxed">
-          Fun {CITY} is a curated guide to the independent bars, restaurants and
-          what&apos;s on tonight. The places worth leaving the house for, never
-          a chain.
+          Fun {CITY} is a curated guide to the bars, restaurants and what&apos;s
+          on tonight. The places worth leaving the house for.
         </p>
         <div className="relative mt-8 flex flex-col items-center gap-3">
           <Link
@@ -137,7 +136,7 @@ export function LandingPage({ venues }: { venues: Venue[] }) {
           href="/explore"
           className="block w-full text-center h-[52px] leading-[52px] rounded-2xl bg-heading text-bg text-[15px] font-extrabold"
         >
-          Browse all of independent {CITY}
+          Browse all of {CITY}
         </Link>
       </section>
 

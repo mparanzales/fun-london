@@ -93,7 +93,6 @@ export function ExploreFeed({
   greetingName,
   preferences,
   signedIn,
-  totalVenues,
   initialHasMore = false,
 }: {
   venues: Venue[];
@@ -101,9 +100,6 @@ export function ExploreFeed({
   greetingName: string;
   preferences: UserPreferences | null;
   signedIn: boolean;
-  // Real catalogue size for the hero trust strip. For anon, `allVenues` is
-  // only the trimmed preview, so the count must be passed separately.
-  totalVenues: number;
   // Signed-in: whether page 0 (in `allVenues`) has more pages to paginate.
   initialHasMore?: boolean;
 }) {
@@ -428,21 +424,13 @@ export function ExploreFeed({
         </div>
       </header>
 
-      {/* DESKTOP hero band (lg+ only) — big lowercase headline + trust strip,
-          where the "no chains, cross-checked" credibility becomes visible. */}
+      {/* DESKTOP hero band (lg+ only) — big lowercase headline. */}
       <section className="hidden lg:block px-6 pt-10 pb-7">
         <h1 className="text-5xl font-extrabold lowercase tracking-tight leading-[1.04]">
-          <span className="fl-grad-text">the independent {CITY}</span>
+          <span className="fl-grad-text">the {CITY}</span>
           <br />
           <span className="text-heading">worth leaving the house for.</span>
         </h1>
-        <div className="mt-5 flex items-center gap-3 text-[13px] font-bold uppercase tracking-wider text-muted-fg">
-          <span>{totalVenues} independent venues</span>
-          <span className="text-border">/</span>
-          <span>cross-checked in 2+ sources</span>
-          <span className="text-border">/</span>
-          <span>no chains</span>
-        </div>
       </section>
 
       {/* Category chips filter the feed for everyone. For anon each category
