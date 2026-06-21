@@ -28,7 +28,7 @@ export async function generateMetadata({
   const title = `${venue.name}, ${venue.neighbourhood}, London`;
   const description =
     venue.longDescription?.slice(0, 200) ||
-    `${venue.name} in ${venue.neighbourhood}. Independent London, checked in 2+ trusted sources.`;
+    `${venue.name} in ${venue.neighbourhood}, London. Plan your night and book a table on Fun London.`;
   const url = `${SITE_URL}/venue/${venue.slug}`;
 
   return {

@@ -87,10 +87,17 @@ export function VenueDetail({ venue }: { venue: Venue }) {
       : null;
 
   const hasRealTalk = !!venue.criticalFlags && venue.criticalFlags.length > 0;
-  const sourceCount = venue.editorialSources?.length ?? 0;
-  const hasWhy =
-    sourceCount > 0 ||
-    (!!venue.creatorCoverage && venue.creatorCoverage.length > 0);
+  // Only VERIFIED provenance is surfaced. The AI-discovered editorial_sources
+  // were substantially dead / recycled / mis-attributed, so "Cross-checked"
+  // and the fact-check links must be backed by sources we've actually fetched
+  // and confirmed are live + on-topic. Unverified entries stay in the DB but
+  // never render and never count — we re-enable each as it passes review.
+  const verifiedSources =
+    venue.editorialSources?.filter((s) => s.verified) ?? [];
+  const verifiedCreators =
+    venue.creatorCoverage?.filter((c) => c.verified) ?? [];
+  const sourceCount = verifiedSources.length;
+  const hasWhy = sourceCount > 0 || verifiedCreators.length > 0;
 
   // Quick-fact pills. We deliberately do NOT surface "tables free",
   // "next slot", or "X min walk": there's no live-availability feed and
@@ -202,21 +209,6 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           <span>{venue.reviewCount.toLocaleString()} reviews</span>
         </div>
 
-        {/* Trust badge — the differentiating thesis, made visible up-front
-            (not buried in the collapsed "Why this is here"). "Cross-checked"
-            is only claimed when we actually hold ≥2 editorial sources. */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3 text-[11px] font-bold text-accent">
-          <span>No chains</span>
-          {sourceCount >= 2 && (
-            <>
-              <span aria-hidden className="text-muted-fg/50">
-                ·
-              </span>
-              <span>Cross-checked</span>
-            </>
-          )}
-        </div>
-
         <p className="text-base leading-relaxed text-fg mt-5">
           {venue.longDescription}
         </p>
@@ -309,48 +301,46 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             </button>
             {whyOpen && (
               <div className="mt-2 rounded-2xl bg-muted/30 border border-fg/10 px-4 py-3">
-                {venue.editorialSources &&
-                  venue.editorialSources.length > 0 && (
-                    <div>
-                      <div className="text-[10px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-1.5">
-                        Editorial coverage
-                      </div>
-                      <ul className="space-y-1">
-                        {venue.editorialSources.map((src, i) => (
-                          <li key={i} className="text-[13px] leading-snug">
-                            <a
-                              href={src.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
-                            >
-                              {src.publication}
-                            </a>
-                            {src.title && (
-                              <span className="text-muted-fg">
-                                {" "}
-                                , {src.title}
-                              </span>
-                            )}
-                            {src.date && (
-                              <span className="text-muted-fg/80 italic">
-                                {" · "}
-                                {new Date(src.date).toLocaleDateString(
-                                  "en-GB",
-                                  { month: "short", year: "numeric" },
-                                )}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
+                {verifiedSources.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-1.5">
+                      Editorial coverage
                     </div>
-                  )}
-                {venue.creatorCoverage && venue.creatorCoverage.length > 0 && (
+                    <ul className="space-y-1">
+                      {verifiedSources.map((src, i) => (
+                        <li key={i} className="text-[13px] leading-snug">
+                          <a
+                            href={src.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
+                          >
+                            {src.publication}
+                          </a>
+                          {src.title && (
+                            <span className="text-muted-fg">
+                              {" "}
+                              , {src.title}
+                            </span>
+                          )}
+                          {src.date && (
+                            <span className="text-muted-fg/80 italic">
+                              {" · "}
+                              {new Date(src.date).toLocaleDateString("en-GB", {
+                                month: "short",
+                                year: "numeric",
+                              })}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {verifiedCreators.length > 0 && (
                   <div
                     className={
-                      venue.editorialSources &&
-                      venue.editorialSources.length > 0
+                      verifiedSources.length > 0
                         ? "mt-3 pt-3 border-t border-fg/10"
                         : ""
                     }
@@ -359,7 +349,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                       Creators covering this
                     </div>
                     <ul className="space-y-1">
-                      {venue.creatorCoverage.map((c, i) => (
+                      {verifiedCreators.map((c, i) => (
                         <li key={i} className="text-[13px] leading-snug">
                           <a
                             href={c.url}
