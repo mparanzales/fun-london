@@ -427,9 +427,9 @@ export function ExploreFeed({
       {/* DESKTOP hero band (lg+ only) — big lowercase headline. */}
       <section className="hidden lg:block px-6 pt-10 pb-7">
         <h1 className="text-5xl font-extrabold lowercase tracking-tight leading-[1.04]">
-          <span className="fl-grad-text">the {CITY}</span>
+          <span className="fl-grad-text">plan the night,</span>
           <br />
-          <span className="text-heading">worth leaving the house for.</span>
+          <span className="text-heading">not the place.</span>
         </h1>
       </section>
 

@@ -22,11 +22,11 @@ const jakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Fun London: bars, restaurants and what's on tonight",
+    default: "Fun London: plan the night, not the place",
     template: "%s · Fun London",
   },
   description:
-    "A curated guide to going out in London: bars, restaurants and what's on tonight. Plan a walkable night and book in a couple of taps.",
+    "fun london builds you a night out: two or three independent spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.",
   manifest: "/manifest.json",
   applicationName: "Fun London",
   // Site-wide sharing defaults; venue/event pages override with their own.
@@ -35,15 +35,15 @@ export const metadata: Metadata = {
     siteName: "Fun London",
     locale: "en_GB",
     url: SITE_URL,
-    title: "Fun London: bars, restaurants and what's on tonight",
+    title: "Fun London: plan the night, not the place",
     description:
-      "A curated guide to going out in London. Plan a walkable night and book in a couple of taps.",
+      "fun london builds you a night out: a walkable two or three stop evening of independent london, the table ready to book in a couple of taps.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Fun London: bars, restaurants and what's on tonight",
+    title: "Fun London: plan the night, not the place",
     description:
-      "A curated guide to going out in London. Plan a walkable night and book in a couple of taps.",
+      "fun london builds you a night out: a walkable two or three stop evening of independent london, the table ready to book in a couple of taps.",
   },
 };
 

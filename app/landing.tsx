@@ -20,18 +20,18 @@ import type { Venue } from "@/lib/types";
 const TRUST_POINTS = [
   {
     icon: Sparkles,
-    title: "What's on tonight",
-    body: `Bars, restaurants and one-off events happening near you in ${CITY}, tonight.`,
+    title: "the whole night, in order",
+    body: "drinks, then dinner, then the last one, each a short walk from the last. the evening moves instead of stalling on the kerb.",
   },
   {
     icon: CheckCheck,
-    title: "Plan the whole night",
-    body: "Build a walkable night out and book a table in a couple of taps.",
+    title: "places we'd actually go",
+    body: "independent bars, kitchens and rooms, no chains, no filler. the natural-wine bar most lists miss, then the kitchen two streets over, then a last drink that's still open.",
   },
   {
     icon: ShieldCheck,
-    title: "All in one place",
-    body: "Discover somewhere new and save the spots you love.",
+    title: "plan it together",
+    body: "build the night solo, or open a room and share one link. the crew joins, swipes, and you land on a plan together, not in forty messages.",
   },
 ];
 
@@ -55,12 +55,16 @@ export function LandingPage({ venues }: { venues: Venue[] }) {
           aria-hidden
           className="absolute left-1/2 -translate-x-1/2 -top-12 w-[420px] h-[420px] rounded-full opacity-[0.16] blur-3xl bg-gradient-to-br from-primary to-accent pointer-events-none"
         />
-        <h1 className="relative text-[30px] leading-[1.12] font-extrabold text-heading tracking-tight">
+        <p className="relative text-[13px] font-semibold italic lowercase text-accent">
           {TAGLINE}
+        </p>
+        <h1 className="relative mt-2 text-[30px] leading-[1.12] font-extrabold text-heading tracking-tight">
+          tell us where to start. we&apos;ll build the night.
         </h1>
         <p className="relative mt-4 text-[15px] text-muted-fg leading-relaxed">
-          Fun {CITY} is a curated guide to the bars, restaurants and what&apos;s
-          on tonight. The places worth leaving the house for.
+          two or three independent spots, all a short walk apart, in the order
+          you&apos;d actually do them, with the table ready to book in a couple
+          of taps. the good {CITY} in one evening, not another list to scroll.
         </p>
         <div className="relative mt-8 flex flex-col items-center gap-3">
           <Link

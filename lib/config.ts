@@ -10,7 +10,7 @@ export const CITY = "London";
 //   LEAD_TAGLINE — a short positioning line.
 //   TAGLINE — the deeper mission line; used as a quieter secondary / OG line.
 export const LEAD_TAGLINE = "a curated guide to going out in london.";
-export const TAGLINE = "The London worth leaving the house for.";
+export const TAGLINE = "plan the night, not the place.";
 
 // Absolute base URL of the production site. Used for canonical/OG URLs,
 // sitemap and robots. Reads NEXT_PUBLIC_SITE_URL (set on Vercel + in
