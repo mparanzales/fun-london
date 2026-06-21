@@ -62,9 +62,9 @@ export function LandingPage({ venues }: { venues: Venue[] }) {
           tell us where to start. we&apos;ll build the night.
         </h1>
         <p className="relative mt-4 text-[15px] text-muted-fg leading-relaxed">
-          two or three independent spots, all a short walk apart, in the order
-          you&apos;d actually do them, with the table ready to book in a couple
-          of taps. the good {CITY} in one evening, not another list to scroll.
+          independent spots, all a short walk apart, in the order you&apos;d
+          actually do them, with the table ready to book in a couple of taps.
+          the good {CITY} in one evening, not another list to scroll.
         </p>
         <div className="relative mt-8 flex flex-col items-center gap-3">
           <Link

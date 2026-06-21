@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     template: "%s · Fun London",
   },
   description:
-    "fun london builds you a night out: two or three independent spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.",
+    "fun london builds you a night out: independent spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.",
   manifest: "/manifest.json",
   applicationName: "Fun London",
   // Site-wide sharing defaults; venue/event pages override with their own.
@@ -37,13 +37,13 @@ export const metadata: Metadata = {
     url: SITE_URL,
     title: "Fun London: plan the night, not the place",
     description:
-      "fun london builds you a night out: a walkable two or three stop evening of independent london, the table ready to book in a couple of taps.",
+      "fun london builds you a night out: a walkable evening of independent london, the table ready to book in a couple of taps.",
   },
   twitter: {
     card: "summary_large_image",
     title: "Fun London: plan the night, not the place",
     description:
-      "fun london builds you a night out: a walkable two or three stop evening of independent london, the table ready to book in a couple of taps.",
+      "fun london builds you a night out: a walkable evening of independent london, the table ready to book in a couple of taps.",
   },
 };
 

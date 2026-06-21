@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: `Fun ${CITY}: plan the night, not the place`,
   description:
-    "fun london builds you a night out: two or three independent spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.",
+    "fun london builds you a night out: independent spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.",
   alternates: { canonical: "/" },
 };
 
