@@ -81,6 +81,12 @@ export type EditorialSource = {
   url: string;
   title?: string;
   date?: string; // ISO date when the source was published / last verified
+  // Gate: only sources we have FETCHED and confirmed are (a) live and (b)
+  // actually about this venue count toward the "Cross-checked" claim and
+  // render in the UI. The original AI-discovered set was substantially
+  // dead/recycled/mis-attributed, so absent-or-false = unverified → hidden
+  // (the row is preserved in the DB; we re-enable per source as it passes).
+  verified?: boolean;
 };
 
 // Third-party creator coverage (Phase 4.5). Surfaced in the "Why this is
@@ -95,6 +101,7 @@ export type CreatorCoverage = {
   verdict: CreatorVerdict;
   note?: string; // optional 1-line summary of what they said
   followerCount?: number; // optional
+  verified?: boolean; // same gate as EditorialSource.verified — unverified is hidden
 };
 
 // "Real Talk" flags — honest concerns surfaced boldly in the UI, not
