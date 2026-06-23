@@ -32,6 +32,11 @@ import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
 } from "@/lib/opening-hours";
+import {
+  TAG_VERSION,
+  fallbackCanonicalTags,
+  rawTagsToCanonical,
+} from "@/lib/tag-vocabulary";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -215,6 +220,17 @@ function buildVenueRow(seed: VenueSeed, details: PlaceDetails, imgUrl: string) {
     websiteUri ?? undefined,
     details.reservable,
   );
+  // Canonical tags from the seed's raw tags, with a type/mood floor so a
+  // tag-less seed is never invisible to the recommender. Mirrors the
+  // ingest-from-pending path's canonicalForCandidate.
+  const canonicalFromTags = rawTagsToCanonical([
+    ...seed.vibeTags,
+    ...seed.moodTags,
+  ]);
+  const canonicalTags =
+    canonicalFromTags.length > 0
+      ? canonicalFromTags
+      : fallbackCanonicalTags(seed.type, seed.moodTags);
 
   return {
     slug: seed.slug,
@@ -238,6 +254,11 @@ function buildVenueRow(seed: VenueSeed, details: PlaceDetails, imgUrl: string) {
     curation_tier: "curated",
     mood_tags: seed.moodTags,
     vibe_tags: seed.vibeTags,
+    // Canonical, shared-vocabulary tags for the recommender + search, stamped
+    // with TAG_VERSION so backfill-canonical-tags.ts can re-sync. Without this,
+    // seed-ingested venues land at version 0 and are invisible to the recommender.
+    canonical_tags: canonicalTags,
+    canonical_tags_version: TAG_VERSION,
     google_place_id: details.id,
     booking_links: bookingLinks,
     website_url: websiteUri,
