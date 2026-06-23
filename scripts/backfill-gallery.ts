@@ -75,21 +75,29 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { data, error } = await supabase
-    .from("venues")
-    .select("id, slug, google_place_id, photo_urls")
-    .not("google_place_id", "is", null)
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(`read venues failed: ${error.message}`);
-
-  const rows = (
-    (data ?? []) as {
-      id: string;
-      slug: string;
-      google_place_id: string;
-      photo_urls: string[] | null;
-    }[]
-  ).filter((v) => !v.photo_urls || v.photo_urls.length === 0);
+  // Paginate — PostgREST caps a select at 1000 rows by default, and the
+  // catalogue is larger, so a single select would silently skip the rest.
+  const PAGE = 1000;
+  const rows: {
+    id: string;
+    slug: string;
+    google_place_id: string;
+    photo_urls: string[] | null;
+  }[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("venues")
+      .select("id, slug, google_place_id, photo_urls")
+      .not("google_place_id", "is", null)
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`read venues failed: ${error.message}`);
+    const batch = (data ?? []) as typeof rows;
+    rows.push(
+      ...batch.filter((v) => !v.photo_urls || v.photo_urls.length === 0),
+    );
+    if (batch.length < PAGE) break;
+  }
 
   console.log(
     `${rows.length} venue(s) missing a gallery (cap ${MAX === Infinity ? "none" : MAX})\n`,
