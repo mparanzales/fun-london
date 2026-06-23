@@ -86,20 +86,26 @@ async function main(): Promise<void> {
   console.log(DRY_RUN ? "DRY RUN (no API calls, no writes)\n" : "");
 
   // The next rotating slice: oldest reviews_synced_at first (nulls = never
-  // synced come first). At BATCH/night the catalogue cycles ~monthly.
-  const { data, error } = await supabase
-    .from("venues")
-    .select("id, slug, google_place_id")
-    .not("google_place_id", "is", null)
-    .order("reviews_synced_at", { ascending: true, nullsFirst: true })
-    .limit(BATCH);
-  if (error) throw new Error(`read venues failed: ${error.message}`);
-
-  const rows = (data ?? []) as {
-    id: string;
-    slug: string;
-    google_place_id: string;
-  }[];
+  // synced come first). At BATCH/night the catalogue cycles ~monthly. Paginate
+  // because PostgREST caps a single select at 1000 rows — so a large one-time
+  // seed (e.g. FL_REVIEW_BATCH=3000) isn't silently truncated. created_at is a
+  // stable tiebreaker so pages don't overlap/skip among the null timestamps.
+  const PAGE = 1000;
+  const rows: { id: string; slug: string; google_place_id: string }[] = [];
+  while (rows.length < BATCH) {
+    const take = Math.min(PAGE, BATCH - rows.length);
+    const { data, error } = await supabase
+      .from("venues")
+      .select("id, slug, google_place_id")
+      .not("google_place_id", "is", null)
+      .order("reviews_synced_at", { ascending: true, nullsFirst: true })
+      .order("created_at", { ascending: true })
+      .range(rows.length, rows.length + take - 1);
+    if (error) throw new Error(`read venues failed: ${error.message}`);
+    const batch = (data ?? []) as typeof rows;
+    rows.push(...batch);
+    if (batch.length < take) break;
+  }
   console.log(
     `Refreshing reviews for ${rows.length} venue(s) (rotating ~monthly; batch ${BATCH})\n`,
   );
