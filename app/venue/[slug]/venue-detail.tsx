@@ -469,35 +469,76 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         )}
 
         {/* ── Reviews ────────────────────────────────────────────────
-            Section scaffold + explicit empty state. Real Google reviews
-            land here in Phase 2 (Places Details); until then we show
-            skeleton cards, never placeholder or invented quotes. */}
+            Real Google reviews when synced (verbatim text + author, plus a
+            small "Reviews from Google" attribution — both required by Google's
+            display policy). Skeleton cards as the empty state until then;
+            never placeholder or invented quotes. */}
         <div className="mt-8">
-          <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
-            Reviews
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
+              Reviews
+            </div>
+            {venue.reviews && venue.reviews.length > 0 && (
+              <span className="text-[10px] text-muted-fg">
+                Reviews from Google
+              </span>
+            )}
           </div>
-          <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1">
-            {[0, 1].map((i) => (
-              <div
-                key={i}
-                aria-hidden
-                className="min-w-[200px] rounded-2xl border border-dashed border-fg/20 px-4 py-4"
-              >
-                <div className="flex gap-1 mb-3">
-                  {[0, 1, 2, 3, 4].map((s) => (
-                    <Star
-                      key={s}
-                      className="w-3 h-3 text-fg/15 fill-current"
-                      strokeWidth={0}
-                    />
-                  ))}
+          {venue.reviews && venue.reviews.length > 0 ? (
+            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {venue.reviews.map((r, i) => (
+                <div
+                  key={i}
+                  className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5"
+                >
+                  <div className="flex gap-0.5 mb-2">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star
+                        key={s}
+                        className={
+                          "w-3.5 h-3.5 fill-current " +
+                          (s <= Math.round(r.rating)
+                            ? "text-muted-fg"
+                            : "text-fg/15")
+                        }
+                        strokeWidth={0}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[13px] text-fg leading-relaxed line-clamp-5">
+                    {r.text}
+                  </p>
+                  <p className="text-[11px] text-muted-fg mt-2">
+                    {r.author}
+                    {r.relativeTime ? ` · ${r.relativeTime}` : ""}
+                  </p>
                 </div>
-                <div className="h-2.5 rounded bg-fg/10 mb-2" />
-                <div className="h-2.5 rounded bg-fg/10 mb-2 w-5/6" />
-                <div className="h-2.5 rounded bg-fg/10 w-2/3" />
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1">
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  aria-hidden
+                  className="min-w-[200px] rounded-2xl border border-dashed border-fg/20 px-4 py-4"
+                >
+                  <div className="flex gap-1 mb-3">
+                    {[0, 1, 2, 3, 4].map((s) => (
+                      <Star
+                        key={s}
+                        className="w-3 h-3 text-fg/15 fill-current"
+                        strokeWidth={0}
+                      />
+                    ))}
+                  </div>
+                  <div className="h-2.5 rounded bg-fg/10 mb-2" />
+                  <div className="h-2.5 rounded bg-fg/10 mb-2 w-5/6" />
+                  <div className="h-2.5 rounded bg-fg/10 w-2/3" />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ── Plan your visit ────────────────────────────────────────

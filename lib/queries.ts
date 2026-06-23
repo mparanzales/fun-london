@@ -34,6 +34,7 @@ import type {
   CreatorCoverage,
   CriticalFlag,
   OpeningHours,
+  VenueReview,
 } from "./types";
 
 // ── Row shapes (raw DB) ─────────────────────────────────────────────────
@@ -72,6 +73,7 @@ type VenueRow = {
   critical_flags: CriticalFlag[] | null;
   opening_hours: OpeningHours | null;
   map_url: string | null;
+  reviews: VenueReview[] | null;
   // Optional so this stays safe if a row predates the curation_tier column.
   curation_tier?: string | null;
   created_at: string;
@@ -150,6 +152,7 @@ function mapVenue(r: VenueRow): Venue {
       })) ?? null,
     openingHours: r.opening_hours,
     mapUrl: r.map_url ?? null,
+    reviews: r.reviews,
     curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
     createdAt: r.created_at,
   };
@@ -286,6 +289,7 @@ function mapVenuePreview(r: VenueCardRow): Venue {
     criticalFlags: null,
     openingHours: null,
     mapUrl: null,
+    reviews: null,
     curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
     createdAt: r.created_at,
   };

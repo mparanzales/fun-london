@@ -17,6 +17,8 @@
     "ingest": "tsx scripts/ingest-venues.ts",
     "refresh-venues:dry": "tsx scripts/refresh-venues.ts --dry-run",
     "refresh-venues": "tsx scripts/refresh-venues.ts",
+    "refresh-reviews:dry": "tsx scripts/refresh-reviews.ts --dry-run",
+    "refresh-reviews": "tsx scripts/refresh-reviews.ts",
     "ingest-events:dry": "tsx scripts/ingest-events.ts --dry-run",
     "ingest-events": "tsx scripts/ingest-events.ts",
     "ingest:from-pending:dry": "tsx scripts/ingest-from-pending.ts --dry-run",

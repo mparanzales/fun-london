@@ -112,6 +112,20 @@ export type CriticalFlag = {
   body: string; // "Borough Market location, weekend mornings 20+ min standard"
 };
 
+// Phase 2 — a single Google review, stored VERBATIM. Never synthesize,
+// translate, summarize, or reorder the text (Google display policy + the
+// project's provenance-honesty rule — same lesson as the fabricated editorial
+// sources). Stored as a JSONB array on `venues.reviews`; the UI must show a
+// "Reviews from Google" attribution and the author per Google's policy.
+export type VenueReview = {
+  author: string; // authorAttribution.displayName
+  rating: number; // 1–5
+  text: string; // review.text.text, exactly as written
+  relativeTime: string; // "2 weeks ago" (relativePublishTimeDescription)
+  publishTime?: string; // ISO timestamp, optional
+  authorPhotoUrl?: string; // keyless lh3.googleusercontent.com URL, optional
+};
+
 // Opening hours — normalized from Google Places `regularOpeningHours`.
 // day = 0 (Sunday) … 6 (Saturday), matching JS Date.getDay(). A null
 // `close` means the venue is open 24h that day. Periods can wrap past
@@ -162,6 +176,8 @@ export type Venue = {
   openingHours: OpeningHours | null;
   // Phase 2 — keyless Storage URL of a static map thumbnail (null = placeholder).
   mapUrl: string | null;
+  // Phase 2 — verbatim Google reviews (signed-in only); null until synced.
+  reviews: VenueReview[] | null;
   // "curated" = hand-picked seed venue; "discovered" = added by the autonomous
   // robot. Curated venues rank first. Defaults to "discovered".
   curationTier: "curated" | "discovered";
