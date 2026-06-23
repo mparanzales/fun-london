@@ -166,6 +166,41 @@ export async function resolveVenuePhotos(
   return urls;
 }
 
+// Mirror a Google Static Map of a venue's coordinates to keyless Storage,
+// returning the keyless public URL. The keyed maps.googleapis.com URL is built
+// and used server-side ONLY (same invariant as the photo media URL); the DB
+// stores only the keyless `${slug}-map.png` Storage URL. Returns null when
+// mirroring is disabled or the fetch fails (the UI keeps the grey placeholder).
+// NOTE: Maps Static API is a SEPARATE SKU from Places — the key must have it
+// enabled or the fetch returns REQUEST_DENIED.
+export async function mirrorMapToStorage(
+  slug: string,
+  lat: number,
+  lng: number,
+  supabase: SupabaseClient,
+): Promise<string | null> {
+  if (!photoStorageEnabled()) return null;
+  return withRetry(`map ${slug}`, async () => {
+    const key = process.env.GOOGLE_PLACES_API_KEY ?? "";
+    const zoom = process.env.FL_STATIC_MAP_ZOOM ?? "15";
+    const marker = `color:0x5a3bd9%7C${lat},${lng}`;
+    const url =
+      `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}` +
+      `&zoom=${zoom}&size=320x160&scale=2&markers=${marker}&key=${key}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const path = `${slug}-map.png`;
+    const { error } = await supabase.storage
+      .from(photoBucket())
+      .upload(path, buffer, { contentType: "image/png", upsert: true });
+    if (error) throw new Error(`upload: ${error.message}`);
+    const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
+    if (!data?.publicUrl) throw new Error("no public URL returned");
+    return data.publicUrl;
+  });
+}
+
 // Generic variant: download an arbitrary public image URL (e.g. a pop-up's
 // og:image from its official page) and re-host it on Supabase Storage,
 // returning a keyless public URL. Same bucket + flag gate. Returns null if

@@ -26,7 +26,11 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { resolveVenuePhotos, FALLBACK_IMG_URL } from "./photo-storage";
+import {
+  resolveVenuePhotos,
+  mirrorMapToStorage,
+  FALLBACK_IMG_URL,
+} from "./photo-storage";
 import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
@@ -674,8 +678,17 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
 
   const photoUrls = await resolveVenuePhotos(details.photos, slug, supabase);
   const imgUrl = photoUrls[0] ?? FALLBACK_IMG_URL;
+  const lat = details.location?.latitude ?? null;
+  const lng = details.location?.longitude ?? null;
+  const mapUrl =
+    lat != null && lng != null
+      ? await mirrorMapToStorage(slug, lat, lng, supabase)
+      : null;
 
-  const venueRow = buildVenueRow(candidate, details, imgUrl, slug, photoUrls);
+  const venueRow = {
+    ...buildVenueRow(candidate, details, imgUrl, slug, photoUrls),
+    map_url: mapUrl,
+  };
   const { error: venueErr } = await supabase
     .from("venues")
     .upsert(venueRow, { onConflict: "google_place_id" });

@@ -513,15 +513,30 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               Plan your visit
             </div>
             {venue.lat && venue.lng && (
-              <div
-                aria-hidden
-                className="mb-3 h-28 rounded-2xl bg-muted flex items-center justify-center gap-2 text-muted-fg"
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${venue.lat},${venue.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open in Google Maps"
+                className="relative block mb-3 h-28 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                <MapPin className="w-5 h-5" strokeWidth={2} />
-                <span className="text-sm font-medium">
-                  {venue.neighbourhood}
-                </span>
-              </div>
+                {venue.mapUrl ? (
+                  <Image
+                    src={venue.mapUrl}
+                    alt={`Map of ${venue.name}`}
+                    fill
+                    sizes="(max-width: 640px) 100vw, 640px"
+                    className="object-cover"
+                  />
+                ) : (
+                  <span className="flex h-full items-center justify-center gap-2 bg-muted text-muted-fg">
+                    <MapPin className="w-5 h-5" strokeWidth={2} />
+                    <span className="text-sm font-medium">
+                      {venue.neighbourhood}
+                    </span>
+                  </span>
+                )}
+              </a>
             )}
             {venue.address && (
               <p className="text-sm font-semibold text-fg">{venue.address}</p>

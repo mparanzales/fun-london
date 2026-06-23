@@ -160,6 +160,8 @@ export type Venue = {
   criticalFlags: CriticalFlag[] | null;
   // Phase: real opening hours (Google Places), for "open when we meet".
   openingHours: OpeningHours | null;
+  // Phase 2 — keyless Storage URL of a static map thumbnail (null = placeholder).
+  mapUrl: string | null;
   // "curated" = hand-picked seed venue; "discovered" = added by the autonomous
   // robot. Curated venues rank first. Defaults to "discovered".
   curationTier: "curated" | "discovered";

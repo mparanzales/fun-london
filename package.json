@@ -36,6 +36,8 @@
     "backfill-photos": "tsx scripts/backfill-photos.ts",
     "backfill-gallery:dry": "tsx scripts/backfill-gallery.ts --dry-run",
     "backfill-gallery": "tsx scripts/backfill-gallery.ts",
+    "backfill-maps:dry": "tsx scripts/backfill-maps.ts --dry-run",
+    "backfill-maps": "tsx scripts/backfill-maps.ts",
     "backfill-popup-images:dry": "tsx scripts/backfill-popup-images.ts --dry-run",
     "backfill-popup-images": "tsx scripts/backfill-popup-images.ts",
     "test": "vitest run"
