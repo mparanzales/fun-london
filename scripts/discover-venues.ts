@@ -35,6 +35,12 @@ import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
 } from "@/lib/opening-hours";
+import { areaFromPostcode } from "@/lib/postcode-areas";
+import {
+  TAG_VERSION,
+  fallbackCanonicalTags,
+  rawTagsToCanonical,
+} from "@/lib/tag-vocabulary";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
@@ -463,22 +469,21 @@ function templateEditorial(
   name: string,
   type: VenueType,
   area: string,
-  sources: Source[],
   isDay: boolean,
 ): Editorial {
-  const { article, noun } = TYPE_NOUN[type] ?? { article: "a", noun: "spot" };
-  const pubs = sources.map((s) => s.publication);
-  const pubList =
-    pubs.length <= 1
-      ? pubs[0]
-      : `${pubs.slice(0, -1).join(", ")} and ${pubs[pubs.length - 1]}`;
+  const { noun } = TYPE_NOUN[type] ?? { noun: "spot" };
 
-  const vibe = `${area}'s own — ${article} ${noun} the critics keep coming back to.`;
+  // Honest, grounded copy only. We have NOT read this venue or verified any
+  // editorial coverage, so the description claims nothing it can't back: just
+  // the type and the (postcode-derived) area, plus a practical heads-up. The
+  // old template asserted "cross-checked across N trusted sources" and "the
+  // critics keep coming back" for every robot-found venue, which was fabricated
+  // (see the provenance audit). No source names, no critic claims, no dashes.
+  const vibe = `An independent ${noun} in ${area}.`;
 
   const long_description =
-    `An independent ${noun} in ${area} that earned its place the honest way: ` +
-    `cross-checked across ${pubs.length} trusted source${pubs.length === 1 ? "" : "s"} ` +
-    `(${pubList}). Worth the trip if you want the real ${area} — not the chain on the high street.`;
+    `An independent ${noun} in ${area}. ` +
+    `Opening hours can vary, so it's worth a quick check before you head over.`;
 
   const critical_flags = isDay
     ? [
@@ -657,7 +662,19 @@ async function main() {
       // Gemini call). See templateEditorial: keeps the robot to ONE Gemini
       // call per venue (source validation only) so the free daily quota
       // stretches ~3x further.
-      const editorial = templateEditorial(name, cat.type, area, sources, isDay);
+      const editorial = templateEditorial(name, cat.type, area, isDay);
+
+      // Canonical tags for the recommender + search, mirroring the ingest path
+      // (scripts/ingest-from-pending.ts canonicalForCandidate): map the raw
+      // tags, with a type/mood floor so a venue is never invisible. Without
+      // this, robot-found venues land at canonical_tags_version 0 and are
+      // silently missing from the shared vocabulary.
+      const rawTags = ["Independent", ...cat.moods];
+      const canonicalFromTags = rawTagsToCanonical(rawTags);
+      const canonicalTags =
+        canonicalFromTags.length > 0
+          ? canonicalFromTags
+          : fallbackCanonicalTags(cat.type, cat.moods);
 
       // Unique slug.
       let slug = slugify(name);
@@ -680,7 +697,11 @@ async function main() {
         type: cat.type,
         vibe: editorial.vibe,
         long_description: editorial.long_description,
-        neighbourhood: area,
+        // Neighbourhood from the venue's real Google postcode (validated),
+        // not the search area it was found under, falling back to that area
+        // when there's no usable postcode. Mirrors the ingest path. See
+        // lib/postcode-areas.ts.
+        neighbourhood: areaFromPostcode(p.formattedAddress) ?? area,
         address: p.formattedAddress ?? `${area}, London`,
         lat: p.location?.latitude ?? null,
         lng: p.location?.longitude ?? null,
@@ -696,15 +717,20 @@ async function main() {
         curation_tier: "discovered",
         mood_tags: cat.moods,
         vibe_tags: ["Independent"],
+        canonical_tags: canonicalTags,
+        canonical_tags_version: TAG_VERSION,
         google_place_id: p.id,
         booking_links: detectBookingLinks(p.websiteUri),
         website_url: p.websiteUri ?? null,
         phone: p.nationalPhoneNumber ?? p.internationalPhoneNumber ?? null,
         instagram_handle: null,
-        editorial_sources: sources.map((s) => ({
-          publication: s.publication,
-          url: s.url,
-        })),
+        // No editorial_sources written. The source validation below is still
+        // used as a publish-quality gate (a venue must clear it to be listed),
+        // but we do NOT persist the source list: the provenance audit showed
+        // these robot-collected URLs are unreliable (dead/recycled/wrong-
+        // business), and the venue page only surfaces sources flagged
+        // verified anyway. Mirrors the ingest path, which writes [].
+        editorial_sources: [],
         creator_coverage: null,
         critical_flags: editorial.critical_flags,
         opening_hours: normalizeOpeningHours(p.regularOpeningHours),
