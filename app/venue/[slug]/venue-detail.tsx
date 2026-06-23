@@ -671,7 +671,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         <Link
           href="/plan"
           aria-label="Add to a plan"
-          className="flex-shrink-0 inline-flex items-center gap-1.5 px-5 border border-fg/15 rounded-full text-fg text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="flex-shrink-0 inline-flex items-center gap-1.5 px-5 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <Plus className="w-4 h-4" strokeWidth={2.5} />
           Plan
