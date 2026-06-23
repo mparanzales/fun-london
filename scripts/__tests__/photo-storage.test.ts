@@ -3,6 +3,7 @@ import {
   FALLBACK_IMG_URL,
   isKeyedPhotoUrl,
   resolveVenuePhoto,
+  resolveVenuePhotos,
   photoStorageEnabled,
 } from "../photo-storage";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -62,5 +63,27 @@ describe("resolveVenuePhoto", () => {
     );
     expect(url).toBe(FALLBACK_IMG_URL);
     expect(isKeyedPhotoUrl(url)).toBe(false);
+  });
+});
+
+describe("resolveVenuePhotos (gallery)", () => {
+  const noopSupabase = {} as unknown as SupabaseClient;
+
+  it("returns an empty array (never a keyed URL) when mirroring is disabled", async () => {
+    // No FL_PHOTO_BUCKET in the test env, so no Storage I/O happens and the
+    // keyed media URLs are never persisted — same invariant as the hero.
+    expect(photoStorageEnabled()).toBe(false);
+    const urls = await resolveVenuePhotos(
+      [{ name: "places/ABC/photos/1" }, { name: "places/ABC/photos/2" }],
+      "some-venue",
+      noopSupabase,
+    );
+    expect(urls).toEqual([]);
+    expect(urls.some((u) => isKeyedPhotoUrl(u))).toBe(false);
+  });
+
+  it("returns an empty array for no photos", async () => {
+    expect(await resolveVenuePhotos(null, "v", noopSupabase)).toEqual([]);
+    expect(await resolveVenuePhotos([], "v", noopSupabase)).toEqual([]);
   });
 });

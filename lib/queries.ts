@@ -57,6 +57,7 @@ type VenueRow = {
   tables_free: number;
   next_slot_label: string;
   img_url: string;
+  photo_urls: string[];
   mood_tags: string[];
   vibe_tags: string[];
   // Phase 4 — nullable on existing demo rows.
@@ -131,6 +132,7 @@ function mapVenue(r: VenueRow): Venue {
     tablesFree: r.tables_free,
     nextSlotLabel: r.next_slot_label,
     imgUrl: r.img_url,
+    photoUrls: r.photo_urls ?? [],
     moodTags: r.mood_tags as Mood[],
     vibeTags: r.vibe_tags,
     googlePlaceId: r.google_place_id,
@@ -266,6 +268,10 @@ function mapVenuePreview(r: VenueCardRow): Venue {
     tablesFree: 0,
     nextSlotLabel: "",
     imgUrl: r.img_url,
+    // Gallery is detail-only (the full select("*") fetch). The card/anon
+    // preview keeps the single hero, so photo_urls stays OUT of the explicit
+    // VENUE_CARD_COLUMNS — a deploy before the migration can't 400 the feed.
+    photoUrls: [],
     moodTags: [],
     vibeTags: [],
     googlePlaceId: null,

@@ -112,6 +112,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const [showReserve, setShowReserve] = useState(false);
   const [hoursOpen, setHoursOpen] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
+  const [photoIdx, setPhotoIdx] = useState(0);
 
   // Open/closed is time- and timezone-sensitive, so compute it only after
   // mount to avoid an SSR/client hydration mismatch. Until then the strip
@@ -184,6 +185,13 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const PILL_LIMIT = 6;
   const pills = venue.vibeTags.slice(0, PILL_LIMIT);
 
+  // Gallery photos: keyless Storage URLs (hero first). Falls back to the single
+  // hero until the Phase 2 gallery backfill populates photo_urls.
+  const photos =
+    venue.photoUrls && venue.photoUrls.length > 0
+      ? venue.photoUrls
+      : [venue.imgUrl];
+
   return (
     // Mobile-shell constraint matches the (main) route group (max-w-md).
     // Keeps the visual width consistent when navigating from /explore →
@@ -192,17 +200,35 @@ export function VenueDetail({ venue }: { venue: Venue }) {
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
       {/* ── Hero ───────────────────────────────────────────────────── */}
       <div className="relative w-full" style={{ aspectRatio: "4/3" }}>
-        <Image
-          src={venue.imgUrl}
-          alt={venue.name}
-          fill
-          priority
-          sizes="(max-width: 640px) 100vw, 640px"
-          // Google Places photo URLs 302-redirect with an API key;
-          // bypass Vercel's optimizer for those.
-          unoptimized={venue.imgUrl.includes("googleapis.com")}
-          className="object-cover"
-        />
+        {/* Swipeable photo gallery — keyless Storage URLs, hero first.
+            Scroll-snaps horizontally; the dots track the active slide. */}
+        <div
+          className="absolute inset-0 flex overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setPhotoIdx(Math.round(el.scrollLeft / el.clientWidth));
+          }}
+        >
+          {photos.map((src, i) => (
+            <div key={i} className="relative min-w-full h-full snap-center">
+              <Image
+                src={src}
+                alt={
+                  photos.length > 1
+                    ? `${venue.name}, photo ${i + 1}`
+                    : venue.name
+                }
+                fill
+                priority={i === 0}
+                sizes="(max-width: 640px) 100vw, 640px"
+                // Keyless Storage URLs optimize fine; only a legacy keyed
+                // Google URL (pre-mirror) needs the optimizer bypass.
+                unoptimized={src.includes("googleapis.com")}
+                className="object-cover"
+              />
+            </div>
+          ))}
+        </div>
 
         {/* Bottom scrim so the vibe tagline stays legible over any photo. */}
         <div
@@ -255,6 +281,25 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           <p className="absolute inset-x-0 bottom-0 px-5 pb-4 text-[15px] italic leading-snug text-white/90 drop-shadow-md">
             {venue.vibe}
           </p>
+        )}
+
+        {/* Photo dots — only when there's a real gallery. Top-center, clear of
+            the back/share controls and the bottom tagline. */}
+        {photos.length > 1 && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+            {photos.map((_, i) => (
+              <span
+                key={i}
+                aria-hidden
+                className={
+                  "rounded-full drop-shadow transition-all " +
+                  (i === photoIdx
+                    ? "w-2 h-2 bg-white"
+                    : "w-1.5 h-1.5 bg-white/60")
+                }
+              />
+            ))}
+          </div>
         )}
       </div>
 

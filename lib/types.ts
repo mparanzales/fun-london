@@ -142,6 +142,8 @@ export type Venue = {
   tablesFree: number; // small int — display as "N tables free"
   nextSlotLabel: string; // e.g. "9:00 PM" or "Open today"
   imgUrl: string;
+  // Phase 2 — ordered keyless Storage URLs for the hero gallery; [0] === imgUrl.
+  photoUrls: string[];
   moodTags: Mood[];
   // vibeTags is free-form display strings (e.g. "Spicy", "Hand-rolled").
   // Not constrained to the Vibe enum, which is for filtering/preferences.

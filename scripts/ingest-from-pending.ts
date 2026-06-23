@@ -26,7 +26,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { resolveVenuePhoto } from "./photo-storage";
+import { resolveVenuePhotos, FALLBACK_IMG_URL } from "./photo-storage";
 import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
@@ -397,6 +397,7 @@ function buildVenueRow(
   details: PlaceDetails,
   imgUrl: string,
   slug: string,
+  photoUrls: string[],
 ) {
   const bookingLinks = detectBookingLinks(details.websiteUri);
   const source = candidate.sources.find((s) => s.source === "onezone");
@@ -429,6 +430,7 @@ function buildVenueRow(
     tables_free: 0,
     next_slot_label: "",
     img_url: imgUrl,
+    photo_urls: photoUrls,
     curation_tier: "discovered",
     mood_tags: deriveMoodTags(candidate),
     vibe_tags: deriveVibeTags(candidate),
@@ -670,10 +672,10 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
 
   if (!supabase) throw new Error("Supabase client not initialised");
 
-  const photoName = details.photos?.[0]?.name;
-  const imgUrl = await resolveVenuePhoto(photoName, slug, supabase);
+  const photoUrls = await resolveVenuePhotos(details.photos, slug, supabase);
+  const imgUrl = photoUrls[0] ?? FALLBACK_IMG_URL;
 
-  const venueRow = buildVenueRow(candidate, details, imgUrl, slug);
+  const venueRow = buildVenueRow(candidate, details, imgUrl, slug, photoUrls);
   const { error: venueErr } = await supabase
     .from("venues")
     .upsert(venueRow, { onConflict: "google_place_id" });

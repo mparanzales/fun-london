@@ -26,7 +26,7 @@ dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { VENUE_SEEDS, type VenueSeed } from "./venues-seed";
-import { resolveVenuePhoto } from "./photo-storage";
+import { resolveVenuePhotos, FALLBACK_IMG_URL } from "./photo-storage";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 import {
   normalizeOpeningHours,
@@ -214,7 +214,12 @@ function hasMajorBookingPlatform(links: BookingLink[]): boolean {
 
 // ── Row builders ─────────────────────────────────────────────────────────
 
-function buildVenueRow(seed: VenueSeed, details: PlaceDetails, imgUrl: string) {
+function buildVenueRow(
+  seed: VenueSeed,
+  details: PlaceDetails,
+  imgUrl: string,
+  photoUrls: string[],
+) {
   const websiteUri = details.websiteUri ?? null;
   const bookingLinks = detectBookingLinks(
     websiteUri ?? undefined,
@@ -250,6 +255,7 @@ function buildVenueRow(seed: VenueSeed, details: PlaceDetails, imgUrl: string) {
     tables_free: 4, // hard-coded V1 default; future: real-time from booking platforms
     next_slot_label: "Open today",
     img_url: imgUrl,
+    photo_urls: photoUrls,
     // Seed venues are hand-picked — they rank first in the catalogue.
     curation_tier: "curated",
     mood_tags: seed.moodTags,
@@ -347,13 +353,17 @@ async function processVenue(seed: VenueSeed): Promise<{
   } else {
     if (!supabase) throw new Error("Supabase client not initialised");
 
-    // Resolve the venue photo to a keyless URL (mirrored to Supabase Storage,
-    // or the keyless stock fallback). resolveVenuePhoto NEVER returns a keyed
-    // Google URL, so the API key can't leak into venues.img_url.
-    const photoName = details.photos?.[0]?.name;
-    const imgUrl = await resolveVenuePhoto(photoName, seed.slug, supabase);
+    // Resolve the venue photos to keyless Storage URLs. resolveVenuePhotos
+    // NEVER returns a keyed Google URL, so the API key can't leak into the
+    // catalogue. photo_urls[0] is the hero (== img_url).
+    const photoUrls = await resolveVenuePhotos(
+      details.photos,
+      seed.slug,
+      supabase,
+    );
+    const imgUrl = photoUrls[0] ?? FALLBACK_IMG_URL;
 
-    const venueRow = buildVenueRow(seed, details, imgUrl);
+    const venueRow = buildVenueRow(seed, details, imgUrl, photoUrls);
     const { error: venueErr } = await supabase
       .from("venues")
       .upsert(venueRow, { onConflict: "google_place_id" });
