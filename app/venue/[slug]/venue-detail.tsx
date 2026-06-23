@@ -1,22 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ChevronDown,
-  Heart,
-  Star,
-  Share2,
   Check,
+  Globe,
+  Heart,
+  MapPin,
+  Phone,
+  Share2,
+  Star,
 } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
 import { ReserveSheet } from "@/components/reserve-sheet";
 import { platformLabel, type ReserveTarget } from "@/lib/booking-link";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
-import type { Venue, VenueType } from "@/lib/types";
+import {
+  getOpenState,
+  londonWallClock,
+  type OpenState,
+} from "@/lib/opening-hours";
+import type { Venue, VenueType, OpeningPeriod } from "@/lib/types";
 
 // Only these venue types accept a table reservation / ticket booking.
 // Museums, markets, cafés, and outdoor spaces are walk-in by nature, so
@@ -29,6 +38,54 @@ const RESERVABLE_TYPES: VenueType[] = [
   "Listening Bar",
   "Live Music",
 ];
+
+const DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+// Dash-free time formatting for the hours strip ("6pm", "1:30am", "midnight").
+function fmtClock(hour: number, minute: number): string {
+  if (hour === 0 && minute === 0) return "midnight";
+  if (hour === 12 && minute === 0) return "noon";
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  const suffix = hour < 12 ? "am" : "pm";
+  return minute === 0
+    ? `${h12}${suffix}`
+    : `${h12}:${String(minute).padStart(2, "0")}${suffix}`;
+}
+
+// One day's opening line, built from the structured periods so it never
+// renders Google's en-dash strings. "6pm until 1am", "Closed", "Open 24 hours".
+function dayHoursLine(periods: OpeningPeriod[], day: number): string {
+  const todays = periods.filter((p) => p.open.day === day);
+  if (todays.length === 0) return "Closed";
+  return todays
+    .map((p) =>
+      p.close === null
+        ? "Open 24 hours"
+        : `${fmtClock(p.open.hour, p.open.minute)} until ${fmtClock(p.close.hour, p.close.minute)}`,
+    )
+    .join(", ");
+}
+
+// The secondary line shown next to the status dot in the collapsed strip.
+function openSummary(state: OpenState): string {
+  if (state.status === "open") {
+    return state.closesAt === null
+      ? "Open 24 hours"
+      : `closes at ${fmtClock(state.closesAt.hour, state.closesAt.minute)}`;
+  }
+  if (state.status === "closed" && state.opensAt) {
+    return `opens ${DAY_NAMES[state.opensAt.day]} ${fmtClock(state.opensAt.hour, state.opensAt.minute)}`;
+  }
+  return "";
+}
 
 // Venue detail (Figma frame 3b) — full-screen immersive layout.
 //
@@ -52,6 +109,20 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const [whyOpen, setWhyOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [showReserve, setShowReserve] = useState(false);
+  const [hoursOpen, setHoursOpen] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
+
+  // Open/closed is time- and timezone-sensitive, so compute it only after
+  // mount to avoid an SSR/client hydration mismatch. Until then the strip
+  // renders a neutral "Hours" state.
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
+  const openState: OpenState = now
+    ? getOpenState(venue.openingHours, now)
+    : { status: "unknown" };
+  const today = now ? londonWallClock(now).day : -1;
 
   const onShare = async () => {
     track("share", { kind: "venue", venue: venue.slug });
@@ -132,17 +203,23 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           className="object-cover"
         />
 
+        {/* Bottom scrim so the vibe tagline stays legible over any photo. */}
+        <div
+          aria-hidden
+          className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/55 to-transparent"
+        />
+
         {/* Floating photo controls — bare icons (no circle), matching the
-            Explore / bottom-nav icon language. White + a drop shadow so
-            they read on any photo in both day and night themes (a themed
-            icon colour would vanish against a light photo at night). */}
+            Explore / bottom-nav icon language. White + a drop shadow so they
+            read on any photo in both day and night themes. 44px hit targets
+            with a visible focus ring for keyboard / switch-control users. */}
 
         {/* Back button — overlays photo, top-left */}
         <button
           type="button"
           onClick={() => router.back()}
           aria-label="Back"
-          className="absolute top-4 left-4 w-10 h-10 flex items-center justify-center"
+          className="absolute top-3 left-3 w-11 h-11 flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
         >
           <ArrowLeft
             className="w-6 h-6 text-white drop-shadow-md"
@@ -150,12 +227,13 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           />
         </button>
 
-        {/* Share button — overlays photo, top-right, left of the heart */}
+        {/* Share button — overlays photo, top-right. Save lives only in the
+            sticky bar now: one always-reachable save control, no duplicate. */}
         <button
           type="button"
           onClick={onShare}
           aria-label="Share"
-          className="absolute top-4 right-14 w-10 h-10 flex items-center justify-center"
+          className="absolute top-3 right-3 w-11 h-11 flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
         >
           {shareCopied ? (
             <Check
@@ -170,27 +248,19 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           )}
         </button>
 
-        {/* Heart button — overlays photo, top-right */}
-        <button
-          type="button"
-          onClick={() => toggleSaved(venue.slug)}
-          aria-label={saved ? "Unsave" : "Save"}
-          className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center"
-        >
-          <Heart
-            className={
-              "w-6 h-6 drop-shadow-md " +
-              (saved ? "fill-primary text-primary" : "fill-none text-white")
-            }
-            strokeWidth={2}
-          />
-        </button>
+        {/* Vibe tagline — the venue's short editorial voice line, over the
+            photo. Hidden if we hold none. */}
+        {venue.vibe && (
+          <p className="absolute inset-x-0 bottom-0 px-5 pb-4 text-[15px] italic leading-snug text-white/90 drop-shadow-md">
+            {venue.vibe}
+          </p>
+        )}
       </div>
 
       {/* ── Info block ────────────────────────────────────────────── */}
       <section className="px-5">
         <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5">
-          {venue.neighbourhood.toUpperCase()} · {venue.price}
+          {venue.neighbourhood.toUpperCase()} · {venue.price} · {venue.type}
         </div>
 
         <h1 className="text-3xl font-extrabold text-fg leading-tight mt-1">
@@ -198,10 +268,10 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         </h1>
 
         <div className="flex items-center gap-1.5 mt-2 text-sm text-muted-fg">
-          {/* Amber star — Tailwind's amber-500 is theme-stable (warm on both
-              bgs), the right warm tone for a rating without a second brand hue. */}
+          {/* Grey star — a warm neutral. The rating isn't a brand-accent
+              moment, so it stays out of the amber/violet vocabulary. */}
           <Star
-            className="w-4 h-4 text-amber-500 fill-current"
+            className="w-4 h-4 text-muted-fg fill-current"
             strokeWidth={0}
           />
           <span>{venue.rating}</span>
@@ -209,43 +279,52 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           <span>{venue.reviewCount.toLocaleString()} reviews</span>
         </div>
 
-        <p className="text-base leading-relaxed text-fg mt-5">
-          {venue.longDescription}
-        </p>
-
-        {/* Quick facts pills */}
-        <div className="flex flex-wrap gap-2 mt-5">
-          {pills.map((label) => (
-            <span
-              key={label}
-              className="border border-fg/15 rounded-full px-3 py-1.5 text-xs font-medium text-fg"
-            >
-              {label}
-            </span>
-          ))}
-        </div>
-
-        {/* Menu / website — restaurants point at the menu, others at the site.
-            Honest secondary link (the Reserve CTA stays the primary action). */}
-        {venue.websiteUrl && (
-          <a
-            href={venue.websiteUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 mt-4 text-sm font-bold text-primary"
-          >
-            {venue.type === "Restaurant" ? "See the menu" : "Visit website"} ↗
-          </a>
+        {/* Vibe tags as filter chips — tapping routes to that tag's results on
+            Explore. Placed before the description so the at-a-glance signal
+            leads. Press state mirrors the Reserve CTA (violet fill, white). */}
+        {pills.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-4">
+            {pills.map((label) => (
+              <Link
+                key={label}
+                href={`/explore?tag=${encodeURIComponent(label)}`}
+                className="rounded-full border border-fg/20 px-3 py-1.5 text-xs font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
         )}
 
+        <div className="mt-5">
+          <p
+            className={
+              "text-base leading-relaxed text-fg " +
+              (descOpen ? "" : "line-clamp-3")
+            }
+          >
+            {venue.longDescription}
+          </p>
+          {venue.longDescription.length > 160 && (
+            <button
+              type="button"
+              onClick={() => setDescOpen((v) => !v)}
+              aria-expanded={descOpen}
+              className="mt-1.5 rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              {descOpen ? "Read less" : "Read more"}
+            </button>
+          )}
+        </div>
+
         {/* ── Real Talk ──────────────────────────────────────────────
-            Editorial pull-quote treatment. Eyebrow + headline above,
-            then a single vertical accent rule running down the side of
-            the flag list, with hairline dividers between flags and
-            italic body copy. The brand promise: honest signal,
-            magazine-style, never buried. */}
+            Moved high on purpose: this honest, practical signal is the
+            most differentiated content on the page. Eyebrow + headline,
+            then a vertical accent rule down the flag list with hairline
+            dividers. Body is upright text-fg (not italic muted) for
+            readability and AA contrast. */}
         {hasRealTalk && (
-          <div className="mt-10">
+          <div className="mt-8">
             <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-accent mb-1.5">
               Real Talk
             </div>
@@ -266,12 +345,142 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                     <div className="text-[15px] font-extrabold text-fg leading-snug">
                       {flag.label}
                     </div>
-                    <p className="text-[14px] italic text-muted-fg leading-relaxed mt-1.5">
+                    <p className="text-[14px] text-fg leading-relaxed mt-1.5">
                       {flag.body}
                     </p>
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Hours / Open now ──────────────────────────────────────
+            Live open/closed computed in Europe/London from the structured
+            periods (see lib/opening-hours). Collapsed: status + next change;
+            expanded: the full week, dash-free ("6pm until 1am"), today bold.
+            Hidden for signed-out users (openingHours is a moat field). */}
+        {venue.openingHours && (
+          <div className="mt-6 border-y border-fg/10">
+            <button
+              type="button"
+              onClick={() => setHoursOpen((v) => !v)}
+              aria-expanded={hoursOpen}
+              className="w-full flex items-center justify-between py-3.5 text-left"
+            >
+              <span className="flex items-center gap-2.5 text-sm">
+                <span
+                  aria-hidden
+                  className={
+                    "w-2 h-2 rounded-full " +
+                    (openState.status === "open"
+                      ? "bg-green-600"
+                      : "bg-muted-fg")
+                  }
+                />
+                <span className="font-extrabold text-fg">
+                  {openState.status === "open"
+                    ? "Open now"
+                    : openState.status === "closed"
+                      ? "Closed"
+                      : "Hours"}
+                </span>
+                {openSummary(openState) && (
+                  <span className="text-muted-fg">
+                    · {openSummary(openState)}
+                  </span>
+                )}
+              </span>
+              <ChevronDown
+                className={
+                  "w-4 h-4 text-muted-fg transition-transform " +
+                  (hoursOpen ? "rotate-180" : "rotate-0")
+                }
+                strokeWidth={2}
+              />
+            </button>
+            {hoursOpen && (
+              <ul className="flex flex-col gap-1.5 pb-4 text-[13px]">
+                {[1, 2, 3, 4, 5, 6, 0].map((day) => {
+                  const isToday = day === today;
+                  return (
+                    <li
+                      key={day}
+                      className={
+                        "flex justify-between " +
+                        (isToday ? "font-bold text-fg" : "text-muted-fg")
+                      }
+                    >
+                      <span>{DAY_NAMES[day]}</span>
+                      <span>
+                        {dayHoursLine(venue.openingHours!.periods, day)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {/* ── Plan your visit ────────────────────────────────────────
+            Address + dash-free practical actions. No map image yet — a
+            static map needs the server-only Places key, so that lands in
+            Phase 2 (cron-cached). Directions deep-links to Google Maps. */}
+        {(venue.address ||
+          (venue.lat && venue.lng) ||
+          venue.phone ||
+          venue.websiteUrl) && (
+          <div className="mt-8">
+            <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
+              Plan your visit
+            </div>
+            {venue.address && (
+              <p className="text-sm font-semibold text-fg">{venue.address}</p>
+            )}
+            <p className="text-[13px] text-muted-fg mt-0.5">
+              {venue.neighbourhood}, London
+            </p>
+            <div className="flex flex-wrap gap-2 mt-4">
+              {((venue.lat && venue.lng) || venue.address) && (
+                <a
+                  href={
+                    venue.lat && venue.lng
+                      ? `https://www.google.com/maps/dir/?api=1&destination=${venue.lat},${venue.lng}`
+                      : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                          `${venue.address}, ${venue.neighbourhood}, London`,
+                        )}`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <MapPin className="w-4 h-4" strokeWidth={2} />
+                  Get directions
+                </a>
+              )}
+              {venue.websiteUrl && (
+                <a
+                  href={venue.websiteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Globe className="w-4 h-4" strokeWidth={2} />
+                  {venue.type === "Restaurant"
+                    ? "See the menu"
+                    : "Visit website"}
+                </a>
+              )}
+              {venue.phone && (
+                <a
+                  href={`tel:${venue.phone}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Phone className="w-4 h-4" strokeWidth={2} />
+                  Call venue
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -300,7 +509,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               />
             </button>
             {whyOpen && (
-              <div className="mt-2 rounded-2xl bg-muted/30 border border-fg/10 px-4 py-3">
+              <div className="mt-2 rounded-2xl bg-muted border border-fg/10 px-4 py-3">
                 {verifiedSources.length > 0 && (
                   <div>
                     <div className="text-[10px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-1.5">

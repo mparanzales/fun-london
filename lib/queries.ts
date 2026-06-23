@@ -526,6 +526,28 @@ export async function fetchVenueCategoryPreview(
   return out.map(mapVenuePreview);
 }
 
+// Tag-filter results for the venue page's vibe chips (/explore?tag=<tag>).
+// Card-level fields only — same moat discipline as the previews — filtering
+// the `vibe_tags` array with a containment match, best-rated first.
+export async function fetchVenuesByTag(
+  tag: string,
+  limit: number,
+): Promise<Venue[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("venues")
+    .select(VENUE_CARD_COLUMNS)
+    .contains("vibe_tags", [tag])
+    .not("google_place_id", "is", null)
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
+    .order("curation_tier", { ascending: true })
+    .order("rating", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`fetchVenuesByTag(${tag}): ${error.message}`);
+  return (data as VenueCardRow[]).map(mapVenuePreview);
+}
+
 // Total catalogue size — for the hero trust strip ("N independent venues"),
 // so the anonymous teaser can show the real count without fetching the rows.
 export async function fetchVenueCount(): Promise<number> {
