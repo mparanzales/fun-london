@@ -184,9 +184,17 @@ export async function mirrorMapToStorage(
     const key = process.env.GOOGLE_PLACES_API_KEY ?? "";
     const zoom = process.env.FL_STATIC_MAP_ZOOM ?? "15";
     const marker = `color:0x5a3bd9%7C${lat},${lng}`;
+    // Clean grayscale: drop all labels + POI/transit icons (too noisy), keep
+    // only the road geometry, and desaturate to B&W. The violet marker is
+    // unaffected (markers ignore map `style`).
+    const style =
+      "&style=feature:all%7Celement:labels%7Cvisibility:off" +
+      "&style=feature:poi%7Cvisibility:off" +
+      "&style=feature:transit%7Cvisibility:off" +
+      "&style=saturation:-100";
     const url =
       `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}` +
-      `&zoom=${zoom}&size=320x160&scale=2&markers=${marker}&key=${key}`;
+      `&zoom=${zoom}&size=320x160&scale=2${style}&markers=${marker}&key=${key}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
