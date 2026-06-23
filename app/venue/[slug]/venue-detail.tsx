@@ -12,6 +12,7 @@ import {
   Heart,
   MapPin,
   Phone,
+  Plus,
   Share2,
   Star,
 } from "lucide-react";
@@ -423,10 +424,45 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           </div>
         )}
 
+        {/* ── Reviews ────────────────────────────────────────────────
+            Section scaffold + explicit empty state. Real Google reviews
+            land here in Phase 2 (Places Details); until then we show
+            skeleton cards, never placeholder or invented quotes. */}
+        <div className="mt-8">
+          <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
+            Reviews
+          </div>
+          <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1">
+            {[0, 1].map((i) => (
+              <div
+                key={i}
+                aria-hidden
+                className="min-w-[200px] rounded-2xl border border-dashed border-fg/20 px-4 py-4"
+              >
+                <div className="flex gap-1 mb-3">
+                  {[0, 1, 2, 3, 4].map((s) => (
+                    <Star
+                      key={s}
+                      className="w-3 h-3 text-fg/15 fill-current"
+                      strokeWidth={0}
+                    />
+                  ))}
+                </div>
+                <div className="h-2.5 rounded bg-fg/10 mb-2" />
+                <div className="h-2.5 rounded bg-fg/10 mb-2 w-5/6" />
+                <div className="h-2.5 rounded bg-fg/10 w-2/3" />
+              </div>
+            ))}
+          </div>
+          <p className="text-[13px] text-muted-fg mt-2">
+            Reviews from Google land here soon.
+          </p>
+        </div>
+
         {/* ── Plan your visit ────────────────────────────────────────
-            Address + dash-free practical actions. No map image yet — a
-            static map needs the server-only Places key, so that lands in
-            Phase 2 (cron-cached). Directions deep-links to Google Maps. */}
+            Address + map + dash-free practical actions. The map is a
+            placeholder until Phase 2 swaps in a Static Map image (needs the
+            server-only Places key). Directions deep-links to Google Maps. */}
         {(venue.address ||
           (venue.lat && venue.lng) ||
           venue.phone ||
@@ -435,6 +471,17 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
               Plan your visit
             </div>
+            {venue.lat && venue.lng && (
+              <div
+                aria-hidden
+                className="mb-3 h-28 rounded-2xl bg-muted flex items-center justify-center gap-2 text-muted-fg"
+              >
+                <MapPin className="w-5 h-5" strokeWidth={2} />
+                <span className="text-sm font-medium">
+                  {venue.neighbourhood}
+                </span>
+              </div>
+            )}
             {venue.address && (
               <p className="text-sm font-semibold text-fg">{venue.address}</p>
             )}
@@ -611,17 +658,26 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           type="button"
           onClick={() => toggleSaved(venue.slug)}
           aria-label={saved ? "Unsave" : "Save"}
-          className="flex-shrink-0 inline-flex items-center gap-2 px-5 py-3 border border-fg/15 rounded-full text-fg text-sm font-medium"
+          className="flex-shrink-0 w-12 h-12 inline-flex items-center justify-center border border-fg/15 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <Heart
             className={
-              "w-4 h-4 " +
+              "w-5 h-5 " +
               (saved ? "fill-primary text-primary" : "fill-none text-fg")
             }
             strokeWidth={2}
           />
-          Save
         </button>
+        {/* Add this venue to a night plan. Scaffold → links to the plan
+            builder for now; wires to add-to-plan in a later phase. */}
+        <Link
+          href="/plan"
+          aria-label="Add to a plan"
+          className="flex-shrink-0 inline-flex items-center gap-1.5 px-5 border border-fg/15 rounded-full text-fg text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <Plus className="w-4 h-4" strokeWidth={2.5} />
+          Plan
+        </Link>
         {isReservable && reserveTarget ? (
           // Agent flow: open the picker (date/time/party), pre-fill the
           // venue's booking platform, then land on the "Did you book?" page.
