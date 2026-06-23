@@ -284,12 +284,12 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             Explore. Placed before the description so the at-a-glance signal
             leads. Press state mirrors the Reserve CTA (violet fill, white). */}
         {pills.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-4">
+          <div className="flex flex-nowrap gap-2 mt-4 overflow-x-auto -mx-5 px-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {pills.map((label) => (
               <Link
                 key={label}
                 href={`/explore?tag=${encodeURIComponent(label)}`}
-                className="rounded-full border border-fg/20 px-3 py-1.5 text-xs font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="shrink-0 whitespace-nowrap rounded-full border border-fg/20 px-3 py-1.5 text-xs font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {label}
               </Link>
@@ -317,44 +317,6 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             </button>
           )}
         </div>
-
-        {/* ── Real Talk ──────────────────────────────────────────────
-            Moved high on purpose: this honest, practical signal is the
-            most differentiated content on the page. Eyebrow + headline,
-            then a vertical accent rule down the flag list with hairline
-            dividers. Body is upright text-fg (not italic muted) for
-            readability and AA contrast. */}
-        {hasRealTalk && (
-          <div className="mt-8">
-            <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-accent mb-1.5">
-              Real Talk
-            </div>
-            <h2 className="text-[20px] font-bold text-heading leading-tight mb-6">
-              What to actually expect.
-            </h2>
-            <div className="relative pl-5">
-              <span
-                aria-hidden
-                className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent rounded-full"
-              />
-              <div className="flex flex-col">
-                {venue.criticalFlags!.map((flag, i) => (
-                  <div
-                    key={i}
-                    className={i > 0 ? "mt-5 pt-5 border-t border-fg/10" : ""}
-                  >
-                    <div className="text-[15px] font-extrabold text-fg leading-snug">
-                      {flag.label}
-                    </div>
-                    <p className="text-[14px] text-fg leading-relaxed mt-1.5">
-                      {flag.body}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ── Hours / Open now ──────────────────────────────────────
             Live open/closed computed in Europe/London from the structured
@@ -424,6 +386,43 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           </div>
         )}
 
+        {/* ── Real Talk ──────────────────────────────────────────────
+            Honest, practical signal in an editorial pull-quote treatment:
+            eyebrow + headline, then a vertical accent rule down the flag
+            list with hairline dividers. Body is upright text-fg (not italic
+            muted) for readability and AA contrast. */}
+        {hasRealTalk && (
+          <div className="mt-8">
+            <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-accent mb-1.5">
+              Real Talk
+            </div>
+            <h2 className="text-[20px] font-bold text-heading leading-tight mb-6">
+              What to actually expect.
+            </h2>
+            <div className="relative pl-5">
+              <span
+                aria-hidden
+                className="absolute left-0 top-1 bottom-1 w-0.5 bg-accent rounded-full"
+              />
+              <div className="flex flex-col">
+                {venue.criticalFlags!.map((flag, i) => (
+                  <div
+                    key={i}
+                    className={i > 0 ? "mt-5 pt-5 border-t border-fg/10" : ""}
+                  >
+                    <div className="text-[15px] font-extrabold text-fg leading-snug">
+                      {flag.label}
+                    </div>
+                    <p className="text-[14px] text-fg leading-relaxed mt-1.5">
+                      {flag.body}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Reviews ────────────────────────────────────────────────
             Section scaffold + explicit empty state. Real Google reviews
             land here in Phase 2 (Places Details); until then we show
@@ -454,9 +453,6 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               </div>
             ))}
           </div>
-          <p className="text-[13px] text-muted-fg mt-2">
-            Reviews from Google land here soon.
-          </p>
         </div>
 
         {/* ── Plan your visit ────────────────────────────────────────
@@ -487,25 +483,27 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             )}
             <p className="text-[13px] text-muted-fg mt-0.5">
               {venue.neighbourhood}, London
+              {((venue.lat && venue.lng) || venue.address) && (
+                <>
+                  {" · "}
+                  <a
+                    href={
+                      venue.lat && venue.lng
+                        ? `https://www.google.com/maps/dir/?api=1&destination=${venue.lat},${venue.lng}`
+                        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                            `${venue.address}, ${venue.neighbourhood}, London`,
+                          )}`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-primary rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    Get directions
+                  </a>
+                </>
+              )}
             </p>
             <div className="flex flex-wrap gap-2 mt-4">
-              {((venue.lat && venue.lng) || venue.address) && (
-                <a
-                  href={
-                    venue.lat && venue.lng
-                      ? `https://www.google.com/maps/dir/?api=1&destination=${venue.lat},${venue.lng}`
-                      : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-                          `${venue.address}, ${venue.neighbourhood}, London`,
-                        )}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  <MapPin className="w-4 h-4" strokeWidth={2} />
-                  Get directions
-                </a>
-              )}
               {venue.websiteUrl && (
                 <a
                   href={venue.websiteUrl}
