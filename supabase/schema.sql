@@ -94,7 +94,12 @@ create table if not exists public.venues (
 alter table public.venues
   add column if not exists curation_tier text not null default 'discovered',
   add column if not exists canonical_tags text[] not null default '{}',
-  add column if not exists canonical_tags_version integer not null default 0;
+  add column if not exists canonical_tags_version integer not null default 0,
+  -- Manual soft-hide for corrupt / mis-matched rows (e.g. a wrong Google
+  -- Place-ID match that inherited a landmark's reviews). Catalogue reads filter
+  -- `hidden_at is null`; the row + its data are preserved for later re-matching.
+  -- Distinct from closed_at (Google business status, an alert flag only).
+  add column if not exists hidden_at timestamptz;
 create index if not exists venues_canonical_tags_idx on public.venues using gin (canonical_tags);
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
 create index if not exists venues_type_idx on public.venues(type);

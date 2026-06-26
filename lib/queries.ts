@@ -198,6 +198,7 @@ export async function fetchVenues(): Promise<Venue[]> {
       .from("venues")
       .select("*")
       .not("google_place_id", "is", null)
+      .is("hidden_at", null)
       // Never surface a venue on a stock (Unsplash) fallback or with no real
       // photo. Show a real Google Places photo (mirrored to our storage), or
       // nothing.
@@ -303,6 +304,7 @@ export async function fetchVenuePreview(limit: number): Promise<Venue[]> {
     .from("venues")
     .select(VENUE_CARD_COLUMNS)
     .not("google_place_id", "is", null)
+    .is("hidden_at", null)
     // Never surface a venue on a stock (Unsplash) fallback or with no real
     // photo. Show a real Google Places photo (mirrored to our storage), or
     // nothing.
@@ -328,6 +330,7 @@ export async function fetchAllVenueCards(): Promise<Venue[]> {
       .from("venues")
       .select(VENUE_CARD_COLUMNS)
       .not("google_place_id", "is", null)
+      .is("hidden_at", null)
       .not("img_url", "ilike", "%unsplash%")
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
@@ -386,6 +389,7 @@ async function getVenueIndex(): Promise<FeedRankRow[]> {
       .from("venues")
       .select(`${VENUE_CARD_COLUMNS}, mood_tags, vibe_tags`)
       .not("google_place_id", "is", null)
+      .is("hidden_at", null)
       .not("img_url", "ilike", "%unsplash%")
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
@@ -506,6 +510,7 @@ export async function fetchVenueCategoryPreview(
       .from("venues")
       .select(VENUE_CARD_COLUMNS)
       .not("google_place_id", "is", null)
+      .is("hidden_at", null)
       .not("img_url", "ilike", "%unsplash%")
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
@@ -552,6 +557,7 @@ export async function fetchVenuesByTag(
     .select(VENUE_CARD_COLUMNS)
     .contains("vibe_tags", [tag])
     .not("google_place_id", "is", null)
+    .is("hidden_at", null)
     .not("img_url", "ilike", "%unsplash%")
     .neq("img_url", "")
     .order("curation_tier", { ascending: true })
@@ -569,6 +575,7 @@ export async function fetchVenueCount(): Promise<number> {
     .from("venues")
     .select("id", { count: "exact", head: true })
     .not("google_place_id", "is", null)
+    .is("hidden_at", null)
     // Never surface a venue on a stock (Unsplash) fallback or with no real
     // photo. Show a real Google Places photo (mirrored to our storage), or
     // nothing.
@@ -585,6 +592,7 @@ export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {
     .select("*")
     .eq("slug", slug)
     .not("google_place_id", "is", null)
+    .is("hidden_at", null)
     // Never surface a venue on a stock (Unsplash) fallback or with no real
     // photo. Show a real Google Places photo (mirrored to our storage), or
     // nothing.
@@ -602,6 +610,7 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
     .select("*")
     .eq("id", id)
     .not("google_place_id", "is", null)
+    .is("hidden_at", null)
     // Never surface a venue on a stock (Unsplash) fallback or with no real
     // photo. Show a real Google Places photo (mirrored to our storage), or
     // nothing.
@@ -626,6 +635,7 @@ export async function fetchVenuePreviewBySlug(
     .select(VENUE_CARD_COLUMNS)
     .eq("slug", slug)
     .not("google_place_id", "is", null)
+    .is("hidden_at", null)
     .not("img_url", "ilike", "%unsplash%")
     .neq("img_url", "")
     .maybeSingle();
@@ -643,6 +653,7 @@ export async function fetchVenuePreviewById(id: string): Promise<Venue | null> {
     .select(VENUE_CARD_COLUMNS)
     .eq("id", id)
     .not("google_place_id", "is", null)
+    .is("hidden_at", null)
     .not("img_url", "ilike", "%unsplash%")
     .neq("img_url", "")
     .maybeSingle();
