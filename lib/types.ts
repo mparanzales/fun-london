@@ -178,6 +178,9 @@ export type Venue = {
   mapUrl: string | null;
   // Phase 2 — verbatim Google reviews (signed-in only); null until synced.
   reviews: VenueReview[] | null;
+  // Real menu URL discovered from the venue's own website (detail-only). Null
+  // when none found; the "See the menu" button falls back to "Visit website".
+  menuUrl: string | null;
   // "curated" = hand-picked seed venue; "discovered" = added by the autonomous
   // robot. Curated venues rank first. Defaults to "discovered".
   curationTier: "curated" | "discovered";
