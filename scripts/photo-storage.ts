@@ -95,25 +95,32 @@ export async function mirrorPhotoToStorage(
   photoName: string,
   slug: string,
   supabase: SupabaseClient,
+  index = 0,
 ): Promise<string | null> {
   if (!photoStorageEnabled()) return null;
-  return withRetry(`mirror ${slug}`, async () => {
-    const res = await fetch(googleMediaUrl(photoName));
-    if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
-    const contentType = res.headers.get("content-type") ?? "image/jpeg";
-    const ext = contentType.includes("png") ? "png" : "jpg";
-    const buffer = Buffer.from(await res.arrayBuffer());
-    const path = `${slug}.${ext}`;
+  return withRetry(
+    `mirror ${slug}${index > 0 ? `-${index}` : ""}`,
+    async () => {
+      const res = await fetch(googleMediaUrl(photoName));
+      if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
+      const contentType = res.headers.get("content-type") ?? "image/jpeg";
+      const ext = contentType.includes("png") ? "png" : "jpg";
+      const buffer = Buffer.from(await res.arrayBuffer());
+      // Index 0 keeps the legacy `${slug}.ext` path, so photo_urls[0] === img_url
+      // (the hero) and the existing hero object is never orphaned. Extra gallery
+      // photos get a `-1`, `-2`, … suffix.
+      const path = index > 0 ? `${slug}-${index}.${ext}` : `${slug}.${ext}`;
 
-    const { error } = await supabase.storage
-      .from(photoBucket())
-      .upload(path, buffer, { contentType, upsert: true });
-    if (error) throw new Error(`upload: ${error.message}`);
+      const { error } = await supabase.storage
+        .from(photoBucket())
+        .upload(path, buffer, { contentType, upsert: true });
+      if (error) throw new Error(`upload: ${error.message}`);
 
-    const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
-    if (!data?.publicUrl) throw new Error("no public URL returned");
-    return data.publicUrl;
-  });
+      const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
+      if (!data?.publicUrl) throw new Error("no public URL returned");
+      return data.publicUrl;
+    },
+  );
 }
 
 // The single safe way to turn a Google photo NAME into a URL for the DB.
@@ -128,6 +135,78 @@ export async function resolveVenuePhoto(
   if (!photoName) return FALLBACK_IMG_URL;
   const mirrored = await mirrorPhotoToStorage(photoName, slug, supabase);
   return mirrored ?? FALLBACK_IMG_URL;
+}
+
+// How many photos to mirror into the gallery (hero + extras). Capped so a
+// venue with 10 Google photos doesn't balloon Storage or the byte-fetch cost.
+export const GALLERY_MAX = 6;
+
+// Multi-photo variant of resolveVenuePhoto: mirrors up to `limit` Google photo
+// names to keyless Storage URLs (hero first as `${slug}.ext`; extras as
+// `${slug}-1.ext`, …). Returns ONLY successfully-mirrored keyless URLs — never
+// a keyed URL, never the empty fallback as a member — so photo_urls[0] is the
+// same keyless hero URL as venues.img_url. Empty array when mirroring is
+// disabled or every photo fails (the caller keeps the single-hero fallback).
+export async function resolveVenuePhotos(
+  photos: { name?: string }[] | null | undefined,
+  slug: string,
+  supabase: SupabaseClient,
+  limit = GALLERY_MAX,
+): Promise<string[]> {
+  if (!photoStorageEnabled() || !photos || photos.length === 0) return [];
+  const names = photos
+    .map((p) => p?.name)
+    .filter((n): n is string => typeof n === "string" && n.length > 0)
+    .slice(0, limit);
+  const urls: string[] = [];
+  for (let i = 0; i < names.length; i++) {
+    const mirrored = await mirrorPhotoToStorage(names[i], slug, supabase, i);
+    if (mirrored) urls.push(mirrored);
+  }
+  return urls;
+}
+
+// Mirror a Google Static Map of a venue's coordinates to keyless Storage,
+// returning the keyless public URL. The keyed maps.googleapis.com URL is built
+// and used server-side ONLY (same invariant as the photo media URL); the DB
+// stores only the keyless `${slug}-map.png` Storage URL. Returns null when
+// mirroring is disabled or the fetch fails (the UI keeps the grey placeholder).
+// NOTE: Maps Static API is a SEPARATE SKU from Places — the key must have it
+// enabled or the fetch returns REQUEST_DENIED.
+export async function mirrorMapToStorage(
+  slug: string,
+  lat: number,
+  lng: number,
+  supabase: SupabaseClient,
+): Promise<string | null> {
+  if (!photoStorageEnabled()) return null;
+  return withRetry(`map ${slug}`, async () => {
+    const key = process.env.GOOGLE_PLACES_API_KEY ?? "";
+    const zoom = process.env.FL_STATIC_MAP_ZOOM ?? "15";
+    const marker = `color:0x5a3bd9%7C${lat},${lng}`;
+    // Clean grayscale: drop all labels + POI/transit icons (too noisy), keep
+    // only the road geometry, and desaturate to B&W. The violet marker is
+    // unaffected (markers ignore map `style`).
+    const style =
+      "&style=feature:all%7Celement:labels%7Cvisibility:off" +
+      "&style=feature:poi%7Cvisibility:off" +
+      "&style=feature:transit%7Cvisibility:off" +
+      "&style=saturation:-100";
+    const url =
+      `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}` +
+      `&zoom=${zoom}&size=320x160&scale=2${style}&markers=${marker}&key=${key}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const path = `${slug}-map.png`;
+    const { error } = await supabase.storage
+      .from(photoBucket())
+      .upload(path, buffer, { contentType: "image/png", upsert: true });
+    if (error) throw new Error(`upload: ${error.message}`);
+    const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
+    if (!data?.publicUrl) throw new Error("no public URL returned");
+    return data.publicUrl;
+  });
 }
 
 // Generic variant: download an arbitrary public image URL (e.g. a pop-up's

@@ -112,6 +112,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const [showReserve, setShowReserve] = useState(false);
   const [hoursOpen, setHoursOpen] = useState(false);
   const [descOpen, setDescOpen] = useState(false);
+  const [photoIdx, setPhotoIdx] = useState(0);
 
   // Open/closed is time- and timezone-sensitive, so compute it only after
   // mount to avoid an SSR/client hydration mismatch. Until then the strip
@@ -184,6 +185,13 @@ export function VenueDetail({ venue }: { venue: Venue }) {
   const PILL_LIMIT = 6;
   const pills = venue.vibeTags.slice(0, PILL_LIMIT);
 
+  // Gallery photos: keyless Storage URLs (hero first). Falls back to the single
+  // hero until the Phase 2 gallery backfill populates photo_urls.
+  const photos =
+    venue.photoUrls && venue.photoUrls.length > 0
+      ? venue.photoUrls
+      : [venue.imgUrl];
+
   return (
     // Mobile-shell constraint matches the (main) route group (max-w-md).
     // Keeps the visual width consistent when navigating from /explore →
@@ -192,17 +200,35 @@ export function VenueDetail({ venue }: { venue: Venue }) {
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
       {/* ── Hero ───────────────────────────────────────────────────── */}
       <div className="relative w-full" style={{ aspectRatio: "4/3" }}>
-        <Image
-          src={venue.imgUrl}
-          alt={venue.name}
-          fill
-          priority
-          sizes="(max-width: 640px) 100vw, 640px"
-          // Google Places photo URLs 302-redirect with an API key;
-          // bypass Vercel's optimizer for those.
-          unoptimized={venue.imgUrl.includes("googleapis.com")}
-          className="object-cover"
-        />
+        {/* Swipeable photo gallery — keyless Storage URLs, hero first.
+            Scroll-snaps horizontally; the dots track the active slide. */}
+        <div
+          className="absolute inset-0 flex overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setPhotoIdx(Math.round(el.scrollLeft / el.clientWidth));
+          }}
+        >
+          {photos.map((src, i) => (
+            <div key={i} className="relative min-w-full h-full snap-center">
+              <Image
+                src={src}
+                alt={
+                  photos.length > 1
+                    ? `${venue.name}, photo ${i + 1}`
+                    : venue.name
+                }
+                fill
+                priority={i === 0}
+                sizes="(max-width: 640px) 100vw, 640px"
+                // Keyless Storage URLs optimize fine; only a legacy keyed
+                // Google URL (pre-mirror) needs the optimizer bypass.
+                unoptimized={src.includes("googleapis.com")}
+                className="object-cover"
+              />
+            </div>
+          ))}
+        </div>
 
         {/* Bottom scrim so the vibe tagline stays legible over any photo. */}
         <div
@@ -255,6 +281,25 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           <p className="absolute inset-x-0 bottom-0 px-5 pb-4 text-[15px] italic leading-snug text-white/90 drop-shadow-md">
             {venue.vibe}
           </p>
+        )}
+
+        {/* Photo dots — only when there's a real gallery. Top-center, clear of
+            the back/share controls and the bottom tagline. */}
+        {photos.length > 1 && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+            {photos.map((_, i) => (
+              <span
+                key={i}
+                aria-hidden
+                className={
+                  "rounded-full drop-shadow transition-all " +
+                  (i === photoIdx
+                    ? "w-2 h-2 bg-white"
+                    : "w-1.5 h-1.5 bg-white/60")
+                }
+              />
+            ))}
+          </div>
         )}
       </div>
 
@@ -424,35 +469,76 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         )}
 
         {/* ── Reviews ────────────────────────────────────────────────
-            Section scaffold + explicit empty state. Real Google reviews
-            land here in Phase 2 (Places Details); until then we show
-            skeleton cards, never placeholder or invented quotes. */}
+            Real Google reviews when synced (verbatim text + author, plus a
+            small "Reviews from Google" attribution — both required by Google's
+            display policy). Skeleton cards as the empty state until then;
+            never placeholder or invented quotes. */}
         <div className="mt-8">
-          <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
-            Reviews
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
+              Reviews
+            </div>
+            {venue.reviews && venue.reviews.length > 0 && (
+              <span className="text-[10px] text-muted-fg">
+                Reviews from Google
+              </span>
+            )}
           </div>
-          <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1">
-            {[0, 1].map((i) => (
-              <div
-                key={i}
-                aria-hidden
-                className="min-w-[200px] rounded-2xl border border-dashed border-fg/20 px-4 py-4"
-              >
-                <div className="flex gap-1 mb-3">
-                  {[0, 1, 2, 3, 4].map((s) => (
-                    <Star
-                      key={s}
-                      className="w-3 h-3 text-fg/15 fill-current"
-                      strokeWidth={0}
-                    />
-                  ))}
+          {venue.reviews && venue.reviews.length > 0 ? (
+            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {venue.reviews.map((r, i) => (
+                <div
+                  key={i}
+                  className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5"
+                >
+                  <div className="flex gap-0.5 mb-2">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star
+                        key={s}
+                        className={
+                          "w-3.5 h-3.5 fill-current " +
+                          (s <= Math.round(r.rating)
+                            ? "text-muted-fg"
+                            : "text-fg/15")
+                        }
+                        strokeWidth={0}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[13px] text-fg leading-relaxed line-clamp-5">
+                    {r.text}
+                  </p>
+                  <p className="text-[11px] text-muted-fg mt-2">
+                    {r.author}
+                    {r.relativeTime ? ` · ${r.relativeTime}` : ""}
+                  </p>
                 </div>
-                <div className="h-2.5 rounded bg-fg/10 mb-2" />
-                <div className="h-2.5 rounded bg-fg/10 mb-2 w-5/6" />
-                <div className="h-2.5 rounded bg-fg/10 w-2/3" />
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1">
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  aria-hidden
+                  className="min-w-[200px] rounded-2xl border border-dashed border-fg/20 px-4 py-4"
+                >
+                  <div className="flex gap-1 mb-3">
+                    {[0, 1, 2, 3, 4].map((s) => (
+                      <Star
+                        key={s}
+                        className="w-3 h-3 text-fg/15 fill-current"
+                        strokeWidth={0}
+                      />
+                    ))}
+                  </div>
+                  <div className="h-2.5 rounded bg-fg/10 mb-2" />
+                  <div className="h-2.5 rounded bg-fg/10 mb-2 w-5/6" />
+                  <div className="h-2.5 rounded bg-fg/10 w-2/3" />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ── Plan your visit ────────────────────────────────────────
@@ -468,15 +554,30 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               Plan your visit
             </div>
             {venue.lat && venue.lng && (
-              <div
-                aria-hidden
-                className="mb-3 h-28 rounded-2xl bg-muted flex items-center justify-center gap-2 text-muted-fg"
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${venue.lat},${venue.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open in Google Maps"
+                className="relative block mb-3 h-28 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                <MapPin className="w-5 h-5" strokeWidth={2} />
-                <span className="text-sm font-medium">
-                  {venue.neighbourhood}
-                </span>
-              </div>
+                {venue.mapUrl ? (
+                  <Image
+                    src={venue.mapUrl}
+                    alt={`Map of ${venue.name}`}
+                    fill
+                    sizes="(max-width: 640px) 100vw, 640px"
+                    className="object-cover"
+                  />
+                ) : (
+                  <span className="flex h-full items-center justify-center gap-2 bg-muted text-muted-fg">
+                    <MapPin className="w-5 h-5" strokeWidth={2} />
+                    <span className="text-sm font-medium">
+                      {venue.neighbourhood}
+                    </span>
+                  </span>
+                )}
+              </a>
             )}
             {venue.address && (
               <p className="text-sm font-semibold text-fg">{venue.address}</p>

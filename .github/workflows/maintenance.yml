@@ -77,6 +77,17 @@ jobs:
             pnpm refresh-venues 2>&1 | tee refresh.log
           fi
 
+      - name: Refresh a rotating batch of reviews
+        # Decoupled from the whole-catalogue refresh above: pulls Google reviews
+        # for ~FL_REVIEW_BATCH venues per night (oldest first), so the catalogue
+        # cycles roughly monthly and the expensive reviews SKU stays affordable
+        # (~$60/mo, not ~$1.8k/mo). Stores text verbatim.
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+        run: pnpm refresh-reviews
+
       - name: Render step summary
         # Always runs (even on script failure) so closures + dead links
         # are visible in the GitHub UI without digging into raw logs.

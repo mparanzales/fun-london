@@ -29,7 +29,11 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { resolveVenuePhoto, FALLBACK_IMG_URL } from "./photo-storage";
+import {
+  resolveVenuePhotos,
+  mirrorMapToStorage,
+  FALLBACK_IMG_URL,
+} from "./photo-storage";
 import type { BookingLink, Mood, VenueType } from "@/lib/types";
 import {
   normalizeOpeningHours,
@@ -685,11 +689,17 @@ async function main() {
       // Resolve the photo to a keyless URL (mirrored to Storage, or the
       // keyless stock fallback). Never a keyed Google URL — see photo-storage.
       // On dry runs we skip the fetch/upload entirely and use the fallback.
-      const photoName = p.photos?.[0]?.name;
-      const imgUrl =
+      const photoUrls =
         supabase && !DRY_RUN
-          ? await resolveVenuePhoto(photoName, slug, supabase)
-          : FALLBACK_IMG_URL;
+          ? await resolveVenuePhotos(p.photos, slug, supabase)
+          : [];
+      const imgUrl = photoUrls[0] ?? FALLBACK_IMG_URL;
+      const mapLat = p.location?.latitude ?? null;
+      const mapLng = p.location?.longitude ?? null;
+      const mapUrl =
+        supabase && !DRY_RUN && mapLat != null && mapLng != null
+          ? await mirrorMapToStorage(slug, mapLat, mapLng, supabase)
+          : null;
 
       const row = {
         slug,
@@ -713,6 +723,8 @@ async function main() {
         tables_free: 4,
         next_slot_label: "Open today",
         img_url: imgUrl,
+        photo_urls: photoUrls,
+        map_url: mapUrl,
         // Robot-found venues are the discovered tier (curated seed ranks first).
         curation_tier: "discovered",
         mood_tags: cat.moods,

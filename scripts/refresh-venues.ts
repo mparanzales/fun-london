@@ -28,7 +28,7 @@ dotenv.config({ path: ".env.local" });
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import {
   photoStorageEnabled,
-  mirrorPhotoToStorage,
+  resolveVenuePhotos,
   isKeyedPhotoUrl,
 } from "./photo-storage";
 import {
@@ -126,6 +126,7 @@ type VenueRow = {
   phone: string | null;
   website_url: string | null;
   img_url: string;
+  photo_urls: string[] | null;
   google_place_id: string;
   closed_at: string | null;
   opening_hours: OpeningHours | null;
@@ -417,9 +418,18 @@ async function selfHealPhoto(
     return;
   }
   if (!supabase) return;
-  const mirrored = await mirrorPhotoToStorage(photoName, row.slug, supabase);
+  // Re-mirror the whole gallery when the hero needs healing, keeping
+  // photo_urls[0] == img_url. (Bulk gallery backfill for already-good heroes is
+  // a separate one-off job, not this nightly cron.)
+  const photoUrls = await resolveVenuePhotos(
+    details.photos,
+    row.slug,
+    supabase,
+  );
+  const mirrored = photoUrls[0] ?? null;
   if (mirrored && mirrored !== row.img_url) {
     update.img_url = mirrored;
+    update.photo_urls = photoUrls;
     diffs.push({
       slug: row.slug,
       field: "img_url",
@@ -510,7 +520,7 @@ async function main() {
   const { data: rows, error } = await readClient
     .from("venues")
     .select(
-      "id, slug, name, rating, review_count, address, phone, website_url, img_url, google_place_id, closed_at, opening_hours, editorial_sources, creator_coverage",
+      "id, slug, name, rating, review_count, address, phone, website_url, img_url, photo_urls, google_place_id, closed_at, opening_hours, editorial_sources, creator_coverage",
     )
     .not("google_place_id", "is", null)
     .order("created_at", { ascending: true });

@@ -94,7 +94,12 @@ create table if not exists public.venues (
 alter table public.venues
   add column if not exists curation_tier text not null default 'discovered',
   add column if not exists canonical_tags text[] not null default '{}',
-  add column if not exists canonical_tags_version integer not null default 0;
+  add column if not exists canonical_tags_version integer not null default 0,
+  -- Manual soft-hide for corrupt / mis-matched rows (e.g. a wrong Google
+  -- Place-ID match that inherited a landmark's reviews). Catalogue reads filter
+  -- `hidden_at is null`; the row + its data are preserved for later re-matching.
+  -- Distinct from closed_at (Google business status, an alert flag only).
+  add column if not exists hidden_at timestamptz;
 create index if not exists venues_canonical_tags_idx on public.venues using gin (canonical_tags);
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
 create index if not exists venues_type_idx on public.venues(type);
@@ -497,3 +502,19 @@ begin
       check (bd_status in ('prospect','contacted','in_conversation','partnered','declined','passed'));
   end if;
 end $$;
+
+-- 2026-06-23 · Phase 2 venue media (photo gallery, reviews, static map) ──────
+-- Populated server-side by the ingest/discover/refresh scripts; these columns
+-- hold ONLY keyless values — mirrored Supabase Storage URLs (photos, map) and
+-- verbatim Google review JSON. The server-only Places API key never reaches
+-- them. photo_urls[0] equals img_url (the hero). reviews/map_url are moat
+-- fields (signed-in only) and must stay OUT of VENUE_CARD_COLUMNS; photo_urls
+-- is keyless so it is safe to expose to the anonymous preview.
+-- Idempotent — paste-and-run in the Supabase SQL Editor, then confirm all four
+-- columns exist (information_schema.columns) BEFORE deploying the cron changes
+-- that write them (a cron writing to a missing column errors silently).
+alter table public.venues
+  add column if not exists photo_urls text[] not null default '{}',
+  add column if not exists reviews jsonb,
+  add column if not exists reviews_synced_at timestamptz,
+  add column if not exists map_url text;
