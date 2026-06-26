@@ -144,4 +144,55 @@ describe("computePlan", () => {
     expect(new Set(types).size).toBe(types.length);
     expect(types.filter((t) => t === "Pub").length).toBeLessThanOrEqual(1);
   });
+
+  it("excludes a venue that is closed at `when` (no routing to a shut door)", () => {
+    const probe = new Date(2026, 5, 10, 12, 0);
+    const day = probe.getDay();
+    // Open 09:00–17:00 on the test day → shut at 23:00.
+    const dayHours: OpeningHours = {
+      periods: [
+        {
+          open: { day, hour: 9, minute: 0 },
+          close: { day, hour: 17, minute: 0 },
+        },
+      ],
+    };
+    const when = new Date(2026, 5, 10, 23, 0); // after close
+    const venues = [
+      makeVenue({
+        id: "closed-bar",
+        neighbourhood: "Soho",
+        type: "Bar" as Venue["type"],
+        openingHours: dayHours,
+      }),
+      makeVenue({
+        id: "open-restaurant",
+        neighbourhood: "Soho",
+        type: "Restaurant" as Venue["type"],
+        openingHours: null,
+      }),
+      makeVenue({
+        id: "open-cafe",
+        neighbourhood: "Soho",
+        type: "Cafe" as Venue["type"],
+        openingHours: null,
+      }),
+      makeVenue({
+        id: "open-pub",
+        neighbourhood: "Soho",
+        type: "Pub" as Venue["type"],
+        openingHours: null,
+      }),
+    ];
+    const plan = computePlan(venues, {
+      area: "Soho",
+      vibe: "Lively",
+      budget: "Any",
+      offset: 0,
+      when,
+    });
+    const ids = plan.steps.map((s) => s.venue.id);
+    expect(ids).not.toContain("closed-bar");
+    expect(plan.steps.length).toBeGreaterThanOrEqual(1);
+  });
 });

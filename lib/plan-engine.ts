@@ -266,16 +266,32 @@ function pickAny(
 
 export function computePlan(
   venues: Venue[],
-  opts: { area: string; vibe: PlanVibe; budget: PlanBudget; offset?: number },
+  opts: {
+    area: string;
+    vibe: PlanVibe;
+    budget: PlanBudget;
+    offset?: number;
+    when?: Date;
+  },
 ): Plan {
-  const { area, vibe, budget, offset = 0 } = opts;
+  const { area, vibe, budget, offset = 0, when } = opts;
 
-  // Prefer venues in the chosen area + budget; widen gracefully if too thin.
-  // poolStage records which rung of the ladder we landed on (see Plan type).
+  // Skip CLOSED venues so a planned night never opens on a shut door. Fail-OPEN
+  // when `when` is omitted or a venue's hours are unknown (isOpenAt), so this
+  // never empties a plan; the open-check is dropped only as the last resort
+  // below. Mirrors computeWalkablePlan, which already does this.
+  const isOpen = (v: Venue) => (when ? isOpenAt(v, when) : true);
+
+  // Prefer venues in the chosen area + budget + open; widen gracefully if too
+  // thin. poolStage records which rung of the ladder we landed on (see Plan type).
   const inArea = venues.filter(
-    (v) => v.neighbourhood === area && withinBudget(v.price, budget),
+    (v) =>
+      v.neighbourhood === area && withinBudget(v.price, budget) && isOpen(v),
   );
-  const inBudget = venues.filter((v) => withinBudget(v.price, budget));
+  const inBudget = venues.filter(
+    (v) => withinBudget(v.price, budget) && isOpen(v),
+  );
+  const openOnly = venues.filter(isOpen);
   let pool: Venue[];
   let poolStage: Plan["poolStage"];
   if (inArea.length >= 3) {
@@ -284,8 +300,11 @@ export function computePlan(
   } else if (inBudget.length >= 3) {
     pool = inBudget;
     poolStage = "budget";
+  } else if (openOnly.length >= 3) {
+    pool = openOnly; // dropped area + budget, but still open
+    poolStage = "all";
   } else {
-    pool = venues; // last resort: ignore area AND budget too
+    pool = venues; // last resort: ignore area, budget AND open
     poolStage = "all";
   }
 
