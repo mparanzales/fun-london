@@ -42,6 +42,10 @@
     "backfill-maps": "tsx scripts/backfill-maps.ts",
     "backfill-popup-images:dry": "tsx scripts/backfill-popup-images.ts --dry-run",
     "backfill-popup-images": "tsx scripts/backfill-popup-images.ts",
+    "verify:sources": "tsx scripts/verify-editorial-sources.ts",
+    "verify:sources:write": "tsx scripts/verify-editorial-sources.ts -- --write",
+    "verify:sources:curated": "tsx scripts/verify-editorial-sources.ts -- --curated",
+    "verify:sources:curated:write": "tsx scripts/verify-editorial-sources.ts -- --write --curated",
     "test": "vitest run"
   },
   "dependencies": {
