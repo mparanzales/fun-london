@@ -613,9 +613,10 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                   className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Globe className="w-4 h-4" strokeWidth={2} />
-                  {venue.type === "Restaurant"
-                    ? "See the menu"
-                    : "Visit website"}
+                  {/* Honest label: this links to the venue's homepage, not a
+                      menu page. Restore a "See the menu" label once we hold a
+                      real menu URL (no menu data today). */}
+                  Visit website
                 </a>
               )}
               {venue.phone && (
