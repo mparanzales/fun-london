@@ -103,6 +103,12 @@ export function PlanFlow({
     "idle",
   );
 
+  // Current time, set AFTER mount so the open-now plan filter can't cause an
+  // SSR/client hydration mismatch: the server renders fail-open (when=undefined),
+  // then the client applies real opening hours once mounted.
+  const [now, setNow] = useState<Date | undefined>(undefined);
+  useEffect(() => setNow(new Date()), []);
+
   const venueById = useMemo(() => {
     const m = new Map<string, Venue>();
     for (const v of venues) m.set(v.id, v);
@@ -110,8 +116,8 @@ export function PlanFlow({
   }, [venues]);
 
   const computed = useMemo(
-    () => computePlan(venues, { area, vibe, budget, offset }),
-    [venues, area, vibe, budget, offset],
+    () => computePlan(venues, { area, vibe, budget, offset, when: now }),
+    [venues, area, vibe, budget, offset, now],
   );
 
   const display: DisplayPlan = openedSaved ?? toDisplay(computed);
@@ -290,6 +296,7 @@ export function PlanFlow({
                 vibe,
                 budget,
                 offset: 0,
+                when: new Date(),
               });
               setOffset(0);
               setOpenedSaved(null);
@@ -451,6 +458,7 @@ export function PlanFlow({
                 vibe,
                 budget,
                 offset: nextOffset,
+                when: new Date(),
               });
               setSaveState("idle");
               setOffset(nextOffset);
