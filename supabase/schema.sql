@@ -283,11 +283,26 @@ create policy "profiles self read"   on public.profiles for select using ((selec
 create policy "profiles self insert" on public.profiles for insert with check ((select auth.uid()) = id);
 create policy "profiles self update" on public.profiles for update using ((select auth.uid()) = id);
 
--- Venues + Events: public read (catalog)
+-- Venues + Events: public read (catalog). RLS `using (true)` gates ROWS; the
+-- anon column GRANTs below gate COLUMNS, so the public/scraper role can read
+-- only the card-level fields the metered preview already exposes, never the
+-- moat (long_description, editorial_sources, phone, booking_links, address, …).
 drop policy if exists "venues public read" on public.venues;
 drop policy if exists "events public read" on public.events;
 create policy "venues public read" on public.venues for select using (true);
 create policy "events public read" on public.events for select using (true);
+
+-- Lock anon to card-level columns on venues (migration
+-- lock_anon_to_card_columns_on_venues). Without this, `using (true)` lets anon
+-- read every column incl. the moat directly via PostgREST. `authenticated`
+-- keeps full access. Keep this column list in sync with VENUE_CARD_COLUMNS +
+-- the columns the anon reads filter on (google_place_id, hidden_at).
+revoke select on public.venues from anon;
+grant select (
+  id, slug, name, type, vibe, neighbourhood, price, time_of_day,
+  rating, review_count, img_url, lat, lng, curation_tier, created_at,
+  google_place_id, hidden_at
+) on public.venues to anon;
 
 -- Pop-up radar: admin may hide an auto-published pop-up (set cancelled_at)
 -- without the service-role key. Scoped to source='popup' + the admin email
