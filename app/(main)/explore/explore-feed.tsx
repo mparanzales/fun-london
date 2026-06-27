@@ -519,6 +519,7 @@ export function ExploreFeed({
                   key={`venue-${item.data.id}`}
                   venue={item.data}
                   variant="wide"
+                  surface="explore"
                   showCategoryTag={showCategoryTag}
                   priority={index === 0}
                   distanceLabel={

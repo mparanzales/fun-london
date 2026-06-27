@@ -1,8 +1,10 @@
 "use client";
+import { useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
+import { recordSignal, type SignalSurface } from "@/lib/signals";
 import type { Venue } from "@/lib/types";
 
 type Props = {
@@ -24,6 +26,11 @@ type Props = {
    * feed is sorted by "nearest first".
    */
   distanceLabel?: string;
+  /**
+   * Which surface this card is shown on — attached to the Kind C `open` /
+   * `impression` / `save` signals so the engine knows where a tap happened.
+   */
+  surface?: SignalSurface;
 };
 
 export function VenueCard({
@@ -32,15 +39,40 @@ export function VenueCard({
   showCategoryTag = true,
   priority = false,
   distanceLabel,
+  surface = "feed",
 }: Props) {
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
 
+  // Kind C `impression` (step 0.4): fire once, when ≥50% of the card first
+  // enters the viewport. Fire-and-forget + signed-in-gated inside recordSignal.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const impressed = useRef(false);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || impressed.current) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting) && !impressed.current) {
+          impressed.current = true;
+          recordSignal("impression", { surface, venueId: venue.id });
+          io.disconnect();
+        }
+      },
+      { threshold: 0.5 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [surface, venue.id]);
+
   const onHeart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleSaved(venue.slug);
+    toggleSaved(venue.slug, surface);
   };
+
+  // `open` (step 0.4): the user tapped into the venue detail from this surface.
+  const onOpen = () => recordSignal("open", { surface, venueId: venue.id });
 
   // The whole card is wrapped in a Link to /venue/[slug]. The heart
   // button is rendered INSIDE the link's positioned ancestor but its
@@ -48,6 +80,7 @@ export function VenueCard({
   // the user taps the heart icon specifically.
   return (
     <div
+      ref={rootRef}
       className={
         "transition-transform duration-300 ease-out lg:hover:-translate-y-1 " +
         (variant === "tall"
@@ -58,6 +91,7 @@ export function VenueCard({
       <Link
         href={`/venue/${venue.slug}`}
         aria-label={`View ${venue.name}`}
+        onClick={onOpen}
         className="block"
         // Don't prefetch: a feed of 24+ cards would each fire a full RSC
         // prefetch of a DYNAMIC detail page (~1.5s server render apiece),
