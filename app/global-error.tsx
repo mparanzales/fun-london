@@ -47,7 +47,22 @@ export default function GlobalError({
             "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
         }}
       >
-        <div style={{ fontSize: 40, marginBottom: 12 }}>😅</div>
+        <svg
+          width="40"
+          height="40"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--ge-muted)"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ marginBottom: 12 }}
+          aria-hidden
+        >
+          <path d="m2 2 20 20" />
+          <path d="M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193" />
+          <path d="M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07" />
+        </svg>
         <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>
           That didn&apos;t load
         </h2>
