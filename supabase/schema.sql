@@ -99,7 +99,10 @@ alter table public.venues
   -- Place-ID match that inherited a landmark's reviews). Catalogue reads filter
   -- `hidden_at is null`; the row + its data are preserved for later re-matching.
   -- Distinct from closed_at (Google business status, an alert flag only).
-  add column if not exists hidden_at timestamptz;
+  add column if not exists hidden_at timestamptz,
+  -- Real menu URL discovered from the venue's own website (scripts/discover-menus.ts).
+  -- Detail-only; the "See the menu" button uses it when present, else "Visit website".
+  add column if not exists menu_url text;
 create index if not exists venues_canonical_tags_idx on public.venues using gin (canonical_tags);
 create index if not exists venues_neighbourhood_idx on public.venues(neighbourhood);
 create index if not exists venues_type_idx on public.venues(type);

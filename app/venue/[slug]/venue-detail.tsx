@@ -605,18 +605,17 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               )}
             </p>
             <div className="flex flex-wrap gap-2 mt-4">
-              {venue.websiteUrl && (
+              {(venue.menuUrl || venue.websiteUrl) && (
                 <a
-                  href={venue.websiteUrl}
+                  href={venue.menuUrl ?? venue.websiteUrl!}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Globe className="w-4 h-4" strokeWidth={2} />
-                  {/* Honest label: this links to the venue's homepage, not a
-                      menu page. Restore a "See the menu" label once we hold a
-                      real menu URL (no menu data today). */}
-                  Visit website
+                  {/* "See the menu" only when we have a real menu link; else the
+                      honest "Visit website" (the homepage, not a menu). */}
+                  {venue.menuUrl ? "See the menu" : "Visit website"}
                 </a>
               )}
               {venue.phone && (
