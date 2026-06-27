@@ -489,6 +489,99 @@ create policy "feedback anyone insert"
   to anon, authenticated
   with check (user_id is null or user_id = (select auth.uid()));
 
+-- 2026-06-27 · Algorithm step 0.1 · Kind C signals store (user_events) ──────
+-- Append-only behavioural-event log the recommendation engine reads (opens,
+-- saves, skips, plan outcomes, …). Named user_events (NOT events, the venue
+-- "what's-on" table) to avoid any clash. Privacy posture (public repo + prod):
+-- SIGNED-IN USERS ONLY (decision D1) — anon can neither read nor insert. Users
+-- insert + read ONLY their own rows and can never update/delete them
+-- (append-only); aggregation runs via the service-role key (bypasses RLS) and
+-- GDPR erasure via the auth.users FK cascade. Append-only and D1 are each
+-- enforced at two independent layers (policy + grant). Closest analogs:
+-- saved_venues / plans (auth.users FK on delete cascade) and events.venue_id
+-- (nullable, on delete set null).
+create table if not exists public.user_events (
+  id uuid primary key default gen_random_uuid(),
+  -- on delete cascade → deleting an auth user purges their entire signal
+  -- history (GDPR right-to-erasure handled by the FK, not a user delete policy).
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- Nullable + on delete set null: search/filter events have no venue, and a
+  -- venue removal must not delete the behavioural record (mirrors events.venue_id).
+  -- Side-effect by design: a deleted venue's signals go NULL and drop out of the
+  -- partial venue-aggregation index below — Kind A can't aggregate a gone venue.
+  venue_id uuid references public.venues(id) on delete set null,
+  -- STARTER set only — final taxonomy LOCKED IN STEP 0.2. CHECK in the guarded
+  -- do-block below (not inline) so 0.2 can evolve it idempotently. Keep in sync
+  -- with the signals writer when 0.2 lands.
+  event_type text not null,
+  -- STARTER set only — also locked/expanded in STEP 0.2 (surfaces will grow:
+  -- onboarding, search_results, digest_email, …). CHECK in the do-block below.
+  surface text not null,
+  -- Extra signal payload (dwell_ms, rank, query bucket). PRIVACY: COARSE,
+  -- NON-IDENTIFYING signals ONLY — NO raw PII (email/name/phone/device-id/IP)
+  -- and NO precise geolocation (lat/lng/coords/geohash); coarse area labels at
+  -- most. Enforced at the writer/validation layer (the only place that can
+  -- inspect nested JSON); a top-level-key DB CHECK was deliberately omitted as
+  -- it is trivially bypassed by nesting and gives false confidence.
+  context jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  -- Cost/abuse guard on a signed-in-writable append-only log: cap one payload.
+  constraint user_events_context_size_check check (pg_column_size(context) <= 8192)
+);
+
+-- CHECKs added via a pg_constraint guard (mirrors the venues_type_check block)
+-- so re-running is safe and an existing user_events table picks them up too.
+-- STARTER sets for both columns — locked/expanded in step 0.2.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'user_events_event_type_check') then
+    alter table public.user_events add constraint user_events_event_type_check
+      check (event_type in (
+        'open', 'save', 'unsave', 'dismiss', 'veto', 'dwell',
+        'plan_started', 'plan_completed', 'plan_abandoned', 'search', 'filter'
+      ));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'user_events_surface_check') then
+    alter table public.user_events add constraint user_events_surface_check
+      check (surface in ('explore', 'feed', 'plan', 'friends', 'venue'));
+  end if;
+end $$;
+
+-- Per-user reads, newest first (the engine's recent-signals query).
+create index if not exists user_events_user_created_idx
+  on public.user_events(user_id, created_at desc);
+-- Venue-level aggregation (Kind A). Partial: skip venue-less rows (mirrors
+-- events_venue_starts_idx). created_at trails the key so time-windowed
+-- aggregation is served from the index.
+create index if not exists user_events_venue_event_idx
+  on public.user_events(venue_id, event_type, created_at desc)
+  where venue_id is not null;
+
+alter table public.user_events enable row level security;
+
+-- D1: SIGNED-IN USERS ONLY. Both policies `to authenticated`, so anon matches
+-- no policy and is denied. No UPDATE/DELETE policy ⇒ append-only for users.
+-- (select auth.uid()) wrapped per the InitPlan advisory.
+drop policy if exists "user_events self read"   on public.user_events;
+drop policy if exists "user_events self insert" on public.user_events;
+create policy "user_events self read"
+  on public.user_events for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+create policy "user_events self insert"
+  on public.user_events for insert
+  to authenticated
+  -- Pin user_id to the caller (anti-spoof; mirrors plans/saved_venues/bookings).
+  with check ((select auth.uid()) = user_id);
+
+-- Belt-and-suspenders table privileges (defense-in-depth). Revoke from PUBLIC
+-- FIRST: anon + authenticated inherit from PUBLIC, so revoking the named roles
+-- alone would not close the door (same reasoning as the handle_new_user revoke).
+revoke all on public.user_events from public;
+revoke all on public.user_events from anon;            -- D1: anon gets nothing
+revoke all on public.user_events from authenticated;
+grant select, insert on public.user_events to authenticated;  -- no update/delete/truncate
+
 -- ── Enum value enforcement (defense-in-depth) ──────────────────────────────
 -- The ingest/admin writers (scripts/ingest-from-pending.ts, buildVenueRow /
 -- buildProspectRow) only emit values from the TS unions in lib/types.ts, and
