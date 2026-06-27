@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
+import { searchEvents } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import type { Event, EventCategory } from "@/lib/types";
@@ -43,10 +44,11 @@ type CategoryFilter = "all" | EventCategory | "popup";
 
 // Anon-only: which chrome interaction a soft AuthWall is gating. The CATEGORY
 // chips are NOT here — for anon they filter to a 4-card preview + the wall, just
-// like the "All" view. Only search and the date pills raise the blur wall.
-type EventsWallTarget = "search" | "date";
-function eventsWallTitle(t: EventsWallTarget): string {
-  return t === "search" ? "Sign up to search" : "Sign up to filter by date";
+// like the "All" view. Search is open to anon (server-side, like Explore); only
+// the date pills raise the blur wall.
+type EventsWallTarget = "date";
+function eventsWallTitle(): string {
+  return "Sign up to filter by date";
 }
 
 // Every category chip we COULD show, in display order. Which ones actually
@@ -206,9 +208,7 @@ export function EventsFeed({
         <button
           type="button"
           aria-label="Search"
-          onClick={
-            signedIn ? () => setSearchOpen(true) : () => setWallFor("search")
-          }
+          onClick={() => setSearchOpen(true)}
           className="p-2 -mr-2 text-fg"
         >
           <Search className="w-6 h-6" strokeWidth={2} />
@@ -325,10 +325,11 @@ export function EventsFeed({
       </div>
       {!signedIn && filtered.length > 0 && <SignupWall returnTo="/events" />}
 
-      {searchOpen && signedIn && (
+      {searchOpen && (
         <SearchOverlay
           venues={[]}
-          events={events}
+          events={signedIn ? events : []}
+          searchAction={signedIn ? undefined : searchEvents}
           onClose={() => setSearchOpen(false)}
         />
       )}
@@ -339,7 +340,7 @@ export function EventsFeed({
         <AuthWall
           signedIn={false}
           mainShell
-          title={eventsWallTitle(wallFor)}
+          title={eventsWallTitle()}
           onBack={() => setWallFor(null)}
         />
       )}

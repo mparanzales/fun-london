@@ -16,6 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/admin";
 import { scoreVenue, hasPrefs } from "./ranking";
 import { FEED_PAGE_SIZE } from "./feed-constants";
 import type {
@@ -256,7 +257,9 @@ type VenueCardRow = Pick<
 
 // Map a card-only row to a Venue with every omitted field set to a safe
 // empty/null default, so the Venue type holds without ever inventing data.
-function mapVenuePreview(r: VenueCardRow): Venue {
+// Exported for the moat leak-guard test: this is the single enforcement point
+// that keeps detail/moat fields out of every anon-facing path (feed + search).
+export function mapVenuePreview(r: VenueCardRow): Venue {
   return {
     id: r.id,
     slug: r.slug,
@@ -345,6 +348,55 @@ export async function fetchAllVenueCards(): Promise<Venue[]> {
     if (page.length < PAGE) break;
   }
   return rows.map(mapVenuePreview);
+}
+
+// Server-only RICH search index for the signed-out catalogue search. The anon
+// DB role is grant-blocked on the detail columns (vibe/mood tags,
+// long_description, address, reviews — see the column-grant moat), so we read
+// them here via the SERVICE-ROLE client SOLELY to build a match haystack.
+//
+// INVARIANT: only CARD-LEVEL venues are returned — `venue` is mapped through
+// mapVenuePreview, which hard-blanks every detail/moat field, so the rich text
+// is used for matching and NEVER leaves the server. (This is a deliberate,
+// reviewed exception to the "service client = admin-gated only" rule: the caller
+// is public, but no protected field is ever returned.) Returns null when no
+// service-role key is configured, so the caller falls back to card-only search.
+export type VenueSearchRow = { venue: Venue; haystack: string };
+export async function fetchAllVenueSearchRows(): Promise<
+  VenueSearchRow[] | null
+> {
+  const supabase = createServiceClient();
+  if (!supabase) return null;
+  const PAGE = 1000;
+  const rows: VenueRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("venues")
+      .select(
+        `${VENUE_CARD_COLUMNS}, long_description, address, vibe_tags, mood_tags, reviews`,
+      )
+      .not("google_place_id", "is", null)
+      .is("hidden_at", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .order("curation_tier", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchAllVenueSearchRows: ${error.message}`);
+    const page = (data as VenueRow[]) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.map((r) => ({
+    venue: mapVenuePreview(r),
+    haystack: [
+      ...(r.vibe_tags ?? []),
+      ...(r.mood_tags ?? []),
+      r.long_description ?? "",
+      r.address ?? "",
+      ...(r.reviews ?? []).map((rev) => rev.text),
+    ].join(" "),
+  }));
 }
 
 // Signed-in "For You" feed: card-level, RANKED ON THE SERVER. We fetch the card
