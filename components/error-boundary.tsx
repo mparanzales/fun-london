@@ -1,5 +1,6 @@
 "use client";
 import { Component, ReactNode } from "react";
+import { CloudOff } from "lucide-react";
 
 type State = { hasError: boolean; error?: Error };
 
@@ -19,7 +20,11 @@ export class ErrorBoundary extends Component<
       return (
         this.props.fallback ?? (
           <div className="p-6 text-center">
-            <div className="text-3xl mb-3">😬</div>
+            <CloudOff
+              className="w-9 h-9 mx-auto text-muted-fg mb-3"
+              strokeWidth={1.5}
+              aria-hidden
+            />
             <h2 className="text-lg font-bold mb-2 text-heading">
               Something went wrong
             </h2>

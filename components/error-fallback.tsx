@@ -6,10 +6,16 @@
 // error screen. `reset()` re-attempts the render; we also offer a hard
 // reload as a backstop.
 
+import { CloudOff } from "lucide-react";
+
 export function ErrorFallback({ reset }: { reset?: () => void }) {
   return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center text-center px-6 py-12">
-      <div className="text-4xl mb-3">😅</div>
+      <CloudOff
+        className="w-10 h-10 text-muted-fg mb-3"
+        strokeWidth={1.5}
+        aria-hidden
+      />
       <h2 className="text-xl font-extrabold text-heading mb-1.5">
         That didn&apos;t load
       </h2>
