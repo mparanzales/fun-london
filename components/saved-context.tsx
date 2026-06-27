@@ -29,13 +29,14 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { MOCK_SAVED_IDS } from "@/lib/mock-data";
 import { track } from "@/lib/analytics";
+import { recordSignal, type SignalSurface } from "@/lib/signals";
 
 const STORAGE_KEY = "fl.saved.v1";
 
 type SavedContextValue = {
   savedSet: Set<string>; // venue slugs
   isSaved: (venueSlug: string) => boolean;
-  toggleSaved: (venueSlug: string) => void;
+  toggleSaved: (venueSlug: string, surface?: SignalSurface) => void;
   count: number;
 };
 
@@ -185,7 +186,7 @@ export function SavedProvider({
   }, [savedSet, authUserId, hydrated]);
 
   const toggleSaved = useCallback(
-    (venueSlug: string) => {
+    (venueSlug: string, surface: SignalSurface = "venue") => {
       const wasSaved = savedSetRef.current.has(venueSlug);
 
       // Optimistic UI update.
@@ -199,6 +200,14 @@ export function SavedProvider({
       apply(!wasSaved);
 
       track(wasSaved ? "venue_unsave" : "venue_save", { venue: venueSlug });
+
+      // Kind C signal (algorithm step 0.4) → public.user_events. venueId
+      // resolves only when signed in (the slug→uuid map is empty for anon);
+      // recordSignal self-gates to signed-in users, so anon is a harmless no-op.
+      recordSignal(wasSaved ? "unsave" : "save", {
+        surface,
+        venueId: slugToUuidRef.current.get(venueSlug) ?? null,
+      });
 
       if (!authUserId) return; // anon: localStorage persist effect handles it
 
