@@ -16,6 +16,7 @@ import {
   type Mood,
 } from "@/lib/plan-together-moods";
 import { DECKS } from "@/lib/plan-together-moods";
+import { Clock, Footprints, RotateCw, Sparkles, Users } from "lucide-react";
 
 // Plan Together — Step 4: Result (real-time, v2).
 // Builds a walkable plan from the host's settings + the group's MOOD votes.
@@ -102,7 +103,7 @@ export function Result({
   const total = room.members.length;
   const mixSummary =
     hearted.length > 0
-      ? hearted.map((m) => `${m.emoji} ${m.label}`).join(" · ")
+      ? hearted.map((m) => m.label).join(" · ")
       : "Closest matches nearby";
 
   // Apply any group swaps (deterministic alt index per step) and recompute
@@ -131,13 +132,34 @@ export function Result({
         Your group&apos;s night
       </h1>
       <div className="text-[11px] text-muted-fg mt-1">
-        🫂 {total} {total === 1 ? "person" : "people"} · 🚶 walkable · 🕒 ~
-        {(plan.totalMins / 60).toFixed(1)} h
+        <Users
+          className="w-3.5 h-3.5 inline-block align-[-3px]"
+          strokeWidth={1.75}
+          aria-hidden
+        />{" "}
+        {total} {total === 1 ? "person" : "people"} ·{" "}
+        <Footprints
+          className="w-3.5 h-3.5 inline-block align-[-3px]"
+          strokeWidth={1.75}
+          aria-hidden
+        />{" "}
+        walkable ·{" "}
+        <Clock
+          className="w-3.5 h-3.5 inline-block align-[-3px]"
+          strokeWidth={1.75}
+          aria-hidden
+        />{" "}
+        ~{(plan.totalMins / 60).toFixed(1)} h
       </div>
 
       <div className="bg-accent/10 border border-accent/30 rounded-xl px-3 py-2.5 mt-3">
         <div className="text-[10px] font-extrabold text-accent uppercase tracking-[0.1em]">
-          ✦ How we mixed it
+          <Sparkles
+            className="w-3.5 h-3.5 inline-block align-[-3px]"
+            strokeWidth={1.75}
+            aria-hidden
+          />{" "}
+          How we mixed it
         </div>
         <div className="text-[11.5px] text-fg mt-1 leading-snug">
           The group&apos;s vibe: {mixSummary}, kept it all within walking
@@ -176,10 +198,10 @@ export function Result({
                     {voters.map((vp, j) => (
                       <div
                         key={vp.id}
-                        className="w-[22px] h-[22px] rounded-full border-2 border-white grid place-items-center text-[10px]"
+                        className="w-[22px] h-[22px] rounded-full border-2 border-white grid place-items-center text-[10px] font-bold text-white"
                         style={{ background: vp.color, marginLeft: j ? -6 : 0 }}
                       >
-                        {vp.emoji}
+                        {vp.name.charAt(0).toUpperCase()}
                       </div>
                     ))}
                   </div>
@@ -205,9 +227,14 @@ export function Result({
                       <button
                         type="button"
                         onClick={() => onSwap(i)}
-                        className="text-[11px] font-extrabold text-accent flex-shrink-0"
+                        className="text-[11px] font-extrabold text-accent flex-shrink-0 inline-flex items-center gap-1"
                       >
-                        ↻ Swap
+                        <RotateCw
+                          className="w-3.5 h-3.5"
+                          strokeWidth={1.75}
+                          aria-hidden
+                        />
+                        Swap
                       </button>
                     )}
                   </div>
@@ -215,7 +242,12 @@ export function Result({
               </div>
               {s.walkToNextMins != null && (
                 <div className="ml-3 text-[10px] text-muted-fg py-1.5 pl-3 border-l-2 border-dashed border-border">
-                  🚶 ~{s.walkToNextMins} min walk
+                  <Footprints
+                    className="w-3.5 h-3.5 inline-block align-[-3px]"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />{" "}
+                  ~{s.walkToNextMins} min walk
                 </div>
               )}
             </div>
@@ -226,7 +258,12 @@ export function Result({
       {plan.event && (
         <div className="mt-3 rounded-2xl border border-accent/30 bg-accent/10 p-3">
           <div className="text-[10px] font-extrabold text-accent uppercase tracking-[0.1em]">
-            ✦ Happening nearby
+            <Sparkles
+              className="w-3.5 h-3.5 inline-block align-[-3px]"
+              strokeWidth={1.75}
+              aria-hidden
+            />{" "}
+            Happening nearby
           </div>
           <div className="text-[13px] font-extrabold text-heading mt-1">
             {plan.event.event.name}
@@ -249,9 +286,10 @@ export function Result({
         <button
           type="button"
           onClick={() => room.sendVariant(room.variant + 1)}
-          className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-sm font-extrabold"
+          className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-sm font-extrabold inline-flex items-center justify-center gap-1.5"
         >
-          Try a different mix ↻
+          Try a different mix
+          <RotateCw className="w-4 h-4" strokeWidth={1.75} aria-hidden />
         </button>
         <button
           type="button"

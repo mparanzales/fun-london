@@ -9,6 +9,7 @@ import {
   type Mood,
 } from "@/lib/plan-together-moods";
 import { track } from "@/lib/analytics";
+import { Disc3, Heart, X } from "lucide-react";
 import { Avatar } from "./avatar";
 
 // Plan Together — Step 2: Group Swipe (real-time).
@@ -66,7 +67,11 @@ export function Swipe({
     const doneMembers = room.members.filter((m) => room.doneIds.includes(m.id));
     return (
       <div className="px-5 pt-10 flex flex-col items-center text-center min-h-[calc(100vh-96px)]">
-        <div className="text-[40px] mb-2">🪩</div>
+        <Disc3
+          className="w-10 h-10 text-muted-fg mb-2"
+          strokeWidth={1.75}
+          aria-hidden
+        />
         <h2 className="text-xl font-extrabold text-heading">Nice, votes in.</h2>
         <p className="text-sm text-muted-fg mt-1.5 mb-6">
           Waiting for the group… {room.doneIds.length}/{room.members.length}{" "}
@@ -107,11 +112,16 @@ export function Swipe({
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/85" />
         <div className="absolute top-3.5 left-3.5">
           <span className="inline-block px-2.5 py-1 rounded-full bg-accent text-accent-fg text-[10px] font-extrabold uppercase tracking-[0.08em]">
-            {mood.emoji} mood
+            <mood.icon
+              className="w-3.5 h-3.5 inline-block align-[-3px]"
+              strokeWidth={1.75}
+              aria-hidden
+            />{" "}
+            mood
           </span>
         </div>
         <div className="absolute left-4 right-4 bottom-4.5 text-white">
-          <span className="text-4xl">{mood.emoji}</span>
+          <mood.icon className="w-10 h-10" strokeWidth={1.75} aria-hidden />
           <h2 className="text-[32px] font-extrabold m-0 tracking-tight mt-1">
             {mood.label}
           </h2>
@@ -124,17 +134,17 @@ export function Swipe({
           type="button"
           onClick={() => vote(false)}
           aria-label="No"
-          className="w-[50px] h-[50px] rounded-full bg-card border border-border text-[17px] text-fg"
+          className="w-[50px] h-[50px] rounded-full bg-card border border-border text-fg grid place-items-center"
         >
-          ✕
+          <X className="w-[18px] h-[18px]" strokeWidth={1.75} aria-hidden />
         </button>
         <button
           type="button"
           onClick={() => vote(true)}
           aria-label="Yes"
-          className="w-[54px] h-[54px] rounded-full bg-accent text-accent-fg text-[22px] shadow-[0_6px_16px_rgba(0,0,0,0.15)]"
+          className="w-[54px] h-[54px] rounded-full bg-accent text-accent-fg shadow-[0_6px_16px_rgba(0,0,0,0.15)] grid place-items-center"
         >
-          ♥
+          <Heart className="w-[22px] h-[22px]" strokeWidth={1.75} aria-hidden />
         </button>
       </div>
     </div>

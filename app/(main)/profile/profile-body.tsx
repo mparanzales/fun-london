@@ -3,6 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  Bell,
+  LogOut,
+  MessageCircle,
+  Moon,
+  Package,
+  Pencil,
+  Sun,
+  SunMoon,
+} from "lucide-react";
 import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import { createClient } from "@/lib/supabase/client";
@@ -83,7 +93,13 @@ function AnonProfile() {
           className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
         >
           <span className="flex gap-2.5 items-center">
-            <span>💬</span>
+            <span>
+              <MessageCircle
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <span>Give Feedback</span>
           </span>
           <span className="text-muted-fg">›</span>
@@ -204,8 +220,8 @@ function SignedInProfile({
 
   // Theme icon mirrors the mode: half-moon for auto, sun for light, moon
   // for dark.
-  const themeIcon =
-    themeMode === "auto" ? "🌗" : themeMode === "day" ? "☀️" : "🌙";
+  const ThemeIcon =
+    themeMode === "auto" ? SunMoon : themeMode === "day" ? Sun : Moon;
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -247,7 +263,13 @@ function SignedInProfile({
           className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold no-underline"
         >
           <span className="flex gap-2.5 items-center">
-            <span>✏️</span>
+            <span>
+              <Pencil
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <span>Edit profile</span>
           </span>
           <span className="text-muted-fg">›</span>
@@ -259,7 +281,13 @@ function SignedInProfile({
           className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
         >
           <span className="flex gap-2.5 items-center">
-            <span>💬</span>
+            <span>
+              <MessageCircle
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <span>Give Feedback</span>
           </span>
           <span className="text-muted-fg">›</span>
@@ -272,7 +300,13 @@ function SignedInProfile({
           className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
         >
           <span className="flex gap-2.5 items-center">
-            <span>{themeIcon}</span>
+            <span>
+              <ThemeIcon
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <span>Theme: {themeModeLabel(themeMode)}</span>
           </span>
           <span className="text-[11px] font-bold text-muted-fg uppercase tracking-wider">
@@ -290,7 +324,13 @@ function SignedInProfile({
           className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold disabled:opacity-50"
         >
           <span className="flex gap-2.5 items-center">
-            <span>🔔</span>
+            <span>
+              <Bell
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <span>Email me what&apos;s new in London</span>
           </span>
           {/* Pill toggle — accent track when on, muted when off. */}
@@ -316,7 +356,13 @@ function SignedInProfile({
           className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold disabled:opacity-50"
         >
           <span className="flex gap-2.5 items-center">
-            <span>📦</span>
+            <span>
+              <Package
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <span>{exporting ? "Preparing…" : "Export my data"}</span>
           </span>
           <span className="text-muted-fg">↓</span>
@@ -329,7 +375,13 @@ function SignedInProfile({
           className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold disabled:opacity-50"
         >
           <span className="flex gap-2.5 items-center">
-            <span>👋</span>
+            <span>
+              <LogOut
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <span>{signingOut ? "Signing out…" : "Sign out"}</span>
           </span>
         </button>

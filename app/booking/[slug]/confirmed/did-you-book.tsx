@@ -148,7 +148,7 @@ export function DidYouBook({
             <Check className="w-8 h-8 text-primary" strokeWidth={3} />
           </div>
           <h1 className="text-2xl font-extrabold text-heading">
-            Added to your plans 🎉
+            Added to your plans
           </h1>
           <p className="text-sm text-muted-fg mt-2">
             {dateLabel}

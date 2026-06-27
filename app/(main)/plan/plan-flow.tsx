@@ -10,6 +10,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  type LucideIcon,
+  Sparkles,
+  Flame,
+  Gem,
+  Drama,
+  Map as MapIcon,
+  MapPin,
+  Clock,
+  Footprints,
+  RotateCw,
+  Check,
+  Star,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
@@ -22,11 +36,11 @@ import {
 import { track } from "@/lib/analytics";
 import type { Venue } from "@/lib/types";
 
-const VIBES: { v: PlanVibe; e: string }[] = [
-  { v: "Chill", e: "✨" },
-  { v: "Lively", e: "🔥" },
-  { v: "Fancy", e: "💎" },
-  { v: "Unique", e: "🎭" },
+const VIBES: { v: PlanVibe; icon: LucideIcon }[] = [
+  { v: "Chill", icon: Sparkles },
+  { v: "Lively", icon: Flame },
+  { v: "Fancy", icon: Gem },
+  { v: "Unique", icon: Drama },
 ];
 
 const BUDGETS: PlanBudget[] = ["£", "££", "Any"];
@@ -253,7 +267,7 @@ export function PlanFlow({
                       : "border-border bg-card")
                   }
                 >
-                  <span className="text-base">{v.e}</span>
+                  <v.icon className="w-5 h-5" strokeWidth={1.75} aria-hidden />
                   {v.v}
                 </button>
               );
@@ -313,7 +327,12 @@ export function PlanFlow({
             }}
             className="w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
           >
-            Build the night ✨
+            Build the night{" "}
+            <Sparkles
+              className="w-4 h-4 inline-block align-[-3px]"
+              strokeWidth={1.75}
+              aria-hidden
+            />
           </button>
         </div>
 
@@ -350,7 +369,7 @@ export function PlanFlow({
   if (display.steps.length === 0) {
     return (
       <div className="px-5 py-16 text-center">
-        <div className="text-4xl mb-3">🗺️</div>
+        <MapIcon className="w-10 h-10 text-muted-fg mb-3" strokeWidth={1.75} aria-hidden />
         <h2 className="text-xl font-extrabold text-heading mb-1.5">
           No plan for that combo
         </h2>
@@ -391,7 +410,18 @@ export function PlanFlow({
         </button>
         <h2 className="text-[22px] font-extrabold m-0">{display.title}</h2>
         <div className="text-xs opacity-90 mt-1.5">
-          📍 {display.area} · 🕒 {fmtHours(display.totalMins)}
+          <MapPin
+            className="w-3.5 h-3.5 inline-block align-[-3px]"
+            strokeWidth={1.75}
+            aria-hidden
+          />{" "}
+          {display.area} ·{" "}
+          <Clock
+            className="w-3.5 h-3.5 inline-block align-[-3px]"
+            strokeWidth={1.75}
+            aria-hidden
+          />{" "}
+          {fmtHours(display.totalMins)}
         </div>
       </div>
 
@@ -426,11 +456,26 @@ export function PlanFlow({
                 <div className="text-[11px] text-muted-fg mt-1 flex items-center gap-1.5 flex-wrap">
                   <span className="text-accent font-bold">{s.venue.type}</span>
                   <span>·</span>
-                  <span>★ {s.venue.rating}</span>
+                  <span>
+                    <Star
+                      className="w-3.5 h-3.5 inline-block align-[-3px]"
+                      strokeWidth={1.75}
+                      fill="currentColor"
+                      aria-hidden
+                    />{" "}
+                    {s.venue.rating}
+                  </span>
                   <span>·</span>
                   <span>{s.venue.price}</span>
                   <span>·</span>
-                  <span>🕒 ~{s.dwellMins} min</span>
+                  <span>
+                    <Clock
+                      className="w-3.5 h-3.5 inline-block align-[-3px]"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    />{" "}
+                    ~{s.dwellMins} min
+                  </span>
                 </div>
                 <div className="text-[11px] text-muted-fg italic mt-1">
                   &quot;{s.venue.vibe}&quot;
@@ -439,7 +484,12 @@ export function PlanFlow({
             </Link>
             {s.walkToNextMins != null && (
               <div className="ml-3 text-[11px] text-muted-fg py-1.5 pl-3 border-l-2 border-dashed border-border">
-                🚶 ~{s.walkToNextMins} min walk
+                <Footprints
+                  className="w-3.5 h-3.5 inline-block align-[-3px]"
+                  strokeWidth={1.75}
+                  aria-hidden
+                />{" "}
+                ~{s.walkToNextMins} min walk
               </div>
             )}
           </div>
@@ -474,7 +524,12 @@ export function PlanFlow({
             }}
             className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold"
           >
-            Try another combination ↻
+            Try another combination{" "}
+            <RotateCw
+              className="w-4 h-4 inline-block align-[-3px]"
+              strokeWidth={1.75}
+              aria-hidden
+            />
           </button>
 
           {authUserId ? (
@@ -484,11 +539,20 @@ export function PlanFlow({
               disabled={saveState !== "idle"}
               className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold disabled:opacity-70"
             >
-              {saveState === "saved"
-                ? "Saved to your nights ✓"
-                : saveState === "saving"
-                  ? "Saving…"
-                  : "Save this night"}
+              {saveState === "saved" ? (
+                <>
+                  Saved to your nights{" "}
+                  <Check
+                    className="w-4 h-4 inline-block align-[-3px]"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                </>
+              ) : saveState === "saving" ? (
+                "Saving…"
+              ) : (
+                "Save this night"
+              )}
             </button>
           ) : (
             <Link
