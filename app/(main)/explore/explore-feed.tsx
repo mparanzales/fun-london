@@ -19,6 +19,7 @@ import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
 import { searchCatalog } from "@/lib/search-action";
 import { loadFeedPage } from "@/lib/feed-action";
+import { recordSignal } from "@/lib/signals";
 import type { FeedFilter, FeedSort } from "@/lib/queries";
 import { FEED_PAGE_SIZE } from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
@@ -422,7 +423,13 @@ export function ExploreFeed({
       {/* Category chips filter the feed for everyone. For anon each category
           shows its own first 4 (from the per-category preview) + the sign-up
           wall, exactly like For You. */}
-      <FilterChipRow selected={selectedFilter} onSelect={setSelectedFilter} />
+      <FilterChipRow
+        selected={selectedFilter}
+        onSelect={(key) => {
+          recordSignal("filter", { surface: "explore", context: { filter: key } });
+          setSelectedFilter(key);
+        }}
+      />
 
       {/* "Near you" sort + taste status line. */}
       <div className="px-5 lg:px-6 pt-1.5 flex items-center gap-2 flex-wrap">

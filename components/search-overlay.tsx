@@ -19,6 +19,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { track } from "@/lib/analytics";
+import { recordSignal } from "@/lib/signals";
 import { normalize, scoreMatch } from "@/lib/search-match";
 import type { Venue, Event } from "@/lib/types";
 
@@ -142,10 +143,14 @@ export function SearchOverlay({
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) return;
-    const t = setTimeout(
-      () => track("search_query", { q, results: results.length }),
-      700,
-    );
+    const t = setTimeout(() => {
+      track("search_query", { q, results: results.length });
+      // Kind C: send only the query LENGTH (never the raw text — no PII).
+      recordSignal("search", {
+        surface: "search_results",
+        context: { query_len: q.length, results: results.length },
+      });
+    }, 700);
     return () => clearTimeout(t);
   }, [query, results.length]);
 

@@ -21,6 +21,7 @@ import { ReserveSheet } from "@/components/reserve-sheet";
 import { platformLabel, type ReserveTarget } from "@/lib/booking-link";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
+import { recordSignal } from "@/lib/signals";
 import {
   getOpenState,
   londonWallClock,
@@ -597,6 +598,13 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                     }
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() =>
+                      recordSignal("outbound_click", {
+                        surface: "venue",
+                        venueId: venue.id,
+                        context: { target: "directions" },
+                      })
+                    }
                     className="font-bold text-primary rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     Get directions
@@ -610,6 +618,13 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                   href={venue.menuUrl ?? venue.websiteUrl!}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() =>
+                    recordSignal("outbound_click", {
+                      surface: "venue",
+                      venueId: venue.id,
+                      context: { target: venue.menuUrl ? "menu" : "website" },
+                    })
+                  }
                   className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Globe className="w-4 h-4" strokeWidth={2} />

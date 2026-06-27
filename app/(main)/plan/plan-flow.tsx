@@ -34,6 +34,7 @@ import {
   type PlanVibe,
 } from "@/lib/plan-engine";
 import { track } from "@/lib/analytics";
+import { recordSignal } from "@/lib/signals";
 import type { Venue } from "@/lib/types";
 
 const VIBES: { v: PlanVibe; icon: LucideIcon }[] = [
@@ -178,6 +179,7 @@ export function PlanFlow({
       return;
     }
     setSaveState("saved");
+    recordSignal("plan_completed", { surface: "plan" });
     track("plan_save", {
       area: computed.area,
       vibe: computed.vibe,
@@ -315,6 +317,7 @@ export function PlanFlow({
               setOffset(0);
               setOpenedSaved(null);
               setStep("result");
+              recordSignal("plan_started", { surface: "plan" });
               track("plan_generate", {
                 area,
                 vibe,
