@@ -25,10 +25,10 @@ import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
 import { hasPrefs } from "@/lib/ranking";
 import {
-  readUserGeo,
+  readFreshUserGeo,
+  requestUserGeo,
   haversineKm,
   distanceLabel,
-  GEO_STORAGE_KEY,
   type LatLng,
 } from "@/lib/geo";
 import type {
@@ -128,7 +128,7 @@ export function ExploreFeed({
     "idle" | "locating" | "denied" | "unavailable"
   >("idle");
   useEffect(() => {
-    setUserGeo(readUserGeo());
+    setUserGeo(readFreshUserGeo());
   }, []);
 
   // One-time "turn on location" nudge for signed-in users. The old anonymous
@@ -140,7 +140,7 @@ export function ExploreFeed({
     if (!signedIn) return;
     try {
       if (window.localStorage.getItem(LOCATION_PROMPTED_KEY)) return;
-      if (readUserGeo()) return;
+      if (readFreshUserGeo()) return;
       setShowLocPrompt(true);
     } catch {
       // localStorage unavailable — skip the nudge.
@@ -156,41 +156,26 @@ export function ExploreFeed({
     setShowLocPrompt(false);
   }
 
-  function toggleNearest() {
-    // Re-read in case the welcome sheet stored coords after this mounted.
-    const stored = userGeo ?? readUserGeo();
+  async function toggleNearest() {
+    // Re-read in case a (still-fresh) fix was stored after this mounted.
+    const stored = userGeo ?? readFreshUserGeo();
     if (stored) {
       if (!userGeo) setUserGeo(stored);
       setNearestFirst((v) => !v);
       return;
     }
-    if (!("geolocation" in navigator)) {
-      setGeoStatus("unavailable");
-      return;
-    }
+    // Acquire a fix. requestUserGeo retries once on a slow/cold timeout (the
+    // root of the "sometimes works, sometimes doesn't" flakiness) and persists
+    // on success, so the next toggle is instant.
     setGeoStatus("locating");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const g = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        try {
-          window.localStorage.setItem(
-            GEO_STORAGE_KEY,
-            JSON.stringify({ ...g, at: Date.now() }),
-          );
-        } catch {
-          /* ignore */
-        }
-        setUserGeo(g);
-        setNearestFirst(true);
-        setGeoStatus("idle");
-      },
-      (err) => {
-        // Tell the user instead of failing silently. PERMISSION_DENIED = 1.
-        setGeoStatus(err.code === 1 ? "denied" : "unavailable");
-      },
-      // Reuse a recent fix (10 min) so we don't re-prompt or hang.
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 },
-    );
+    const r = await requestUserGeo();
+    if (r.ok) {
+      setUserGeo(r.geo);
+      setNearestFirst(true);
+      setGeoStatus("idle");
+    } else {
+      setGeoStatus(r.reason === "denied" ? "denied" : "unavailable");
+    }
   }
 
   const items = useMemo<FeedItem[]>(() => {

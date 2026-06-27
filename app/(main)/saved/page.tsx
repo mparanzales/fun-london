@@ -11,10 +11,12 @@ import { AuthWall } from "@/components/auth-wall";
 // DB queries.
 
 export default async function SavedPage() {
-  const [allVenues, authUser] = await Promise.all([
-    fetchVenues(),
-    getAuthUser(),
-  ]);
+  const authUser = await getAuthUser();
+  // Anonymous visitors hit the AuthWall and can't use Saved (their saves live
+  // only in this browser, resolved client-side). Never ship them the catalogue:
+  // fetchVenues() is the full select-* row INCLUDING moat fields, which would
+  // otherwise serialize into the anonymous RSC payload behind only a CSS blur.
+  const allVenues = authUser ? await fetchVenues() : [];
   return (
     <>
       <SavedList allVenues={allVenues} isAnon={!authUser} />
