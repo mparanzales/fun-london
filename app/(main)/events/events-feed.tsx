@@ -10,6 +10,7 @@ import {
   Disc3,
   Store,
   Search,
+  Moon,
   type LucideIcon,
 } from "lucide-react";
 import { EventCard } from "@/components/event-card";
@@ -315,7 +316,7 @@ export function EventsFeed({
         ))}
         {filtered.length === 0 && (
           <div className="rounded-2xl bg-card border border-border p-5 text-center">
-            <div className="text-2xl mb-1">🌙</div>
+            <Moon className="w-8 h-8 text-muted-fg mb-1" strokeWidth={1.75} aria-hidden />
             <p className="text-sm text-muted-fg leading-relaxed">
               No events match that filter yet. Tier 3 ingests every 4 hours,
               more sources coming soon.

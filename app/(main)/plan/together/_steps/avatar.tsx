@@ -15,7 +15,7 @@ export function Avatar({
 }) {
   return (
     <div
-      className="rounded-full grid place-items-center text-white"
+      className="rounded-full grid place-items-center text-white font-bold"
       style={{
         width: size,
         height: size,
@@ -23,7 +23,7 @@ export function Avatar({
         fontSize,
       }}
     >
-      {participant.emoji}
+      {participant.name.charAt(0).toUpperCase()}
     </div>
   );
 }

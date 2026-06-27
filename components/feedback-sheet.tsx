@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { X, Heart } from "lucide-react";
 import { submitFeedback } from "@/app/(main)/profile/actions";
 
 type Choice = { id: string; label: string };
@@ -119,7 +119,7 @@ export function FeedbackSheet({
 
         {status === "done" ? (
           <div className="py-10 text-center">
-            <div className="text-4xl mb-3">💜</div>
+            <Heart className="w-10 h-10 text-muted-fg mb-3" strokeWidth={1.75} aria-hidden />
             <h2 className="text-xl font-extrabold text-heading mb-1.5">
               Thank you
             </h2>

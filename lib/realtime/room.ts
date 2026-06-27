@@ -19,7 +19,6 @@ export type Member = {
   id: string;
   name: string;
   color: string;
-  emoji: string;
 };
 
 export type Phase = "lobby" | "settings" | "swipe" | "result";
@@ -73,7 +72,6 @@ const COLORS = [
   "hsl(150 55% 45%)",
   "hsl(40 90% 55%)",
 ];
-const EMOJIS = ["🧡", "💖", "💙", "💜", "💚", "💛"];
 const ANIMALS = [
   "Fox",
   "Otter",
@@ -109,7 +107,6 @@ export function makeMember(rawName: string): Member {
     id,
     name,
     color: COLORS[h % COLORS.length],
-    emoji: EMOJIS[h % EMOJIS.length],
   };
 }
 
@@ -152,7 +149,7 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
       for (const key of Object.keys(state)) {
         for (const pres of state[key]) {
           const m = pres as Partial<Member>;
-          if (m.id && m.name && m.color && m.emoji && !seen.has(m.id)) {
+          if (m.id && m.name && m.color && !seen.has(m.id)) {
             seen.add(m.id);
             list.push(m as Member);
           }

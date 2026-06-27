@@ -293,6 +293,5 @@ export type Profile = {
 export type Participant = {
   id: string;
   name: string; // "You" | "Maya" | "Tom" | "Alex"
-  color: string; // HSL string used as avatar background
-  emoji: string; // heart emoji used as avatar glyph (🧡 💖 💙 💜)
+  color: string; // HSL string used as avatar background (with the initial monogram)
 };

@@ -5,6 +5,7 @@
 
 import { useMemo, useState } from "react";
 import type { Venue } from "@/lib/types";
+import { Map } from "lucide-react";
 import { REGIONS, type PlanArea, type Region } from "@/lib/regions";
 import type { PlanBudget } from "@/lib/plan-engine";
 import type { PlanWhen, Room, RoomSettings } from "@/lib/realtime/room";
@@ -33,7 +34,11 @@ export function Settings({ room, venues }: { room: Room; venues: Venue[] }) {
   if (!room.isHost) {
     return (
       <div className="px-5 py-10 text-center">
-        <div className="text-[40px] mb-2">🗺️</div>
+        <Map
+          className="w-10 h-10 text-muted-fg mb-2 mx-auto"
+          strokeWidth={1.75}
+          aria-hidden
+        />
         <h1 className="text-xl font-extrabold text-heading">
           The host is setting the plan…
         </h1>

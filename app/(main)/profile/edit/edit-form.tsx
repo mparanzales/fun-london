@@ -3,7 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import {
+  ArrowLeft,
+  Drama,
+  Flame,
+  Gem,
+  Laugh,
+  type LucideIcon,
+  Martini,
+  Music,
+  Sparkles,
+  UtensilsCrossed,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Mood, Vibe, PriceTier, UserPreferences } from "@/lib/types";
 
@@ -12,18 +23,18 @@ import type { Mood, Vibe, PriceTier, UserPreferences } from "@/lib/types";
 // initial values in; we keep local state for the form and upsert to
 // public.profiles on Save.
 
-const MOOD_OPTIONS: { value: Mood; emoji: string; label: string }[] = [
-  { value: "dinner", emoji: "🍝", label: "Dinner" },
-  { value: "drinks", emoji: "🍸", label: "Drinks" },
-  { value: "culture", emoji: "🎵", label: "Live Music" },
-  { value: "activity", emoji: "😂", label: "Comedy" },
+const MOOD_OPTIONS: { value: Mood; icon: LucideIcon; label: string }[] = [
+  { value: "dinner", icon: UtensilsCrossed, label: "Dinner" },
+  { value: "drinks", icon: Martini, label: "Drinks" },
+  { value: "culture", icon: Music, label: "Live Music" },
+  { value: "activity", icon: Laugh, label: "Comedy" },
 ];
 
-const VIBE_OPTIONS: { value: Vibe; emoji: string; label: string }[] = [
-  { value: "chill", emoji: "✨", label: "Chill" },
-  { value: "lively", emoji: "🔥", label: "Lively" },
-  { value: "fancy", emoji: "💎", label: "Fancy" },
-  { value: "unique", emoji: "🎭", label: "Unique" },
+const VIBE_OPTIONS: { value: Vibe; icon: LucideIcon; label: string }[] = [
+  { value: "chill", icon: Sparkles, label: "Chill" },
+  { value: "lively", icon: Flame, label: "Lively" },
+  { value: "fancy", icon: Gem, label: "Fancy" },
+  { value: "unique", icon: Drama, label: "Unique" },
 ];
 
 // Personal budget cap. "Free" is omitted — it's a venue attribute,
@@ -251,7 +262,7 @@ function Section({
   );
 }
 
-type Option<T> = { value: T; emoji: string; label: string };
+type Option<T> = { value: T; icon: LucideIcon; label: string };
 
 function Grid<T extends string>({
   items,
@@ -277,7 +288,7 @@ function Grid<T extends string>({
               (on ? "bg-accent/10 border-accent" : "bg-card border-border")
             }
           >
-            <span className="text-[28px] leading-none">{o.emoji}</span>
+            <o.icon className="w-7 h-7" strokeWidth={1.75} aria-hidden />
             <span className="text-sm font-extrabold text-fg">{o.label}</span>
           </button>
         );

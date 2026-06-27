@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 // Status reflects the magic-link form only. The OAuth buttons have their own
@@ -127,7 +128,7 @@ export function SignInForm({
   if (status === "sent") {
     return (
       <div className="rounded-2xl bg-card border border-border p-6 text-center">
-        <div className="text-3xl mb-2">📬</div>
+        <MailCheck className="w-9 h-9 text-muted-fg mb-2" strokeWidth={1.75} aria-hidden />
         <h2 className="text-sm font-extrabold text-heading mb-1">
           Check your inbox
         </h2>

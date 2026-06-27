@@ -30,10 +30,10 @@ export const MOCK_SAVED_IDS: string[] = [];
 // Colors and emoji mirror the prototype's plan-together.jsx voter palette.
 
 export const MOCK_PARTICIPANTS: Participant[] = [
-  { id: "you", name: "You", color: "hsl(20 90% 55%)", emoji: "🧡" },
-  { id: "maya", name: "Maya", color: "hsl(330 80% 60%)", emoji: "💖" },
-  { id: "tom", name: "Tom", color: "hsl(220 80% 60%)", emoji: "💙" },
-  { id: "alex", name: "Alex", color: "hsl(280 70% 65%)", emoji: "💜" },
+  { id: "you", name: "You", color: "hsl(20 90% 55%)" },
+  { id: "maya", name: "Maya", color: "hsl(330 80% 60%)" },
+  { id: "tom", name: "Tom", color: "hsl(220 80% 60%)" },
+  { id: "alex", name: "Alex", color: "hsl(280 70% 65%)" },
 ];
 
 export function getParticipants(): Participant[] {
