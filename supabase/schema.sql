@@ -510,12 +510,12 @@ create table if not exists public.user_events (
   -- Side-effect by design: a deleted venue's signals go NULL and drop out of the
   -- partial venue-aggregation index below — Kind A can't aggregate a gone venue.
   venue_id uuid references public.venues(id) on delete set null,
-  -- STARTER set only — final taxonomy LOCKED IN STEP 0.2. CHECK in the guarded
-  -- do-block below (not inline) so 0.2 can evolve it idempotently. Keep in sync
-  -- with the signals writer when 0.2 lands.
+  -- Locked taxonomy (step 0.2). CHECK lives in the guarded do-block below (not
+  -- inline) so it stays idempotent / alterable. Keep in sync with the signals
+  -- writer. Per-type learning weights live in the engine (Stage 2), not the DB.
   event_type text not null,
-  -- STARTER set only — also locked/expanded in STEP 0.2 (surfaces will grow:
-  -- onboarding, search_results, digest_email, …). CHECK in the do-block below.
+  -- Locked surfaces (step 0.2). Add any new surface here AND in the writer
+  -- together (e.g. digest_email when that surface ships).
   surface text not null,
   -- Extra signal payload (dwell_ms, rank, query bucket). PRIVACY: COARSE,
   -- NON-IDENTIFYING signals ONLY — NO raw PII (email/name/phone/device-id/IP)
@@ -531,19 +531,22 @@ create table if not exists public.user_events (
 
 -- CHECKs added via a pg_constraint guard (mirrors the venues_type_check block)
 -- so re-running is safe and an existing user_events table picks them up too.
--- STARTER sets for both columns — locked/expanded in step 0.2.
+-- Locked taxonomy (step 0.2): 14 event types, 8 surfaces.
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'user_events_event_type_check') then
     alter table public.user_events add constraint user_events_event_type_check
       check (event_type in (
-        'open', 'save', 'unsave', 'dismiss', 'veto', 'dwell',
+        'impression', 'open', 'dwell', 'outbound_click',
+        'save', 'unsave', 'dismiss', 'react', 'veto',
         'plan_started', 'plan_completed', 'plan_abandoned', 'search', 'filter'
       ));
   end if;
   if not exists (select 1 from pg_constraint where conname = 'user_events_surface_check') then
     alter table public.user_events add constraint user_events_surface_check
-      check (surface in ('explore', 'feed', 'plan', 'friends', 'venue'));
+      check (surface in (
+        'explore', 'feed', 'plan', 'friends', 'venue', 'saved', 'onboarding', 'search_results'
+      ));
   end if;
 end $$;
 
