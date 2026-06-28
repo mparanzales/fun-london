@@ -517,13 +517,21 @@ async function main() {
     `Fun London — refresh-venues · ${DRY_RUN ? "DRY RUN" : "WRITING"}${SKIP_LINK_CHECK ? " · link-check off" : ""}\n`,
   );
 
+  // COST GUARD: refresh only the N STALEST venues per run (oldest
+  // last_synced_at first), NOT the whole catalogue. Each venue costs one Google
+  // Place Details call; refreshing all ~2,100 daily blows the free monthly
+  // allowance. At 80/day the full catalogue rotates through in ~26 days (venue
+  // facts — rating, hours, closures — change slowly), and daily Places spend
+  // stays inside Google's free tier (≈ £0). Tune with REFRESH_LIMIT.
+  const REFRESH_LIMIT = Number(process.env.REFRESH_LIMIT ?? "80");
   const { data: rows, error } = await readClient
     .from("venues")
     .select(
       "id, slug, name, rating, review_count, address, phone, website_url, img_url, photo_urls, google_place_id, closed_at, opening_hours, editorial_sources, creator_coverage",
     )
     .not("google_place_id", "is", null)
-    .order("created_at", { ascending: true });
+    .order("last_synced_at", { ascending: true, nullsFirst: true })
+    .limit(REFRESH_LIMIT);
 
   if (error) {
     console.error(`Failed to fetch venues: ${error.message}`);
