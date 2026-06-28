@@ -30,8 +30,8 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { mirrorImageUrlToStorage } from "./photo-storage";
-import { fetchOgImage } from "./og-image";
+import { realVenuePhoto } from "./places-photo";
+import { makeRow, isDuplicate, type DedupeRow } from "./event-dedupe";
 import type { EventCategory } from "@/lib/types";
 
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -306,20 +306,23 @@ async function main() {
   // (e.g. "Citizens of Soil" vs "Citizens of Soil's", "X" vs "X by Y") that
   // discovery surfaces under slightly different names across runs.
   const existing = new Set<string>();
-  const seenNameKeys = new Set<string>();
-  const nameKey = (n: string) =>
-    n
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "")
-      .slice(0, 14);
+  const existingRows: DedupeRow[] = [];
   if (supabase) {
     const { data } = await supabase
       .from("events")
-      .select("source_id, name")
+      .select("source_id, name, venue_name, starts_at, ends_at")
       .eq("source", "popup");
     for (const r of data ?? []) {
       if (r.source_id) existing.add(r.source_id as string);
-      if (r.name) seenNameKeys.add(nameKey(r.name as string));
+      if (r.name)
+        existingRows.push(
+          makeRow(
+            r.name as string,
+            (r.venue_name as string) ?? "",
+            (r.starts_at as string) ?? null,
+            (r.ends_at as string) ?? null,
+          ),
+        );
     }
   }
 
@@ -357,12 +360,12 @@ async function main() {
       console.log(`  ↺ already have: ${name}`);
       continue;
     }
-    const key = nameKey(name);
-    if (seenNameKeys.has(key)) {
-      console.log(`  ↺ near-duplicate name: ${name}`);
+    const candRow = makeRow(name, venue, start.toISOString(), end.toISOString());
+    if (isDuplicate(candRow, existingRows)) {
+      console.log(`  ↺ duplicate of an existing pop-up: ${name}`);
       continue;
     }
-    seenNameKeys.add(key);
+    existingRows.push(candRow);
     scanned++;
 
     // Guardrail: must be recognised by >= 1 trusted publication.
@@ -381,20 +384,17 @@ async function main() {
     const category = normCategory(c.category);
     const officialUrl = (c.url ?? "").trim() || null;
 
-    // Image: the pop-up's OWN promo image (official page og:image), mirrored to
-    // Supabase Storage for a keyless, allowlisted URL. No real image → the
-    // pop-up is NOT published (no stock fallback). On dry runs we can't mirror,
-    // so the skip is enforced only for real writes.
+    // Image: the event's VENUE photo from Google Places, mirrored keyless to
+    // Storage — the real place, never a brand logo (og:image was the logo
+    // source). No real venue photo → NOT published (the read-side img_url<>''
+    // filter would hide it anyway, and a wrong photo breaks the cross-checked
+    // promise). Dry runs can't mirror, so the skip is enforced on real writes.
     let imgUrl: string | null = null;
-    if (!DRY_RUN && supabase && officialUrl) {
-      const og = await fetchOgImage(officialUrl);
-      if (og) {
-        const mirrored = await mirrorImageUrlToStorage(og, source_id, supabase);
-        if (mirrored) imgUrl = mirrored;
-      }
+    if (!DRY_RUN && supabase) {
+      imgUrl = await realVenuePhoto(venue, neighbourhood, source_id, supabase);
     }
     if (!imgUrl && !DRY_RUN) {
-      console.log(`  ✗ ${name}: no real image, skipping (not published)`);
+      console.log(`  ✗ ${name}: no real venue photo, skipping (not published)`);
       continue;
     }
 
