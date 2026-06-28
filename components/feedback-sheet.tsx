@@ -119,7 +119,11 @@ export function FeedbackSheet({
 
         {status === "done" ? (
           <div className="py-10 text-center">
-            <Heart className="w-10 h-10 text-muted-fg mb-3" strokeWidth={1.75} aria-hidden />
+            <Heart
+              className="w-10 h-10 text-muted-fg mb-3"
+              strokeWidth={1.75}
+              aria-hidden
+            />
             <h2 className="text-xl font-extrabold text-heading mb-1.5">
               Thank you
             </h2>

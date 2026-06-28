@@ -67,7 +67,13 @@ export function SavedList({
       {showAnonWarning && (
         <div className="px-5 pb-4">
           <div className="rounded-2xl border border-accent/40 bg-accent/10 px-4 py-3.5 flex items-start gap-3">
-            <span className="text-lg leading-none mt-0.5"><Pin className="w-4 h-4 inline-block align-[-3px]" strokeWidth={1.75} aria-hidden /></span>
+            <span className="text-lg leading-none mt-0.5">
+              <Pin
+                className="w-4 h-4 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
             <div className="flex-1 min-w-0">
               <div className="text-[13px] font-extrabold text-heading">
                 Saved on this device only
@@ -185,7 +191,11 @@ export function SavedList({
 
       {!hasAnything && (
         <div className="mx-5 mt-5 p-6 rounded-2xl bg-card border border-border text-center">
-          <Heart className="w-9 h-9 text-muted-fg mx-auto" strokeWidth={1.75} aria-hidden />
+          <Heart
+            className="w-9 h-9 text-muted-fg mx-auto"
+            strokeWidth={1.75}
+            aria-hidden
+          />
           <h2 className="text-sm font-extrabold text-heading mt-2">
             Nothing saved yet
           </h2>

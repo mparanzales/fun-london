@@ -63,8 +63,8 @@ async function getIndex() {
 const SEARCH_RATE_LIMIT = 40;
 const SEARCH_RATE_WINDOW_MS = 60 * 1000;
 
-function searchAllowed(): boolean {
-  const h = headers();
+async function searchAllowed(): Promise<boolean> {
+  const h = await headers();
   const ip =
     h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     h.get("x-real-ip") ||
@@ -95,7 +95,7 @@ export async function searchCatalog(
 ): Promise<{ venues: Venue[]; events: Event[] }> {
   const q = normalize(query);
   if (q.length < 2) return { venues: [], events: [] };
-  if (!searchAllowed()) return { venues: [], events: [] };
+  if (!(await searchAllowed())) return { venues: [], events: [] };
   const idx = await getIndex();
   return {
     venues: rankIndexed(idx.venues, q, 24),
@@ -112,7 +112,7 @@ export async function searchEvents(
 ): Promise<{ venues: Venue[]; events: Event[] }> {
   const q = normalize(query);
   if (q.length < 2) return { venues: [], events: [] };
-  if (!searchAllowed()) return { venues: [], events: [] };
+  if (!(await searchAllowed())) return { venues: [], events: [] };
   const idx = await getIndex();
   return { venues: [], events: rankIndexed(idx.events, q, 24) };
 }

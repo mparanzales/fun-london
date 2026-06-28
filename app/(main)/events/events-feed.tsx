@@ -316,7 +316,11 @@ export function EventsFeed({
         ))}
         {filtered.length === 0 && (
           <div className="rounded-2xl bg-card border border-border p-5 text-center">
-            <Moon className="w-8 h-8 text-muted-fg mb-1" strokeWidth={1.75} aria-hidden />
+            <Moon
+              className="w-8 h-8 text-muted-fg mb-1"
+              strokeWidth={1.75}
+              aria-hidden
+            />
             <p className="text-sm text-muted-fg leading-relaxed">
               No events match that filter yet. Tier 3 ingests every 4 hours,
               more sources coming soon.

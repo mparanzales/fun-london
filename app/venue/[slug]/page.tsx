@@ -17,11 +17,10 @@ import { AuthWall } from "@/components/auth-wall";
 // Per-page metadata so a shared /venue/[slug] link renders a rich preview
 // (name, neighbourhood, description, OG image) instead of the generic site
 // card — and so Google can index each venue page distinctly.
-export async function generateMetadata({
-  params,
-}: {
-  params: { slug: string };
+export async function generateMetadata(props: {
+  params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
+  const params = await props.params;
   const venue = await fetchVenueBySlug(params.slug);
   if (!venue) return { title: "Venue not found" };
 
@@ -42,11 +41,10 @@ export async function generateMetadata({
   };
 }
 
-export default async function VenuePage({
-  params,
-}: {
-  params: { slug: string };
+export default async function VenuePage(props: {
+  params: Promise<{ slug: string }>;
 }) {
+  const params = await props.params;
   const authUser = await getAuthUser();
   // Signed-out visitors get a CARD-LEVEL preview only — never the moat fields
   // (full editorial, sources, creator coverage, flags, booking links, phone,

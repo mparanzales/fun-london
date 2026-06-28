@@ -189,7 +189,7 @@ function mapEvent(r: EventRow): Event {
 // FK-valid, but they're hidden from the user-facing catalog feed. To
 // surface a former demo venue, ingest it via scripts/ingest-venues.ts.
 export async function fetchVenues(): Promise<Venue[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   // Paginate past PostgREST's 1000-row cap. With >1000 live venues an
   // unpaginated select silently dropped everything after row 1000 (the entire
   // onezone import sorts last by created_at), so signed-in users were missing
@@ -305,7 +305,7 @@ export function mapVenuePreview(r: VenueCardRow): Venue {
 // Card-level preview of the catalogue's first `limit` venues (same default
 // order as fetchVenues: curated first, then by created_at). Sliced in the DB.
 export async function fetchVenuePreview(limit: number): Promise<Venue[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
     .select(VENUE_CARD_COLUMNS)
@@ -328,7 +328,7 @@ export async function fetchVenuePreview(limit: number): Promise<Venue[]> {
 // mapVenuePreview, so the moat/detail fields are blanked and never leave the
 // server, only matched cards are returned to the client.
 export async function fetchAllVenueCards(): Promise<Venue[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const PAGE = 1000;
   const rows: VenueCardRow[] = [];
   for (let from = 0; ; from += PAGE) {
@@ -436,7 +436,7 @@ async function getVenueIndex(): Promise<FeedRankRow[]> {
   if (venueIndexCache && Date.now() - venueIndexCache.at < VENUE_INDEX_TTL_MS) {
     return venueIndexCache.rows;
   }
-  const supabase = createClient();
+  const supabase = await createClient();
   const PAGE = 1000;
   const rows: FeedRankRow[] = [];
   for (let from = 0; ; from += PAGE) {
@@ -559,7 +559,7 @@ export async function feedPage(args: {
 export async function fetchVenueCategoryPreview(
   perCategory: number,
 ): Promise<Venue[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const base = () =>
     supabase
       .from("venues")
@@ -606,7 +606,7 @@ export async function fetchVenuesByTag(
   tag: string,
   limit: number,
 ): Promise<Venue[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
     .select(VENUE_CARD_COLUMNS)
@@ -625,7 +625,7 @@ export async function fetchVenuesByTag(
 // Total catalogue size — for the hero trust strip ("N independent venues"),
 // so the anonymous teaser can show the real count without fetching the rows.
 export async function fetchVenueCount(): Promise<number> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { count, error } = await supabase
     .from("venues")
     .select("id", { count: "exact", head: true })
@@ -641,7 +641,7 @@ export async function fetchVenueCount(): Promise<number> {
 }
 
 export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
     .select("*")
@@ -659,7 +659,7 @@ export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {
 }
 
 export async function fetchVenueById(id: string): Promise<Venue | null> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
     .select("*")
@@ -684,7 +684,7 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
 export async function fetchVenuePreviewBySlug(
   slug: string,
 ): Promise<Venue | null> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
     .select(VENUE_CARD_COLUMNS)
@@ -702,7 +702,7 @@ export async function fetchVenuePreviewBySlug(
 // By-id variant — used for the linked venue card on the event detail page so a
 // signed-out visitor never receives that venue's moat fields either.
 export async function fetchVenuePreviewById(id: string): Promise<Venue | null> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
     .select(VENUE_CARD_COLUMNS)
@@ -749,7 +749,7 @@ function startOfLondonDayUtc(now = new Date()): Date {
 }
 
 export async function fetchEvents(): Promise<Event[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   // Only surface events from the start of today onward — a "what's on"
   // feed shouldn't list events that already happened. Using start-of-day
   // (rather than the exact current time) keeps events earlier today
@@ -833,7 +833,7 @@ function mapEventPreview(r: EventCardRow): Event {
 }
 
 export async function fetchEventPreview(limit: number): Promise<Event[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const startOfToday = startOfLondonDayUtc();
   const { data, error } = await supabase
     .from("events")
@@ -852,7 +852,7 @@ export async function fetchEventPreview(limit: number): Promise<Event[]> {
 
 // Full card-level upcoming events for the signed-out search action (paginated).
 export async function fetchAllEventCards(): Promise<Event[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const startOfToday = startOfLondonDayUtc();
   const PAGE = 1000;
   const rows: EventCardRow[] = [];
@@ -883,7 +883,7 @@ export async function fetchAllEventCards(): Promise<Event[]> {
 export async function fetchEventCategoryPreview(
   perCategory: number,
 ): Promise<Event[]> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const startOfToday = startOfLondonDayUtc();
   const base = () =>
     supabase
@@ -920,7 +920,7 @@ export async function fetchEventCategoryPreview(
 }
 
 export async function fetchEventById(id: string): Promise<Event | null> {
-  const supabase = createClient();
+  const supabase = await createClient();
   // Same gates as the feed: a hidden (cancelled) or stock-image (Unsplash /
   // empty) event must not be reachable by a direct /event/[id] link or bake
   // its stock photo into an OG image. maybeSingle() then returns null →
@@ -941,7 +941,7 @@ export async function fetchEventById(id: string): Promise<Event | null> {
 // gates as fetchEventById but selects only EVENT_CARD_COLUMNS — no source_url
 // or description reaches the anonymous client.
 export async function fetchEventPreviewById(id: string): Promise<Event | null> {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("events")
     .select(EVENT_CARD_COLUMNS)
@@ -978,7 +978,7 @@ type ProfileRow = {
 };
 
 export async function fetchProfile(userId: string): Promise<Profile | null> {
-  const supabase = createClient();
+  const supabase = await createClient();
   // select("*") rather than a column list so a not-yet-migrated DB (missing
   // email_weekly_opt_in) doesn't error — the field just reads as undefined.
   const { data, error } = await supabase

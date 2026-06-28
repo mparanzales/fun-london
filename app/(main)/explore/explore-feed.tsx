@@ -437,7 +437,10 @@ export function ExploreFeed({
       <FilterChipRow
         selected={selectedFilter}
         onSelect={(key) => {
-          recordSignal("filter", { surface: "explore", context: { filter: key } });
+          recordSignal("filter", {
+            surface: "explore",
+            context: { filter: key },
+          });
           setSelectedFilter(key);
         }}
       />
@@ -479,7 +482,12 @@ export function ExploreFeed({
           !nearestFirst &&
           geoStatus === "idle" && (
             <span className="text-[11px] font-semibold text-muted-fg">
-              <Sparkles className="w-3.5 h-3.5 inline-block align-[-3px]" strokeWidth={1.75} aria-hidden /> Sorted around your taste
+              <Sparkles
+                className="w-3.5 h-3.5 inline-block align-[-3px]"
+                strokeWidth={1.75}
+                aria-hidden
+              />{" "}
+              Sorted around your taste
             </span>
           )}
       </div>
