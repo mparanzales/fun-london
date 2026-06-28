@@ -411,13 +411,24 @@ export function ExploreFeed({
         </div>
       </header>
 
-      {/* DESKTOP hero band (lg+ only) — big lowercase headline. */}
-      <section className="hidden lg:block px-6 pt-10 pb-7">
+      {/* DESKTOP hero band (lg+ only) — big lowercase headline + search.
+          Search lived only in the mobile header (lg:hidden), so on desktop it
+          was missing entirely; this restores it, reusing the same overlay. */}
+      <section className="hidden lg:flex items-start justify-between gap-6 px-6 pt-10 pb-7">
         <h1 className="text-5xl font-extrabold lowercase tracking-tight leading-[1.04]">
           <span className="fl-grad-text">plan the night,</span>
           <br />
           <span className="text-heading">not the place.</span>
         </h1>
+        <button
+          type="button"
+          aria-label="Search"
+          onClick={() => setSearchOpen(true)}
+          className="mt-1 shrink-0 inline-flex items-center gap-2 h-11 px-4 rounded-full border border-border bg-card text-fg text-sm font-semibold transition-colors hover:border-primary"
+        >
+          <Search className="w-5 h-5" strokeWidth={2} />
+          Search
+        </button>
       </section>
 
       {/* Category chips filter the feed for everyone. For anon each category
