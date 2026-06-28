@@ -2,6 +2,14 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
+    // Vercel's image optimizer is unavailable on the current plan (Hobby): once
+    // the quota is spent it returns HTTP 402 (OPTIMIZED_IMAGE_REQUEST_PAYMENT_
+    // REQUIRED), which broke venue/event photos across Explore, What's On and
+    // Saved (the gallery backfill 6×'d the image count and tipped it over). Our
+    // images are already web-ready JPEGs on CDNs (Supabase Storage, Google,
+    // Ticketmaster), so serve them directly — no optimizer, no quota, no broken
+    // images, £0. Re-enable optimization here if/when on a paid plan.
+    unoptimized: true,
     remotePatterns: [
       // Google Places photo CDN — the venue ingestion script stores
       // photo URLs from places.googleapis.com which 302-redirect to
