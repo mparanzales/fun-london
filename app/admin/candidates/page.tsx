@@ -45,11 +45,10 @@ type ReviewItem = {
   } | null;
 };
 
-export default async function AdminCandidatesPage({
-  searchParams,
-}: {
-  searchParams: { status?: string };
+export default async function AdminCandidatesPage(props: {
+  searchParams: Promise<{ status?: string }>;
 }) {
+  const searchParams = await props.searchParams;
   const user = await getAuthUser();
   if (!user) redirect("/sign-in?return=/admin/candidates");
   if (!isAdminEmail(user.email)) {

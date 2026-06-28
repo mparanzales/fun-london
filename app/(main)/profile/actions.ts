@@ -69,7 +69,7 @@ export async function submitFeedback(
 
   const user = await getAuthUser();
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { error } = await supabase.from("feedback").insert({
     user_id: user?.id ?? null,
     email: email ?? user?.email ?? null,
@@ -104,7 +104,7 @@ export async function exportMyData(): Promise<ExportResult> {
   const user = await getAuthUser();
   if (!user) return { ok: false, error: "not_signed_in" };
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const [profile, saved, bookings, plans] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
     supabase
@@ -145,7 +145,7 @@ export async function setEmailDigestOptIn(
   const user = await getAuthUser();
   if (!user) return { ok: false, error: "not_signed_in" };
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { error } = await supabase
     .from("profiles")
     .update({ email_weekly_opt_in: optIn })

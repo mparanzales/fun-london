@@ -20,11 +20,10 @@ import { FEED_PAGE_SIZE } from "@/lib/feed-constants";
 //     never enters the RSC payload, so it can't be recovered from view-source.
 //   • Signed-in → the full catalogue + profile, ranked client-side as before.
 
-export default async function ExplorePage({
-  searchParams,
-}: {
-  searchParams: { tag?: string };
+export default async function ExplorePage(props: {
+  searchParams: Promise<{ tag?: string }>;
 }) {
+  const searchParams = await props.searchParams;
   const authUser = await getAuthUser();
 
   // Vibe-tag filter results, reached from a venue page's tag chips. Signed-in

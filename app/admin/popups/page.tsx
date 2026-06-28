@@ -45,7 +45,7 @@ export default async function AdminPopupsPage() {
     return <NotAuthorised email={user.email ?? ""} />;
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const { data: rows, error } = await supabase

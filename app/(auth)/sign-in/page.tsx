@@ -23,11 +23,10 @@ function initialErrorFor(tag: string | undefined): string | null {
 // /sign-in?return=... redirect that any future authed-only action can
 // trigger when a user tries to do something that requires identity.
 
-export default async function SignInPage({
-  searchParams,
-}: {
-  searchParams: { return?: string; error?: string };
+export default async function SignInPage(props: {
+  searchParams: Promise<{ return?: string; error?: string }>;
 }) {
+  const searchParams = await props.searchParams;
   const user = await getAuthUser();
   if (user) {
     // Already signed in — bounce them to where they were headed (guarded

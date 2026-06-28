@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (code) {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       await maybeBackfillDisplayName(supabase);
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
 // failures are logged but don't block the redirect (the user is already
 // signed in at this point and can always set a name in the edit screen).
 async function maybeBackfillDisplayName(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Awaited<ReturnType<typeof createClient>>,
 ) {
   try {
     const {

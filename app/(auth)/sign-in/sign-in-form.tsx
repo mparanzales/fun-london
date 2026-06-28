@@ -128,7 +128,11 @@ export function SignInForm({
   if (status === "sent") {
     return (
       <div className="rounded-2xl bg-card border border-border p-6 text-center">
-        <MailCheck className="w-9 h-9 text-muted-fg mb-2" strokeWidth={1.75} aria-hidden />
+        <MailCheck
+          className="w-9 h-9 text-muted-fg mb-2"
+          strokeWidth={1.75}
+          aria-hidden
+        />
         <h2 className="text-sm font-extrabold text-heading mb-1">
           Check your inbox
         </h2>

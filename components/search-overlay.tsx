@@ -205,7 +205,11 @@ export function SearchOverlay({
             </p>
           ) : showEmpty ? (
             <div className="pt-10 text-center">
-              <Search className="w-8 h-8 text-muted-fg mb-1" strokeWidth={1.75} aria-hidden />
+              <Search
+                className="w-8 h-8 text-muted-fg mb-1"
+                strokeWidth={1.75}
+                aria-hidden
+              />
               <p className="text-sm text-muted-fg">
                 Nothing matches “{q}”. Try a venue name, area, or category.
               </p>

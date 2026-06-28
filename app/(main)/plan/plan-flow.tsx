@@ -372,7 +372,11 @@ export function PlanFlow({
   if (display.steps.length === 0) {
     return (
       <div className="px-5 py-16 text-center">
-        <MapIcon className="w-10 h-10 text-muted-fg mb-3" strokeWidth={1.75} aria-hidden />
+        <MapIcon
+          className="w-10 h-10 text-muted-fg mb-3"
+          strokeWidth={1.75}
+          aria-hidden
+        />
         <h2 className="text-xl font-extrabold text-heading mb-1.5">
           No plan for that combo
         </h2>

@@ -29,7 +29,7 @@ export async function hidePopup(formData: FormData): Promise<void> {
     return;
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { error } = await supabase
     .from("events")
     .update({ cancelled_at: new Date().toISOString() })

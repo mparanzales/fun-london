@@ -7,13 +7,12 @@ import { DidYouBook } from "./did-you-book";
 // The actual reservation happens there; here we let them log it so it
 // becomes a real entry in Saved → "Coming up". No phantom bookings.
 
-export default async function BookingConfirmedPage({
-  params,
-  searchParams,
-}: {
-  params: { slug: string };
-  searchParams: { d?: string; t?: string; p?: string };
+export default async function BookingConfirmedPage(props: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ d?: string; t?: string; p?: string }>;
 }) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const venue = await fetchVenueBySlug(params.slug);
   if (!venue) notFound();
 
