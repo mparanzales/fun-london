@@ -8,6 +8,8 @@
 // Removing or reordering tags invalidates existing vectors — do a full
 // backfill of experience_vector and taste_vector if you do.
 
+import { TAG_IDF } from "./tag-idf";
+
 export const TAG_VERSION = 2; // bumped: map coverage pass + the type/mood fallback below
 
 // ── Cuisine tags ─────────────────────────────────────────────────────────────
@@ -149,11 +151,16 @@ export type VibeTag = (typeof VIBE_TAGS)[number];
 export type OccasionTag = (typeof OCCASION_TAGS)[number];
 export type Tag = (typeof ALL_TAGS)[number];
 
-export const TAG_COUNT = ALL_TAGS.length;
+// A few tags live in more than one category (e.g. "coffee" is both cuisine and
+// occasion; "date-night" is both vibe and occasion), so ALL_TAGS has duplicates.
+// Dedupe before indexing, or the vector would carry a permanently-zero slot.
+const UNIQUE_TAGS: Tag[] = Array.from(new Set<Tag>(ALL_TAGS));
+
+export const TAG_COUNT = UNIQUE_TAGS.length;
 
 // Tag index for fast vector construction (tag → position in vector)
 export const TAG_INDEX: Readonly<Record<Tag, number>> = Object.fromEntries(
-  ALL_TAGS.map((t, i) => [t, i]),
+  UNIQUE_TAGS.map((t, i) => [t, i]),
 ) as Readonly<Record<Tag, number>>;
 
 // ── OneZone tag → canonical tag mapping ──────────────────────────────────────
@@ -455,6 +462,25 @@ export function tagsToVector(tags: Tag[]): number[] {
   for (const tag of tags) {
     const idx = TAG_INDEX[tag];
     if (idx !== undefined) vec[idx] += 1;
+  }
+  return normalise(vec);
+}
+
+/**
+ * Build an IDF-WEIGHTED, unit-norm vector from canonical tags (Stage 1.1 — the
+ * venue "item vector"). Each tag contributes its IDF weight, so distinctive
+ * tags (omakase, natural-wine) dominate and boilerplate (casual) barely
+ * registers — cosine similarity then reflects shared *distinctive* taste, not
+ * shared filler. Defaults to the generated TAG_IDF; pass a map for tests.
+ */
+export function tagsToWeightedVector(
+  tags: Tag[],
+  idf: Readonly<Record<string, number>> = TAG_IDF,
+): number[] {
+  const vec = new Array<number>(TAG_COUNT).fill(0);
+  for (const tag of tags) {
+    const i = TAG_INDEX[tag];
+    if (i !== undefined) vec[i] += idf[tag] ?? 0;
   }
   return normalise(vec);
 }
