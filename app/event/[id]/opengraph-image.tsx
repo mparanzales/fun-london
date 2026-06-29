@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { fetchEventById } from "@/lib/queries";
+import { fetchEventPreviewById } from "@/lib/queries";
 
 // Dynamic Open Graph image for an event — shown when an /event/[id] link is
 // shared. Brand-gradient card with the event name, venue + area and date.
@@ -8,8 +8,13 @@ export const alt = "Fun London event";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-export default async function Image({ params }: { params: { id: string } }) {
-  const event = await fetchEventById(params.id).catch(() => null);
+export default async function Image({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const event = await fetchEventPreviewById(id).catch(() => null);
   const name = event?.name ?? "What's on in London";
   const where = event ? `${event.venueName} · ${event.area}` : "Fun London";
   const when = event

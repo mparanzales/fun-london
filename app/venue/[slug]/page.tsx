@@ -21,7 +21,9 @@ export async function generateMetadata(props: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const params = await props.params;
-  const venue = await fetchVenueBySlug(params.slug);
+  // Card-level fetch: metadata is public (crawlers/link unfurls run as anon, who
+  // are grant-blocked from moat columns), so never select the full row here.
+  const venue = await fetchVenuePreviewBySlug(params.slug);
   if (!venue) return { title: "Venue not found" };
 
   const title = `${venue.name}, ${venue.neighbourhood}, London`;
