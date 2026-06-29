@@ -56,10 +56,11 @@ async function getIndex() {
 // Per-IP rate limit for the public search actions — blunts bulk catalogue
 // harvesting through the search endpoint (#25). Because signed-out search now
 // MATCHES over gated detail content (returning only card-level results), the
-// endpoint is a content-inference oracle, so this guard is required. In-process
-// + per-instance, so it's a speed bump, not a global guarantee — a Redis/Upstash
-// backend is the production upgrade. 40 queries/minute is generous for a human
-// (debounced typing) but throttles a scraper walking prefixes.
+// endpoint is a content-inference oracle, so this guard is required. Backed by a
+// shared Upstash Redis counter when configured (enforced across all serverless
+// instances), falling back to a per-instance in-memory counter otherwise. 40
+// queries/minute is generous for a human (debounced typing) but throttles a
+// scraper walking prefixes.
 const SEARCH_RATE_LIMIT = 40;
 const SEARCH_RATE_WINDOW_MS = 60 * 1000;
 
@@ -69,7 +70,7 @@ async function searchAllowed(): Promise<boolean> {
     h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     h.get("x-real-ip") ||
     "local";
-  return rateLimit(`search:${ip}`, SEARCH_RATE_LIMIT, SEARCH_RATE_WINDOW_MS).ok;
+  return rateLimit(`search:${ip}`, SEARCH_RATE_LIMIT, SEARCH_RATE_WINDOW_MS);
 }
 
 // Rank an indexed list against a normalised query: name-prefix beats
