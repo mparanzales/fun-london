@@ -7,3 +7,4 @@ out
 pnpm-lock.yaml
 supabase/seed.sql
 *.md
+lib/tag-idf.ts

@@ -18,7 +18,7 @@ const IDF = {
   japanese: 5.0,
 } as const;
 
-describe("tag-vocabulary — IDF-weighted vectors (Stage 1.1)", () => {
+describe("tag-vocabulary · IDF-weighted vectors (Stage 1.1)", () => {
   it("dedupes tags that live in two categories (no dead vector slots)", () => {
     // "coffee" and "date-night" each appear in two source arrays.
     expect(TAG_COUNT).toBe(new Set(ALL_TAGS).size);
@@ -41,7 +41,10 @@ describe("tag-vocabulary — IDF-weighted vectors (Stage 1.1)", () => {
   it("makes a venue more similar to one sharing its RARE tag than its common tag", () => {
     const a = tagsToWeightedVector(["omakase", "casual"], IDF);
     const sharesRare = tagsToWeightedVector(["omakase", "sushi"], IDF);
-    const sharesCommon = tagsToWeightedVector(["casual", "good-for-groups"], IDF);
+    const sharesCommon = tagsToWeightedVector(
+      ["casual", "good-for-groups"],
+      IDF,
+    );
     expect(cosineSimilarity(a, sharesRare)).toBeGreaterThan(
       cosineSimilarity(a, sharesCommon),
     );

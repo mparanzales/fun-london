@@ -632,3 +632,27 @@ alter table public.venues
   add column if not exists reviews jsonb,
   add column if not exists reviews_synced_at timestamptz,
   add column if not exists map_url text;
+
+-- 2026-06-29 · Stage 1.2 — venue review embeddings (the "venue brain") ────────
+-- One 384-d vector per venue: the mean-pooled MiniLM (all-MiniLM-L6-v2)
+-- embedding of its Google reviews. Captures the *feel* of a place the coarse
+-- tag vocabulary can't (Taiwanese-bao vs fresh-pasta read alike to tags, not to
+-- reviews). Populated offline by scripts/embed-reviews.ts (CPU, ~£0); new or
+-- review-refreshed venues are re-embedded with `pnpm embed-reviews --stale`.
+-- Derived from review text, so service-role ONLY (RLS on, no policies → anon &
+-- authenticated blocked) — consistent with the review/description anon moat.
+-- Exact cosine KNN (review_embedding <=> q) is instant at ~2k rows; add an HNSW
+-- index (vector_cosine_ops) only when the catalogue exceeds ~50k venues.
+create extension if not exists vector with schema extensions;
+
+create table if not exists public.venue_embeddings (
+  venue_id             uuid primary key references public.venues(id) on delete cascade,
+  review_embedding     extensions.vector(384),
+  model                text not null,
+  source_reviews_count int  not null default 0,
+  reviews_synced_at    timestamptz,            -- the venues.reviews_synced_at this was built from
+  updated_at           timestamptz not null default now()
+);
+
+alter table public.venue_embeddings enable row level security;
+revoke all on public.venue_embeddings from anon, authenticated;
