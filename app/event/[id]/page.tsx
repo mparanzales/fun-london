@@ -19,7 +19,9 @@ export async function generateMetadata(props: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const params = await props.params;
-  const event = await fetchEventById(params.id);
+  // Card-level fetch: metadata is public (crawlers/link unfurls run as anon), so
+  // never select the full row here.
+  const event = await fetchEventPreviewById(params.id);
   if (!event) return { title: "Event not found" };
 
   const title = `${event.name}, ${event.venueName}, ${event.area}`;

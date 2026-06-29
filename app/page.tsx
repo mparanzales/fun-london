@@ -14,7 +14,7 @@
 
 import type { Metadata } from "next";
 import { getAuthUser } from "@/lib/auth";
-import { fetchVenues } from "@/lib/queries";
+import { fetchVenuePreview } from "@/lib/queries";
 import { CITY, TAGLINE, SITE_URL } from "@/lib/config";
 import { SplashClient } from "./splash-client";
 import { LandingPage } from "./landing";
@@ -38,14 +38,13 @@ const FEATURED_COUNT = 8;
 export default async function SplashPage() {
   const user = await getAuthUser();
 
-  // Featured venues for the landing — highest-rated first. Failures degrade
+  // Featured venues for the landing. The landing renders for signed-OUT
+  // visitors, and the anon DB role is grant-blocked from the full row, so this
+  // MUST be a card-level fetch (curated venues sort first). Failures degrade
   // gracefully to a venue-less landing (the splash + hero still render).
-  let featured: Awaited<ReturnType<typeof fetchVenues>> = [];
+  let featured: Awaited<ReturnType<typeof fetchVenuePreview>> = [];
   try {
-    const venues = await fetchVenues();
-    featured = [...venues]
-      .sort((a, b) => b.rating - a.rating)
-      .slice(0, FEATURED_COUNT);
+    featured = await fetchVenuePreview(FEATURED_COUNT);
   } catch {
     // Leave featured empty — LandingPage hides the section when there are none.
   }

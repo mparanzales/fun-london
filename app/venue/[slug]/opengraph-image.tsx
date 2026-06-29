@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { fetchVenueBySlug } from "@/lib/queries";
+import { fetchVenuePreviewBySlug } from "@/lib/queries";
 import { TAGLINE } from "@/lib/config";
 
 // Dynamic Open Graph image for a venue — what shows when a /venue/[slug] link
@@ -11,8 +11,13 @@ export const alt = "Fun London venue";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-export default async function Image({ params }: { params: { slug: string } }) {
-  const venue = await fetchVenueBySlug(params.slug).catch(() => null);
+export default async function Image({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const venue = await fetchVenuePreviewBySlug(slug).catch(() => null);
   const name = venue?.name ?? "Fun London";
   const area = venue?.neighbourhood ?? "London";
 
