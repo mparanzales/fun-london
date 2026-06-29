@@ -44,6 +44,7 @@
     "discover-menus": "tsx scripts/discover-menus.ts",
     "backfill-popup-images:dry": "tsx scripts/backfill-popup-images.ts --dry-run",
     "backfill-popup-images": "tsx scripts/backfill-popup-images.ts",
+    "compute-tag-idf": "tsx scripts/compute-tag-idf.ts",
     "fix-events:dry": "tsx scripts/fix-events.ts",
     "fix-events": "tsx scripts/fix-events.ts --write",
     "verify:sources": "tsx scripts/verify-editorial-sources.ts",
