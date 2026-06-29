@@ -85,6 +85,14 @@ type PlaceDetails = {
   regularOpeningHours?: GoogleOpeningHours;
 };
 
+// A Google Places daily-quota 429 (RESOURCE_EXHAUSTED), shared across every cron.
+// On busy days the budget runs out mid-run; we treat that as a graceful stop
+// (refresh what we can, exit 0) rather than a failure, so the cron doesn't file a
+// noise issue and the unrefreshed venues simply rotate to the next run.
+function isQuotaError(msg: string): boolean {
+  return /\b429\b|RESOURCE_EXHAUSTED|RATE_LIMIT_EXCEEDED/.test(msg);
+}
+
 async function placeDetails(placeId: string): Promise<PlaceDetails> {
   const fieldMask = [
     "id",
@@ -557,6 +565,12 @@ async function main() {
       if (r.closure) closures.push(row.slug);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (isQuotaError(msg)) {
+        console.warn(
+          "\n⏸ Daily Places quota reached — stopping early; the remaining venues rotate to the next run.",
+        );
+        break;
+      }
       console.error(`  ✗ FAILED: ${msg}`);
       failed.push({ slug: row.slug, error: msg });
     }

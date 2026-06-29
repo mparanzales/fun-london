@@ -86,6 +86,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          # 30/night ≈ 900/mo — under the Enterprise (reviews) SKU's ~1,000/mo
+          # free tier, so reviews stay £0. (Raise once the daily quota is bumped.)
+          FL_REVIEW_BATCH: "30"
         run: pnpm refresh-reviews
 
       - name: Render step summary

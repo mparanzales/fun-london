@@ -110,6 +110,13 @@ async function main(): Promise<void> {
     `Refreshing reviews for ${rows.length} venue(s) (rotating ~monthly; batch ${BATCH})\n`,
   );
 
+  // A shared Google Places daily-quota 429. Reviews run after the venue refresh,
+  // so on a tight day the budget may already be gone — stop cleanly instead of
+  // burning the batch (and instead of stamping reviews_synced_at, which would
+  // skip these venues for a full cycle).
+  const isQuotaError = (msg: string) =>
+    /\b429\b|RESOURCE_EXHAUSTED|RATE_LIMIT_EXCEEDED/.test(msg);
+
   let done = 0;
   let empty = 0;
   let failed = 0;
@@ -134,7 +141,14 @@ async function main(): Promise<void> {
       done += 1;
       await sleep(120); // gentle pacing
     } catch (e) {
-      console.error(`  ✗ ${v.slug}: ${(e as Error).message}`);
+      const msg = (e as Error).message;
+      if (isQuotaError(msg)) {
+        console.warn(
+          "\n⏸ Daily Places quota reached — stopping reviews early; picks up next run.",
+        );
+        break;
+      }
+      console.error(`  ✗ ${v.slug}: ${msg}`);
       failed += 1;
       // Stamp the timestamp even on failure so a permanently-bad place_id
       // rotates to the BACK of the queue instead of squatting at the front and
