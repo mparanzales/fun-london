@@ -50,6 +50,7 @@
     "backfill-missing-venues:dry": "tsx scripts/backfill-missing-venues.ts --dry-run",
     "backfill-missing-venues": "tsx scripts/backfill-missing-venues.ts",
     "verify-hybrid": "tsx scripts/verify-hybrid.ts",
+    "verify-taste": "tsx scripts/verify-taste.ts",
     "fix-events:dry": "tsx scripts/fix-events.ts",
     "fix-events": "tsx scripts/fix-events.ts --write",
     "verify:sources": "tsx scripts/verify-editorial-sources.ts",
