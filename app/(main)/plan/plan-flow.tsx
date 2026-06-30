@@ -88,9 +88,11 @@ function toDisplay(plan: Plan): DisplayPlan {
 export function PlanFlow({
   venues,
   authUserId,
+  tasteScores,
 }: {
   venues: Venue[];
   authUserId: string | null;
+  tasteScores: Record<string, number> | null;
 }) {
   // Area chips are derived from the catalog so every chip has venues —
   // most-stocked neighbourhoods first.
@@ -131,8 +133,8 @@ export function PlanFlow({
   }, [venues]);
 
   const computed = useMemo(
-    () => computePlan(venues, { area, vibe, budget, offset, when: now }),
-    [venues, area, vibe, budget, offset, now],
+    () => computePlan(venues, { area, vibe, budget, offset, when: now, tasteScores }),
+    [venues, area, vibe, budget, offset, now, tasteScores],
   );
 
   const display: DisplayPlan = openedSaved ?? toDisplay(computed);
@@ -313,6 +315,7 @@ export function PlanFlow({
                 budget,
                 offset: 0,
                 when: new Date(),
+                tasteScores,
               });
               setOffset(0);
               setOpenedSaved(null);
@@ -516,6 +519,7 @@ export function PlanFlow({
                 budget,
                 offset: nextOffset,
                 when: new Date(),
+                tasteScores,
               });
               setSaveState("idle");
               setOffset(nextOffset);

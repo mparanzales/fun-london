@@ -161,3 +161,19 @@ export async function rankRowsByTaste<T extends { id: string; type: string }>(
     ...noVec,
   ];
 }
+
+/**
+ * Per-venue taste relevance (centred cosine) for a user as a JSON-serialisable
+ * map — so the server can compute it and hand it to the CLIENT plan engine
+ * (which can't read the service-role embeddings itself). null = no signal /
+ * no embeddings → the planner runs without personalisation. Stage 4.1 / 5.1.
+ */
+export async function tasteScoresForUser(userId: string): Promise<Record<string, number> | null> {
+  const idx = await getTasteIndex();
+  if (!idx) return null;
+  const taste = await loadUserTaste(userId, idx);
+  if (!taste) return null;
+  const out: Record<string, number> = {};
+  for (const [id, vec] of idx) out[id] = cosineSimilarity(taste, vec);
+  return out;
+}
