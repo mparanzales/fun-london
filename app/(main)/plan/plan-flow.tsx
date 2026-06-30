@@ -29,6 +29,7 @@ import {
   Globe,
   Navigation,
   ChevronDown,
+  CalendarClock,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -64,7 +65,7 @@ const WHENS: { v: WhenChoice; label: string; icon: LucideIcon }[] = [
   { v: "now", label: "Right now", icon: Zap },
   { v: "day", label: "Daytime", icon: Sun },
   { v: "evening", label: "Tonight", icon: Moon },
-  { v: "custom", label: "Pick a time", icon: Clock },
+  { v: "custom", label: "Pick a day", icon: CalendarClock },
 ];
 
 // Special area chips beyond the real neighbourhoods. ANYWHERE comes from the
@@ -77,6 +78,7 @@ const NEAR_YOU = "Near you";
 // caller controls hydration timing (no Date() before mount).
 function resolveTiming(
   choice: WhenChoice,
+  customDay: number,
   customTime: string,
   base: Date,
 ): { daypart: PlanDaypart; when: Date } {
@@ -95,8 +97,17 @@ function resolveTiming(
       // A night out: use now if it's already evening, else 7pm tonight.
       return { daypart: "evening", when: isDayNow ? at(19) : base };
     case "custom": {
+      // A specific day (offset in days from today) + clock time. The day matters
+      // for the open-at-arrival checks — venues keep different hours by weekday.
       const [h, m] = customTime.split(":").map(Number);
-      const when = Number.isFinite(h) ? at(h, Number.isFinite(m) ? m : 0) : base;
+      const when = new Date(base);
+      when.setDate(when.getDate() + Math.max(0, customDay));
+      when.setHours(
+        Number.isFinite(h) ? h : 20,
+        Number.isFinite(m) ? m : 0,
+        0,
+        0,
+      );
       return { daypart: when.getHours() < 17 ? "day" : "evening", when };
     }
     default: // "now" — plan for this moment, shape follows the clock.
@@ -201,6 +212,8 @@ export function PlanFlow({
 
   const [step, setStep] = useState<"setup" | "result">("setup");
   const [when, setWhen] = useState<WhenChoice>("now");
+  // For the "Pick a day" path: a day offset (0 = today) + a clock time.
+  const [customDay, setCustomDay] = useState<number>(0);
   const [customTime, setCustomTime] = useState<string>("20:00");
   const [area, setArea] = useState<string>(() => areas[0] ?? "");
   // Set when the user picks "Near you" and the browser grants location — the
@@ -239,9 +252,27 @@ export function PlanFlow({
   // Resolve the When answer into (daypart, start clock) once the live clock is
   // known (post-mount). null before mount → engine infers + fails open on hours,
   // matching the SSR render so there's no hydration mismatch.
+  // Day chips for the "Pick a day" path — Today, Tomorrow, then the next few
+  // weekdays. Built from the live clock (only rendered after the user opens the
+  // custom path, which is post-mount, so no SSR/hydration concern).
+  const dayOptions = useMemo(() => {
+    if (!now) return [] as { offset: number; label: string }[];
+    return Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() + i);
+      const label =
+        i === 0
+          ? "Today"
+          : i === 1
+            ? "Tomorrow"
+            : d.toLocaleDateString("en-GB", { weekday: "short" });
+      return { offset: i, label };
+    });
+  }, [now]);
+
   const timing = useMemo(
-    () => (now ? resolveTiming(when, customTime, now) : null),
-    [when, customTime, now],
+    () => (now ? resolveTiming(when, customDay, customTime, now) : null),
+    [when, customDay, customTime, now],
   );
 
   const computed = useMemo(
@@ -403,7 +434,7 @@ export function PlanFlow({
   // The effective (daypart, clock, center) for a build/reshuffle click — uses
   // the live wall clock at click time, same resolution as the memoised preview.
   const planOpts = (offsetOverride: number) => {
-    const t = resolveTiming(when, customTime, new Date());
+    const t = resolveTiming(when, customDay, customTime, new Date());
     return {
       area,
       vibe,
@@ -460,15 +491,28 @@ export function PlanFlow({
             })}
           </div>
           {when === "custom" && (
-            <input
-              type="time"
-              value={customTime}
-              onChange={(e) =>
-                editInputs(() => setCustomTime(e.target.value))
-              }
-              aria-label="Pick a start time"
-              className="mt-2 w-full h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] px-3.5"
-            />
+            <div className="mt-2 flex flex-col gap-2">
+              <div className="flex gap-2 flex-wrap">
+                {dayOptions.map((d) => (
+                  <Chip
+                    key={d.offset}
+                    on={customDay === d.offset}
+                    onClick={() => editInputs(() => setCustomDay(d.offset))}
+                  >
+                    {d.label}
+                  </Chip>
+                ))}
+              </div>
+              <input
+                type="time"
+                value={customTime}
+                onChange={(e) =>
+                  editInputs(() => setCustomTime(e.target.value))
+                }
+                aria-label="Pick a start time"
+                className="w-full h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] px-3.5"
+              />
+            </div>
           )}
         </Group>
 
