@@ -34,8 +34,8 @@ const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
   // at mobile widths without horizontal scroll.
   { id: "all", label: "All" },
   { id: "today", label: "Today" },
-  { id: "this-week", label: "This week" },
-  { id: "this-month", label: "This month" },
+  { id: "this-week", label: "Week" },
+  { id: "this-month", label: "Month" },
   { id: "custom", label: "Custom" },
 ];
 
@@ -198,13 +198,15 @@ export function EventsFeed({
   }, [events]);
 
   return (
-    <div className="pt-4 pb-6">
-      <header className="px-5 pb-3 flex justify-between items-start">
+    <div className="pb-6">
+      <header className="px-5 pt-8 pb-3 flex justify-between items-end">
         <div>
-          <h1 className="text-[28px] font-extrabold tracking-tight text-primary">
-            What&apos;s On
+          <div className="text-sm italic font-medium text-muted-fg lowercase mb-1.5">
+            {todayLabel}
+          </div>
+          <h1 className="text-[32px] font-bold fl-grad-text lowercase tracking-tight m-0 leading-none">
+            what&apos;s on
           </h1>
-          <div className="text-xs text-muted-fg mt-0.5">{todayLabel}</div>
         </div>
         <button
           type="button"
@@ -216,9 +218,47 @@ export function EventsFeed({
         </button>
       </header>
 
-      {/* Quick date pills — flex-wrap so they wrap to a second row if a
-          narrower phone can't fit all five. No horizontal scroll. */}
-      <div className="px-5 pb-2.5 flex flex-wrap gap-1.5">
+      {/* Category row — icon on top, label below, no per-chip background,
+          colour shift on selection (mirrors /explore). Sits directly under the
+          header, Explore-style; the date rail follows below it. */}
+      {categoryChips.length > 1 && (
+        <div
+          className="px-5 pt-1 pb-3 grid gap-1"
+          style={{
+            gridTemplateColumns: `repeat(${categoryChips.length}, minmax(0, 1fr))`,
+          }}
+        >
+          {categoryChips.map((c) => {
+            const on = category === c.id;
+            const iconClass =
+              "w-6 h-6 transition-colors duration-200 " +
+              (on ? "text-accent" : "text-muted-fg");
+            const labelClass =
+              "text-xs transition-colors duration-200 " +
+              (on ? "text-accent font-medium" : "text-muted-fg font-normal");
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setCategory(c.id)}
+                aria-pressed={on}
+                className={
+                  "flex flex-col items-center gap-1 py-2 rounded-xl transition-colors " +
+                  (on ? "bg-accent/10" : "")
+                }
+              >
+                <c.Icon className={iconClass} strokeWidth={on ? 2.4 : 2} />
+                <span className={labelClass}>{c.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Quick date filters — slim, lowercase, single horizontal rail (no
+          wrap), under the category icons (Explore-style). The active one gets a
+          soft accent tint, the rest are quiet muted text. */}
+      <div className="px-5 pb-2.5 flex justify-between gap-1.5">
         {QUICK_FILTERS.map((f) => {
           const on = quick === f.id;
           return (
@@ -232,8 +272,10 @@ export function EventsFeed({
                     : () => setWallFor("date")
               }
               className={
-                "px-3 py-2.5 rounded-full text-[11px] font-extrabold uppercase tracking-[0.06em] whitespace-nowrap transition " +
-                (on ? "bg-primary text-primary-fg" : "bg-muted text-muted-fg")
+                "shrink-0 px-3.5 h-9 rounded-full text-[13px] lowercase whitespace-nowrap transition-colors " +
+                (on
+                  ? "bg-accent/10 text-accent font-semibold"
+                  : "text-muted-fg font-medium hover:text-fg")
               }
             >
               {f.label}
@@ -267,45 +309,6 @@ export function EventsFeed({
               className="w-full h-10 rounded-xl bg-card border border-border px-3 text-fg text-[13px]"
             />
           </label>
-        </div>
-      )}
-
-      {/* Category row — matches the /explore page filter chips: icon on top,
-          label below, no per-chip background, colour shift on selection. The
-          column count tracks the number of visible chips so they stay
-          equal-width with no horizontal scroll. Hidden entirely when there are
-          no real categories to filter (only "All"). */}
-      {categoryChips.length > 1 && (
-        <div
-          className="px-5 pt-1 pb-4 grid gap-1"
-          style={{
-            gridTemplateColumns: `repeat(${categoryChips.length}, minmax(0, 1fr))`,
-          }}
-        >
-          {categoryChips.map((c) => {
-            const on = category === c.id;
-            const iconClass =
-              "w-6 h-6 transition-colors duration-200 " +
-              (on ? "text-accent" : "text-muted-fg");
-            const labelClass =
-              "text-xs transition-colors duration-200 " +
-              (on ? "text-accent font-medium" : "text-muted-fg font-normal");
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setCategory(c.id)}
-                aria-pressed={on}
-                className={
-                  "flex flex-col items-center gap-1 py-2 rounded-xl transition-colors " +
-                  (on ? "bg-accent/10" : "")
-                }
-              >
-                <c.Icon className={iconClass} strokeWidth={on ? 2.4 : 2} />
-                <span className={labelClass}>{c.label}</span>
-              </button>
-            );
-          })}
         </div>
       )}
 
