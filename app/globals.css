@@ -204,3 +204,9 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Plan route map (Leaflet): fully desaturate the light tiles to match the
+   venue page's clean greyscale static map. */
+.fl-plan-map .leaflet-tile {
+  filter: grayscale(1);
+}

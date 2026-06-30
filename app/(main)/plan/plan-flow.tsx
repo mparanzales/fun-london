@@ -45,6 +45,8 @@ import {
 import { REGIONS, regionOf, type Region, type PlanArea } from "@/lib/regions";
 import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
+import { googleMapsWalkingUrl } from "@/lib/plan-maps";
+import { PlanRouteMapLive } from "./plan-route-map-live";
 import type { Venue } from "@/lib/types";
 
 const VIBES: { v: PlanVibe; icon: LucideIcon }[] = [
@@ -874,6 +876,15 @@ export function PlanFlow({
     );
   }
 
+  // Real turn-by-turn for the whole night (null when no stop has coordinates).
+  const mapsUrl = googleMapsWalkingUrl(
+    display.steps.map((s) => ({
+      lat: s.venue.lat,
+      lng: s.venue.lng,
+      name: s.venue.name,
+    })),
+  );
+
   return (
     <div>
       <div
@@ -1002,6 +1013,30 @@ export function PlanFlow({
           </div>
         ))}
       </div>
+
+      {/* The walk on a map + real turn-by-turn in Google Maps (both live and
+          re-opened saved plans). */}
+      {mapsUrl && (
+        <div className="px-5 pb-3">
+          <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase mb-2.5">
+            The walk
+          </div>
+          <PlanRouteMapLive steps={display.steps} />
+          <a
+            href={mapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => {
+              recordSignal("outbound_click", { surface: "plan" });
+              track("plan_open_maps", { stops: display.steps.length });
+            }}
+            className="mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-border bg-card text-[14px] font-extrabold text-fg"
+          >
+            <MapIcon className="w-4 h-4" strokeWidth={1.75} aria-hidden />
+            Open in Google Maps
+          </a>
+        </div>
+      )}
 
       {/* Actions — try another + save (live plans only, not re-opened) */}
       {!openedSaved && (
