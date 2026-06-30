@@ -4,6 +4,7 @@ import {
   walkMins,
   isOpenAt,
   computePlan,
+  relinkSteps,
 } from "@/lib/plan-engine";
 import type { Venue, OpeningHours } from "@/lib/types";
 import { makeVenue } from "./_fixtures";
@@ -528,5 +529,54 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
       radiusKm: 1,
     }).steps.map((s) => s.venue.id);
     expect(ids).not.toContain("far");
+  });
+});
+
+describe("computePlan · per-stop swap (alternatives + relinkSteps)", () => {
+  const venues: Venue[] = [
+    makeVenue({ id: "rest", type: "Restaurant", neighbourhood: "Soho", rating: 4.6 }),
+    makeVenue({ id: "bar1", type: "Bar", neighbourhood: "Soho", rating: 4.6 }),
+    makeVenue({ id: "bar2", type: "Bar", neighbourhood: "Soho", rating: 4.4 }),
+    makeVenue({ id: "music", type: "Live Music", neighbourhood: "Soho", rating: 4.5 }),
+  ];
+
+  it("offers per-stop alternatives that aren't already in the plan", () => {
+    const plan = computePlan(venues, {
+      area: { kind: "neighbourhood" as const, name: "Soho" },
+      vibe: "Lively",
+      budget: "Any",
+      daypart: "evening",
+    });
+    expect(plan.alternatives).toHaveLength(plan.steps.length);
+    const chosen = new Set(plan.steps.map((s) => s.venue.id));
+    for (const alts of plan.alternatives)
+      for (const a of alts) expect(chosen.has(a.id)).toBe(false);
+    // the unused second bar is a real swap option somewhere in the plan
+    expect(plan.alternatives.flat().map((a) => a.id)).toContain("bar2");
+  });
+
+  it("relinkSteps recomputes dwell + walk + the arrival clock for a swap", () => {
+    const when = new Date(2026, 5, 10, 19, 0);
+    const steps = relinkSteps(
+      [
+        { venue: makeVenue({ type: "Restaurant" }), role: "Start" },
+        { venue: makeVenue({ type: "Bar" }), role: "Then" },
+      ],
+      when,
+    );
+    expect(steps[0].dwellMins).toBe(90); // Restaurant
+    expect(steps[1].dwellMins).toBe(60); // Bar
+    expect(steps[0].walkToNextMins).toBe(8); // no coords → fallback
+    expect(steps[1].walkToNextMins).toBeNull(); // last stop
+    expect(steps[0].arriveAt?.getTime()).toBe(when.getTime());
+    // stop 2 arrives after stop 1's dwell (90) + walk (8) = 98 min later
+    expect(steps[1].arriveAt?.getTime()).toBe(when.getTime() + 98 * 60_000);
+  });
+
+  it("relinkSteps leaves arrivals null with no clock (server render)", () => {
+    const steps = relinkSteps([
+      { venue: makeVenue({ type: "Cafe" }), role: "Start" },
+    ]);
+    expect(steps[0].arriveAt).toBeNull();
   });
 });
