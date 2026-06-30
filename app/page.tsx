@@ -13,6 +13,7 @@
 // Keeping the splash for everyone preserves the brand moment on every cold open.
 
 import type { Metadata } from "next";
+import { unstable_cache } from "next/cache";
 import { getAuthUser } from "@/lib/auth";
 import { fetchVenuePreview } from "@/lib/queries";
 import { CITY, TAGLINE, SITE_URL } from "@/lib/config";
@@ -35,6 +36,15 @@ export const metadata: Metadata = {
 // How many real venues to feature on the landing.
 const FEATURED_COUNT = 8;
 
+// The featured-venue read carries no user data, so cache it across requests
+// (5-min TTL). The page stays dynamic for the auth-gated splash routing; only
+// this catalogue query is shared.
+const cachedFeatured = unstable_cache(
+  () => fetchVenuePreview(FEATURED_COUNT),
+  ["landing-featured-venues"],
+  { revalidate: 300 },
+);
+
 export default async function SplashPage() {
   const user = await getAuthUser();
 
@@ -44,7 +54,7 @@ export default async function SplashPage() {
   // gracefully to a venue-less landing (the splash + hero still render).
   let featured: Awaited<ReturnType<typeof fetchVenuePreview>> = [];
   try {
-    featured = await fetchVenuePreview(FEATURED_COUNT);
+    featured = await cachedFeatured();
   } catch {
     // Leave featured empty — LandingPage hides the section when there are none.
   }

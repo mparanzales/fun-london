@@ -224,6 +224,123 @@ export async function fetchVenues(): Promise<Venue[]> {
   return rows.map(mapVenue);
 }
 
+// ── Lean plan/saved catalogue ────────────────────────────────────────────
+//
+// /plan, /plan/together and /saved each need the WHOLE live catalogue in
+// memory (the plan engine ranks/clusters across it; Saved filters it by the
+// client-side saved set), but none of them render the heavy "moat" fields
+// (reviews, long_description, editorial_sources, creator_coverage,
+// critical_flags, map_url, photo_urls, etc.). The full select("*") in
+// fetchVenues() serialised all of that into the RSC payload for ~2,100 rows.
+//
+// fetchPlanVenues() selects only the columns the engine reads + the cards
+// render, with the SAME filters/order as fetchVenues, so behaviour is
+// identical and only the payload shrinks. It differs from the anon
+// VENUE_CARD_COLUMNS set by ALSO selecting the three fields the engine needs
+// that mapVenuePreview blanks: vibe_tags (vibe scoring), opening_hours
+// (open-at-arrival check) and plan_note (rendered on the result card).
+
+// Columns the plan engine + plan/saved cards actually use. EXCLUDES every
+// detail/moat column on purpose (reviews, long_description, editorial_sources,
+// creator_coverage, critical_flags, map_url, photo_urls, mood_tags, address,
+// booking_links, website_url, phone, instagram_handle, menu_url).
+const VENUE_PLAN_COLUMNS =
+  "id, slug, name, type, vibe, vibe_tags, neighbourhood, price, time_of_day, rating, review_count, lat, lng, opening_hours, plan_note, img_url, curation_tier, created_at";
+
+type VenuePlanRow = Pick<
+  VenueRow,
+  | "id"
+  | "slug"
+  | "name"
+  | "type"
+  | "vibe"
+  | "vibe_tags"
+  | "neighbourhood"
+  | "price"
+  | "time_of_day"
+  | "rating"
+  | "review_count"
+  | "lat"
+  | "lng"
+  | "opening_hours"
+  | "plan_note"
+  | "img_url"
+  | "curation_tier"
+  | "created_at"
+>;
+
+// Map a lean plan row to a Venue. Keeps the fields the engine/cards use
+// (incl. vibe_tags, opening_hours, plan_note) and blanks the detail/moat
+// fields that aren't selected — same discipline as mapVenuePreview, just a
+// slightly wider keep-set.
+function mapVenuePlan(r: VenuePlanRow): Venue {
+  return {
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    type: r.type as VenueType,
+    vibe: tidyDashes(r.vibe),
+    longDescription: "",
+    neighbourhood: r.neighbourhood,
+    address: "",
+    lat: r.lat,
+    lng: r.lng,
+    price: r.price as PriceTier,
+    timeOfDay: r.time_of_day as TimeOfDay,
+    rating: Number(r.rating),
+    reviewCount: r.review_count,
+    walkingMins: 0,
+    tablesFree: 0,
+    nextSlotLabel: "",
+    imgUrl: r.img_url,
+    photoUrls: [],
+    moodTags: [],
+    vibeTags: r.vibe_tags ?? [],
+    googlePlaceId: null,
+    bookingLinks: null,
+    websiteUrl: null,
+    phone: null,
+    instagramHandle: null,
+    editorialSources: null,
+    creatorCoverage: null,
+    criticalFlags: null,
+    openingHours: r.opening_hours,
+    mapUrl: null,
+    reviews: null,
+    planNote: r.plan_note ?? null,
+    menuUrl: null,
+    curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
+    createdAt: r.created_at,
+  };
+}
+
+// Whole live catalogue, LEAN columns only, for /plan + /plan/together + /saved.
+// Same filters/order as fetchVenues (google_place_id present, not hidden, real
+// non-Unsplash image, curated-first then created_at). Paginated past the
+// 1000-row cap. The plan engine and the saved-list run entirely on this.
+export async function fetchPlanVenues(): Promise<Venue[]> {
+  const supabase = await createClient();
+  const PAGE = 1000;
+  const rows: VenuePlanRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("venues")
+      .select(VENUE_PLAN_COLUMNS)
+      .not("google_place_id", "is", null)
+      .is("hidden_at", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .order("curation_tier", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchPlanVenues: ${error.message}`);
+    const page = (data as VenuePlanRow[]) ?? [];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.map(mapVenuePlan);
+}
+
 // ── Anonymous metered preview ───────────────────────────────────────────
 //
 // The signed-out feed is a metered TEASER, not the catalogue. These two
