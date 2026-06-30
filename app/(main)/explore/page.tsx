@@ -99,6 +99,7 @@ export default async function ExplorePage(props: {
       offset: 0,
       limit: FEED_PAGE_SIZE,
       sort: "taste",
+      userId: authUser.id,
     }),
     fetchEvents(),
   ]);

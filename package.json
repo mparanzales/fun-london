@@ -52,13 +52,15 @@
     "verify-hybrid": "tsx scripts/verify-hybrid.ts",
     "verify-taste": "tsx scripts/verify-taste.ts",
     "verify-personas": "tsx scripts/verify-personas.ts",
+    "verify-ranker": "tsx scripts/verify-ranker.ts",
     "fix-events:dry": "tsx scripts/fix-events.ts",
     "fix-events": "tsx scripts/fix-events.ts --write",
     "verify:sources": "tsx scripts/verify-editorial-sources.ts",
     "verify:sources:write": "tsx scripts/verify-editorial-sources.ts -- --write",
     "verify:sources:curated": "tsx scripts/verify-editorial-sources.ts -- --curated",
     "verify:sources:curated:write": "tsx scripts/verify-editorial-sources.ts -- --write --curated",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify-feed-rank": "tsx scripts/verify-feed-rank.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

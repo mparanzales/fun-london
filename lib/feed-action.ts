@@ -25,5 +25,5 @@ export async function loadFeedPage(args: {
   const user = await getAuthUser();
   if (!user) return { venues: [], hasMore: false };
   const profile = await fetchProfile(user.id);
-  return feedPage({ ...args, prefs: profile?.preferences ?? null });
+  return feedPage({ ...args, prefs: profile?.preferences ?? null, userId: user.id });
 }

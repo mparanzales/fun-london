@@ -16,6 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@/lib/supabase/server";
+import { rankRowsByTaste } from "@/lib/taste-feed";
 import { createServiceClient } from "@/lib/supabase/admin";
 import { scoreVenue, hasPrefs } from "./ranking";
 import { FEED_PAGE_SIZE } from "./feed-constants";
@@ -506,11 +507,19 @@ export async function feedPage(args: {
   sort: FeedSort;
   lat?: number | null;
   lng?: number | null;
+  userId?: string | null;
 }): Promise<{ venues: Venue[]; hasMore: boolean }> {
   const idx = await getVenueIndex();
   let rows = idx.filter((r) =>
     matchesFeedFilter(r.type as string, args.filter),
   );
+
+  const quizSort = (prefs: UserPreferences) => {
+    rows = rows
+      .map((r) => ({ r, s: scoreFeedRow(r, prefs) }))
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.r);
+  };
 
   if (args.sort === "nearest" && args.lat != null && args.lng != null) {
     const g = { lat: args.lat, lng: args.lng };
@@ -525,12 +534,16 @@ export async function feedPage(args: {
           : Infinity;
       return da - db;
     });
+  } else if (args.sort === "taste" && args.userId) {
+    // Behavioural taste vector (Stage 2/3): centred-cosine + MMR. Falls back to
+    // the onboarding-quiz sort when there's no signal/embeddings (rankRowsByTaste
+    // returns null), which itself no-ops to the curated order when there are no
+    // prefs — so the feed always has a sensible order.
+    const ranked = await rankRowsByTaste(args.userId, rows);
+    if (ranked) rows = ranked;
+    else if (args.prefs && hasPrefs(args.prefs)) quizSort(args.prefs);
   } else if (args.prefs && hasPrefs(args.prefs)) {
-    const prefs = args.prefs;
-    rows = rows
-      .map((r) => ({ r, s: scoreFeedRow(r, prefs) }))
-      .sort((a, b) => b.s - a.s)
-      .map((x) => x.r);
+    quizSort(args.prefs);
   }
 
   // Clamp offset/limit so a bad value (e.g. an undefined limit) can never
