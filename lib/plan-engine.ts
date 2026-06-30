@@ -14,6 +14,11 @@ import { venueInArea, regionOf, type PlanArea } from "./regions";
 export type PlanVibe = "Chill" | "Lively" | "Fancy" | "Unique";
 export type PlanBudget = "£" | "££" | "Any";
 export type PlanRole = "Start" | "Then" | "Finish";
+// "day" = a daytime outing (brunch/coffee → a daytime activity → a relaxed
+// wind-down); "evening" = the classic eat → drinks → night-out arc.
+export type PlanDaypart = "day" | "evening";
+// Sentinel area meaning "don't constrain to a neighbourhood".
+export const ANYWHERE = "Anywhere";
 
 export type PlanStep = {
   venue: Venue;
@@ -30,6 +35,7 @@ export type Plan = {
   area: string;
   vibe: PlanVibe;
   budget: PlanBudget;
+  daypart: PlanDaypart;
   steps: PlanStep[];
   totalMins: number; // dwell + walking across the whole night
   // Telemetry (not rendered) — how the candidate pool was resolved, so
@@ -106,6 +112,31 @@ function roleMatches(v: Venue, role: PlanRole): boolean {
   }
 }
 
+// Daytime role types: brunch/coffee → a daytime activity → a relaxed wind-down.
+// Lets the daytime catalogue (cafés, culture, markets, outdoors) actually be
+// PLACED as stops — the evening arc (eat → drinks → night-venue) can't.
+const DAY_START_TYPES: VenueType[] = ["Cafe", "Restaurant"];
+const DAY_THEN_TYPES: VenueType[] = ["Culture", "Market", "Outdoors"];
+const DAY_FINISH_TYPES: VenueType[] = ["Cafe", "Wine Bar", "Restaurant"];
+
+// Role match for a daypart. Evening reuses the classic arc; day uses the
+// daytime templates above.
+function roleMatchesForDaypart(
+  v: Venue,
+  role: PlanRole,
+  daypart: PlanDaypart,
+): boolean {
+  if (daypart === "evening") return roleMatches(v, role);
+  switch (role) {
+    case "Start":
+      return DAY_START_TYPES.includes(v.type);
+    case "Then":
+      return DAY_THEN_TYPES.includes(v.type);
+    case "Finish":
+      return DAY_FINISH_TYPES.includes(v.type);
+  }
+}
+
 // Plan Together (mood-deck) matcher: when the group hearted moods for this
 // role, the allowed venue types are exactly the union of those moods' types
 // (RoleIntent). When a role has no hearted types, fall back to the default
@@ -124,7 +155,24 @@ function roleMatchesIntent(
   return roleMatches(v, role);
 }
 
-const DWELL: Record<PlanRole, number> = { Start: 75, Then: 60, Finish: 60 };
+// How long you actually spend at a stop, by venue TYPE — a coffee is not a
+// dinner is not a club. Drives both the itinerary's total time and the
+// arrival-time clock (Stage 4.2). Falls back to 60 for any unlisted type.
+const DWELL_BY_TYPE: Record<VenueType, number> = {
+  Cafe: 40, // coffee / a quick bite
+  Restaurant: 90, // a proper sit-down meal
+  "Wine Bar": 70,
+  Bar: 60,
+  Pub: 60,
+  "Listening Bar": 75,
+  "Live Music": 105, // a set / a club night runs long
+  Culture: 75, // a gallery / exhibition
+  Market: 50,
+  Outdoors: 60,
+};
+function dwellFor(v: Venue): number {
+  return DWELL_BY_TYPE[v.type] ?? 60;
+}
 
 // ── Vibe scoring ─────────────────────────────────────────────────────────
 
@@ -237,9 +285,10 @@ function pick(
   usedTypes: Set<VenueType>,
   offset: number,
   openOK: (v: Venue) => boolean,
+  matchRole: (v: Venue, role: PlanRole) => boolean,
 ): Venue | null {
   const matches = pool.filter(
-    (v) => !used.has(v.id) && roleMatches(v, role) && openOK(v),
+    (v) => !used.has(v.id) && matchRole(v, role) && openOK(v),
   );
   // Keep the night varied: prefer a venue TYPE we haven't used yet, so we
   // don't recommend e.g. a Pub then another Pub. Only relax to any role-match
@@ -280,6 +329,24 @@ function pickAny(
 // to a strong vibe match (~8), so taste leads but vibe still shapes the night.
 const PLAN_TASTE_WEIGHT = 8;
 
+// Is a venue in the requested area? Three modes: a "near me" centre+radius
+// (walk-radius planning) wins; else "Anywhere" matches everything; else the
+// venue must be in the named neighbourhood.
+function withinArea(
+  v: Venue,
+  area: string,
+  center: { lat: number; lng: number } | null | undefined,
+  radiusKm: number,
+): boolean {
+  if (center) {
+    if (v.lat == null || v.lng == null) return false;
+    const km = haversineKm({ lat: center.lat, lng: center.lng } as Venue, v);
+    return km != null && km <= radiusKm;
+  }
+  if (area === ANYWHERE) return true;
+  return v.neighbourhood === area;
+}
+
 export function computePlan(
   venues: Venue[],
   opts: {
@@ -289,9 +356,27 @@ export function computePlan(
     offset?: number;
     when?: Date;
     tasteScores?: Record<string, number> | null;
+    daypart?: PlanDaypart;
+    center?: { lat: number; lng: number } | null;
+    radiusKm?: number;
   },
 ): Plan {
-  const { area, vibe, budget, offset = 0, when, tasteScores } = opts;
+  const {
+    area,
+    vibe,
+    budget,
+    offset = 0,
+    when,
+    tasteScores,
+    center,
+    radiusKm = 1.5,
+  } = opts;
+  // Day vs evening shapes the whole plan (which venue types fill each role).
+  // Explicit `daypart` wins; else infer from the clock (before 5pm reads day).
+  const daypart: PlanDaypart =
+    opts.daypart ?? (when && when.getHours() < 17 ? "day" : "evening");
+  const matchRole = (v: Venue, role: PlanRole) =>
+    roleMatchesForDaypart(v, role, daypart);
   // Blended desirability: tonight's vibe/quality + the user's personal taste
   // (Stage 4.1). No taste (anon / no signals) → pure vibe, unchanged behaviour.
   const scoreOf = (v: Venue) =>
@@ -304,7 +389,7 @@ export function computePlan(
   // the plan's start but open by a later slot — a club, a late bar — is still a
   // valid candidate for that slot, so open-ness is judged per stop at arrival.
   const inArea = venues.filter(
-    (v) => v.neighbourhood === area && withinBudget(v.price, budget),
+    (v) => withinArea(v, area, center, radiusKm) && withinBudget(v.price, budget),
   );
   const inBudget = venues.filter((v) => withinBudget(v.price, budget));
   let pool: Venue[];
@@ -342,7 +427,7 @@ export function computePlan(
     const arrivalFor = (cand: Venue): Date | undefined => {
       if (!when) return undefined;
       if (!prevVenue || !prevRole || !prevArrival) return when;
-      const depart = addMins(prevArrival, DWELL[prevRole]);
+      const depart = addMins(prevArrival, dwellFor(prevVenue));
       return addMins(depart, walkMins(prevVenue, cand));
     };
     const openOK = (cand: Venue): boolean => {
@@ -352,7 +437,7 @@ export function computePlan(
 
     for (const role of roles) {
       const v =
-        pick(pool, role, scoreOf, used, usedTypes, offset, openOK) ??
+        pick(pool, role, scoreOf, used, usedTypes, offset, openOK, matchRole) ??
         pickAny(pool, scoreOf, used, usedTypes, offset, openOK);
       if (!v) continue;
       const arriveAt = when ? arrivalFor(v)! : null;
@@ -377,7 +462,7 @@ export function computePlan(
     return {
       venue: c.venue,
       role: c.role,
-      dwellMins: DWELL[c.role],
+      dwellMins: dwellFor(c.venue),
       walkToNextMins: next ? walkMins(c.venue, next) : null,
       arriveAt: c.arriveAt,
     };
@@ -392,6 +477,7 @@ export function computePlan(
     area,
     vibe,
     budget,
+    daypart,
     steps,
     totalMins,
     poolStage,
@@ -402,7 +488,9 @@ export function computePlan(
 // One-line rationale for the saved-plan record + the result header.
 export function planRationale(plan: Plan): string {
   const names = plan.steps.map((s) => s.venue.name);
-  return `A ${plan.vibe.toLowerCase()} ${plan.area} night: ${names.join(" → ")}.`;
+  const where = plan.area === ANYWHERE ? "London" : plan.area;
+  const kind = plan.daypart === "day" ? "day out" : "night";
+  return `A ${plan.vibe.toLowerCase()} ${where} ${kind}: ${names.join(" → ")}.`;
 }
 
 // ── Plan Together v2 — proximity-first walkable group plan ───────────────────
@@ -626,7 +714,7 @@ export function computeWalkablePlan(
     return {
       venue: c.venue,
       role: c.role,
-      dwellMins: DWELL[c.role],
+      dwellMins: dwellFor(c.venue),
       walkToNextMins: next ? walkMins(c.venue, next) : null,
     };
   });
