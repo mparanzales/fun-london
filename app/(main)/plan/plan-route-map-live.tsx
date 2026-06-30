@@ -19,12 +19,12 @@ const ACCENT = "hsl(266 78% 58%)";
 export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const pts = steps.filter(
-    (s): s is RouteStep & { venue: { lat: number; lng: number; name: string } } =>
+    (
+      s,
+    ): s is RouteStep & { venue: { lat: number; lng: number; name: string } } =>
       s.venue.lat != null && s.venue.lng != null,
   );
-  const coordsKey = pts
-    .map((p) => `${p.venue.lat},${p.venue.lng}`)
-    .join("|");
+  const coordsKey = pts.map((p) => `${p.venue.lat},${p.venue.lng}`).join("|");
 
   useEffect(() => {
     if (!ref.current || pts.length < 2) return;
