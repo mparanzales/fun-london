@@ -44,18 +44,18 @@ async function main() {
   console.log(`${venues.length} venues · user ${userId?.slice(0, 8)}… · taste=${ts ? "loaded" : "none"}\n`);
 
   const show = (label: string, plan: ReturnType<typeof computePlan>) => {
-    console.log(label + ` (pool: ${plan.poolStage}/${plan.poolSize})`);
-    for (const s of plan.steps) {
-      const t = ts ? (ts[s.venue.id] ?? 0).toFixed(2) : "—";
-      console.log(`   ${s.role.padEnd(7)} ${s.venue.name} (${s.venue.type}, ${s.venue.neighbourhood})  taste=${t}`);
-    }
+    console.log(`${label}  [${plan.daypart}] pool ${plan.poolStage}/${plan.poolSize} · ~${Math.round((plan.totalMins / 60) * 10) / 10}h`);
+    for (const s of plan.steps)
+      console.log(`   ${s.role.padEnd(7)} ${s.venue.name} (${s.venue.type}) · ${s.dwellMins}min`);
     console.log("");
   };
 
-  for (const [area, vibe, budget] of [["Soho", "Fancy", "Any"], ["Marylebone", "Chill", "Any"]] as [string, PlanVibe, PlanBudget][]) {
-    console.log(`━━ ${area} · ${vibe} · ${budget} ━━`);
-    show("WITHOUT taste:", computePlan(venues, { area, vibe, budget }));
-    show("WITH taste:   ", computePlan(venues, { area, vibe, budget, tasteScores: ts }));
+  const vibe: PlanVibe = "Chill";
+  const budget: PlanBudget = "Any";
+  for (const area of ["Soho", "Anywhere"]) {
+    console.log(`━━ ${area} · ${vibe} (taste-aware) ━━`);
+    show("DAY:    ", computePlan(venues, { area, vibe, budget, daypart: "day", tasteScores: ts }));
+    show("EVENING:", computePlan(venues, { area, vibe, budget, daypart: "evening", tasteScores: ts }));
   }
 }
 

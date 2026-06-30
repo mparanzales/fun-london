@@ -265,5 +265,9 @@ export function isGrounded(
     if (appearsIn(w, haystack)) grounded += 1;
   }
   if (claims === 0) return true; // pure sentiment over a 4–5★ review is fine
-  return grounded / claims >= 0.7;
+  // 0.55 tolerates natural paraphrase/synonyms (a 5★ "treated well" → "spoils you",
+  // "stayed for two" → "won't want to leave") while the hard guards above stay
+  // strict (digits/prices/counts must appear verbatim). Calibrated on a real
+  // sample where 0.7 rejected ~70% of faithful lines (scripts/verify-plan-notes.ts).
+  return grounded / claims >= 0.55;
 }

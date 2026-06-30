@@ -345,3 +345,61 @@ describe("computePlan · time-window orienteering (Stage 4.2)", () => {
     expect(plan.steps.every((s) => s.arriveAt === null)).toBe(true);
   });
 });
+
+describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () => {
+  const venues: Venue[] = [
+    makeVenue({ id: "cafe", type: "Cafe", neighbourhood: "Soho" }),
+    makeVenue({ id: "rest", type: "Restaurant", neighbourhood: "Soho" }),
+    makeVenue({ id: "culture", type: "Culture", neighbourhood: "Soho" }),
+    makeVenue({ id: "market", type: "Market", neighbourhood: "Soho" }),
+    makeVenue({ id: "wine", type: "Wine Bar", neighbourhood: "Soho" }),
+    makeVenue({ id: "bar", type: "Bar", neighbourhood: "Soho" }),
+    makeVenue({ id: "music", type: "Live Music", neighbourhood: "Soho" }),
+  ];
+  const base = { area: "Soho", vibe: "Chill" as const, budget: "Any" as const };
+
+  it("a DAY plan can place daytime activities (Culture/Market); an EVENING plan can't", () => {
+    const dayTypes = computePlan(venues, { ...base, daypart: "day" }).steps.map((s) => s.venue.type);
+    expect(dayTypes.some((t) => t === "Culture" || t === "Market")).toBe(true);
+    expect(dayTypes).not.toContain("Live Music"); // no club in a daytime plan
+
+    const eveTypes = computePlan(venues, { ...base, daypart: "evening" }).steps.map((s) => s.venue.type);
+    expect(eveTypes).not.toContain("Culture");
+    expect(eveTypes).not.toContain("Market"); // markets aren't a night stop
+  });
+
+  it("dwell time depends on venue type (coffee ≠ dinner ≠ club), not the slot", () => {
+    const plan = computePlan(venues, { ...base, daypart: "evening" });
+    for (const s of plan.steps) {
+      if (s.venue.type === "Restaurant") expect(s.dwellMins).toBe(90);
+      if (s.venue.type === "Cafe") expect(s.dwellMins).toBe(40);
+      if (s.venue.type === "Live Music") expect(s.dwellMins).toBe(105);
+    }
+    // The old bug was a flat per-slot dwell; now a night has varied dwells.
+    expect(new Set(plan.steps.map((s) => s.dwellMins)).size).toBeGreaterThan(1);
+  });
+
+  it("'Anywhere' builds across neighbourhoods", () => {
+    const mixed = [
+      makeVenue({ id: "a", type: "Restaurant", neighbourhood: "Soho" }),
+      makeVenue({ id: "b", type: "Bar", neighbourhood: "Hackney" }),
+      makeVenue({ id: "c", type: "Live Music", neighbourhood: "Peckham" }),
+    ];
+    const plan = computePlan(mixed, { area: "Anywhere", vibe: "Lively", budget: "Any", daypart: "evening" });
+    expect(plan.steps.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("a 'near me' centre restricts the plan to its radius", () => {
+    const here = { lat: 51.5141, lng: -0.1494 };
+    const venuesGeo = [
+      makeVenue({ id: "near-r", type: "Restaurant", neighbourhood: "X", lat: 51.5141, lng: -0.1494 }),
+      makeVenue({ id: "near-b", type: "Bar", neighbourhood: "X", lat: 51.5145, lng: -0.1496 }),
+      makeVenue({ id: "near-m", type: "Live Music", neighbourhood: "X", lat: 51.5139, lng: -0.1492 }),
+      makeVenue({ id: "far", type: "Restaurant", neighbourhood: "X", lat: 51.62, lng: -0.32 }), // ~20 km
+    ];
+    const ids = computePlan(venuesGeo, {
+      area: "X", vibe: "Lively", budget: "Any", daypart: "evening", center: here, radiusKm: 1,
+    }).steps.map((s) => s.venue.id);
+    expect(ids).not.toContain("far");
+  });
+});
