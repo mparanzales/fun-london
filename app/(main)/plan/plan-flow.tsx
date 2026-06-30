@@ -69,10 +69,16 @@ const BUDGETS: PlanBudget[] = ["£", "££", "Any"];
 type WhenChoice = "now" | "day" | "evening" | "custom";
 const WHENS: { v: WhenChoice; label: string; icon: LucideIcon }[] = [
   { v: "now", label: "Right now", icon: Zap },
-  { v: "day", label: "Daytime", icon: Sun },
+  { v: "day", label: "Today", icon: Sun },
   { v: "evening", label: "Tonight", icon: Moon },
   { v: "custom", label: "Pick a day", icon: CalendarClock },
 ];
+
+// Local YYYY-MM-DD (what <input type="date"> expects), in the browser's TZ.
+function toISODate(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 // ── Area ─────────────────────────────────────────────────────────────────
 // The user's WHERE selection. Four shapes: Anywhere (let the engine find a good
@@ -101,7 +107,7 @@ function toPlanArea(sel: AreaSel): PlanArea {
 // caller controls hydration timing (no Date() before mount).
 function resolveTiming(
   choice: WhenChoice,
-  customDay: number,
+  customDate: string,
   customTime: string,
   base: Date,
 ): { daypart: PlanDaypart; when: Date } {
@@ -120,11 +126,12 @@ function resolveTiming(
       // A night out: use now if it's already evening, else 7pm tonight.
       return { daypart: "evening", when: isDayNow ? at(19) : base };
     case "custom": {
-      // A specific day (offset in days from today) + clock time. The day matters
-      // for the open-at-arrival checks — venues keep different hours by weekday.
+      // A specific calendar day + clock time. The day matters for the
+      // open-at-arrival checks — venues keep different hours by weekday.
       const [h, m] = customTime.split(":").map(Number);
       const when = new Date(base);
-      when.setDate(when.getDate() + Math.max(0, customDay));
+      const [y, mo, d] = customDate.split("-").map(Number);
+      if (y && mo && d) when.setFullYear(y, mo - 1, d);
       when.setHours(
         Number.isFinite(h) ? h : 20,
         Number.isFinite(m) ? m : 0,
@@ -233,14 +240,16 @@ export function PlanFlow({
 
   const [step, setStep] = useState<"setup" | "result">("setup");
   const [when, setWhen] = useState<WhenChoice>("now");
-  // For the "Pick a day" path: a day offset (0 = today) + a clock time.
-  const [customDay, setCustomDay] = useState<number>(0);
+  // For the "Pick a day" path: a calendar date (YYYY-MM-DD, "" = today) + time.
+  const [customDate, setCustomDate] = useState<string>("");
   const [customTime, setCustomTime] = useState<string>("20:00");
   // WHERE. Defaults to Anywhere — never a single neighbourhood — so the engine
   // is free to find the best walkable pocket. (See AreaSel above.)
   const [areaSel, setAreaSel] = useState<AreaSel>({ kind: "anywhere" });
-  // Which region's neighbourhood drill-down is open (null = none).
-  const [openRegion, setOpenRegion] = useState<Region | null>(null);
+  // Ghost-dropdown disclosure state: the region list, and the "a spot in …"
+  // neighbourhood list (only meaningful once a region is chosen).
+  const [areaOpen, setAreaOpen] = useState(false);
+  const [spotOpen, setSpotOpen] = useState(false);
   // Set when the user picks "Near you" and the browser grants location — the
   // engine then keeps the night within a short walk of this point. Cleared
   // whenever another area is chosen.
@@ -274,30 +283,19 @@ export function PlanFlow({
     return m;
   }, [venues]);
 
+  // Today's date (YYYY-MM-DD), known post-mount — the floor for the date picker
+  // (no planning the past) and its default when the user hasn't picked one.
+  const todayISO = now ? toISODate(now) : "";
+
   // Resolve the When answer into (daypart, start clock) once the live clock is
   // known (post-mount). null before mount → engine infers + fails open on hours,
   // matching the SSR render so there's no hydration mismatch.
-  // Day chips for the "Pick a day" path — Today, Tomorrow, then the next few
-  // weekdays. Built from the live clock (only rendered after the user opens the
-  // custom path, which is post-mount, so no SSR/hydration concern).
-  const dayOptions = useMemo(() => {
-    if (!now) return [] as { offset: number; label: string }[];
-    return Array.from({ length: 6 }, (_, i) => {
-      const d = new Date(now);
-      d.setDate(d.getDate() + i);
-      const label =
-        i === 0
-          ? "Today"
-          : i === 1
-            ? "Tomorrow"
-            : d.toLocaleDateString("en-GB", { weekday: "short" });
-      return { offset: i, label };
-    });
-  }, [now]);
-
   const timing = useMemo(
-    () => (now ? resolveTiming(when, customDay, customTime, now) : null),
-    [when, customDay, customTime, now],
+    () =>
+      now
+        ? resolveTiming(when, customDate || todayISO, customTime, now)
+        : null,
+    [when, customDate, todayISO, customTime, now],
   );
 
   const computed = useMemo(
@@ -416,16 +414,36 @@ export function PlanFlow({
     fn();
   };
 
-  // Select Anywhere / a region / a specific neighbourhood: clear any near-you
-  // location. Tapping a region also opens its neighbourhood drill-down.
-  const chooseArea = (sel: AreaSel, region?: Region) =>
+  // Anywhere / Near you are the two quick chips; the rest goes through the
+  // ghost dropdowns below. All selections clear any stale near-you location.
+  const chooseAnywhere = () =>
     editInputs(() => {
-      setAreaSel(sel);
+      setAreaSel({ kind: "anywhere" });
       setCenter(null);
       setGeoState("idle");
-      if (sel.kind === "region") setOpenRegion(region ?? sel.region);
-      else if (sel.kind === "anywhere" || sel.kind === "nearYou")
-        setOpenRegion(null);
+      setAreaOpen(false);
+      setSpotOpen(false);
+    });
+
+  // Pick a region from the "Area" dropdown → close it, reveal the "a spot in …"
+  // neighbourhood dropdown.
+  const chooseRegion = (region: Region) =>
+    editInputs(() => {
+      setAreaSel({ kind: "region", region });
+      setCenter(null);
+      setGeoState("idle");
+      setAreaOpen(false);
+      setSpotOpen(true);
+    });
+
+  // Pick a specific neighbourhood from the "a spot in …" dropdown (or clear back
+  // to the whole region with a null name).
+  const chooseSpot = (region: Region, name: string | null) =>
+    editInputs(() => {
+      setAreaSel(name ? { kind: "neighbourhood", name } : { kind: "region", region });
+      setCenter(null);
+      setGeoState("idle");
+      setSpotOpen(false);
     });
 
   // "Near you" — ask the browser for location and keep the night within walking
@@ -434,7 +452,8 @@ export function PlanFlow({
   const pickNearYou = () => {
     editInputs(() => {
       setAreaSel({ kind: "nearYou" });
-      setOpenRegion(null);
+      setAreaOpen(false);
+      setSpotOpen(false);
     });
     if (center) return; // already located — just reselect
     if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -455,11 +474,21 @@ export function PlanFlow({
     );
   };
 
+  // The region currently in play (selected directly, or the region of the
+  // selected neighbourhood) — drives the "a spot in …" dropdown.
+  const activeRegion: Region | null =
+    areaSel.kind === "region"
+      ? areaSel.region
+      : areaSel.kind === "neighbourhood"
+        ? regionOf(areaSel.name)
+        : null;
+
   // The effective (daypart, clock, area, centre) for a build/reshuffle click —
   // uses the live wall clock at click time, same resolution as the memoised
   // preview.
   const planOpts = (offsetOverride: number) => {
-    const t = resolveTiming(when, customDay, customTime, new Date());
+    const now = new Date();
+    const t = resolveTiming(when, customDate || toISODate(now), customTime, now);
     return {
       area: toPlanArea(areaSel),
       vibe,
@@ -516,18 +545,17 @@ export function PlanFlow({
             })}
           </div>
           {when === "custom" && (
-            <div className="mt-2 flex flex-col gap-2">
-              <div className="flex gap-2 flex-wrap">
-                {dayOptions.map((d) => (
-                  <Chip
-                    key={d.offset}
-                    on={customDay === d.offset}
-                    onClick={() => editInputs(() => setCustomDay(d.offset))}
-                  >
-                    {d.label}
-                  </Chip>
-                ))}
-              </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={customDate || todayISO}
+                min={todayISO}
+                onChange={(e) =>
+                  editInputs(() => setCustomDate(e.target.value))
+                }
+                aria-label="Pick a date"
+                className="h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] px-3.5"
+              />
               <input
                 type="time"
                 value={customTime}
@@ -535,7 +563,7 @@ export function PlanFlow({
                   editInputs(() => setCustomTime(e.target.value))
                 }
                 aria-label="Pick a start time"
-                className="w-full h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] px-3.5"
+                className="h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] px-3.5"
               />
             </div>
           )}
@@ -567,10 +595,7 @@ export function PlanFlow({
 
         <Group label="Area">
           <div className="flex gap-2 flex-wrap">
-            <Chip
-              on={areaSel.kind === "anywhere"}
-              onClick={() => chooseArea({ kind: "anywhere" })}
-            >
+            <Chip on={areaSel.kind === "anywhere"} onClick={chooseAnywhere}>
               <Globe
                 className="w-3.5 h-3.5 inline-block align-[-2px] mr-1"
                 strokeWidth={1.75}
@@ -586,52 +611,128 @@ export function PlanFlow({
               />
               {geoState === "pending" ? "Locating…" : "Near you"}
             </Chip>
-            {regionsWith.map((r) => {
-              const on =
-                (areaSel.kind === "region" && areaSel.region === r) ||
-                (areaSel.kind === "neighbourhood" &&
-                  regionOf(areaSel.name) === r);
-              return (
-                <Chip
-                  key={r}
-                  on={on}
-                  onClick={() => chooseArea({ kind: "region", region: r }, r)}
-                >
-                  {r}
-                  <ChevronDown
-                    className={
-                      "w-3.5 h-3.5 inline-block align-[-2px] ml-1 transition-transform " +
-                      (openRegion === r ? "rotate-180" : "")
-                    }
-                    strokeWidth={1.75}
-                    aria-hidden
-                  />
-                </Chip>
-              );
-            })}
           </div>
 
-          {/* Drill-down: the open region's specific neighbourhoods. */}
-          {openRegion && (hoodsByRegion.get(openRegion)?.length ?? 0) > 0 && (
-            <div className="mt-2 rounded-2xl border border-border bg-muted/40 p-2.5">
-              <div className="text-[10px] font-extrabold tracking-[0.12em] text-muted-fg uppercase mb-2 px-0.5">
-                a spot in {openRegion}
-              </div>
-              <div className="flex gap-2 flex-wrap max-h-44 overflow-y-auto">
-                {hoodsByRegion.get(openRegion)!.map(({ name }) => (
-                  <Chip
-                    key={name}
-                    on={
-                      areaSel.kind === "neighbourhood" && areaSel.name === name
-                    }
-                    onClick={() =>
-                      chooseArea({ kind: "neighbourhood", name })
+          {/* "Area" ghost dropdown — pick a region (Central/North/…) without a
+              wall of chips. Editorial border-y disclosure, like venue hours. */}
+          {regionsWith.length > 0 && (
+            <div className="mt-2.5 border-y border-border">
+              <button
+                type="button"
+                onClick={() => setAreaOpen((v) => !v)}
+                aria-expanded={areaOpen}
+                className="w-full flex items-center justify-between py-3 text-left"
+              >
+                <span className="text-[13px]">
+                  <span className="font-extrabold text-fg">Area</span>
+                  {activeRegion && (
+                    <span className="text-muted-fg"> · {activeRegion}</span>
+                  )}
+                </span>
+                <ChevronDown
+                  className={
+                    "w-4 h-4 text-muted-fg transition-transform " +
+                    (areaOpen ? "rotate-180" : "")
+                  }
+                  strokeWidth={2}
+                  aria-hidden
+                />
+              </button>
+              {areaOpen && (
+                <div className="flex flex-col pb-1.5">
+                  {regionsWith.map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => chooseRegion(r)}
+                      className={
+                        "flex items-center justify-between py-2.5 text-left text-[13px] " +
+                        (activeRegion === r
+                          ? "font-extrabold text-accent"
+                          : "text-fg")
+                      }
+                    >
+                      <span>{r}</span>
+                      {activeRegion === r && (
+                        <Check className="w-4 h-4" strokeWidth={2} aria-hidden />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* "A spot in {region}" ghost dropdown — only once a region is chosen.
+              Pick a specific neighbourhood, or stay region-wide. */}
+          {activeRegion && (hoodsByRegion.get(activeRegion)?.length ?? 0) > 0 && (
+            <div className="border-b border-border">
+              <button
+                type="button"
+                onClick={() => setSpotOpen((v) => !v)}
+                aria-expanded={spotOpen}
+                className="w-full flex items-center justify-between py-3 text-left"
+              >
+                <span className="text-[13px]">
+                  <span className="font-extrabold text-fg">
+                    A spot in {activeRegion}
+                  </span>
+                  <span className="text-muted-fg">
+                    {" · "}
+                    {areaSel.kind === "neighbourhood"
+                      ? areaSel.name
+                      : "anywhere here"}
+                  </span>
+                </span>
+                <ChevronDown
+                  className={
+                    "w-4 h-4 text-muted-fg transition-transform " +
+                    (spotOpen ? "rotate-180" : "")
+                  }
+                  strokeWidth={2}
+                  aria-hidden
+                />
+              </button>
+              {spotOpen && (
+                <div className="flex flex-col pb-1.5 max-h-56 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => chooseSpot(activeRegion, null)}
+                    className={
+                      "py-2.5 text-left text-[13px] " +
+                      (areaSel.kind === "region"
+                        ? "font-extrabold text-accent"
+                        : "text-muted-fg")
                     }
                   >
-                    {name}
-                  </Chip>
-                ))}
-              </div>
+                    Anywhere in {activeRegion}
+                  </button>
+                  {(hoodsByRegion.get(activeRegion) ?? []).map(({ name }) => {
+                    const on =
+                      areaSel.kind === "neighbourhood" && areaSel.name === name;
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => chooseSpot(activeRegion, name)}
+                        className={
+                          "flex items-center justify-between py-2.5 text-left text-[13px] " +
+                          (on ? "font-extrabold text-accent" : "text-fg")
+                        }
+                      >
+                        <span>{name}</span>
+                        {on && (
+                          <Check
+                            className="w-4 h-4"
+                            strokeWidth={2}
+                            aria-hidden
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
