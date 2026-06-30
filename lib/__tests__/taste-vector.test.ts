@@ -29,9 +29,9 @@ describe("taste-vector (Stage 2.1)", () => {
     expect(signalWeight("open")).toBeGreaterThan(0);
     expect(signalWeight("dismiss")).toBeLessThan(0);
     expect(signalWeight("search")).toBe(0);
-    expect(signalWeight("outbound_click", { target: "booking" })).toBeGreaterThan(
-      signalWeight("outbound_click", { target: "website" }),
-    );
+    expect(
+      signalWeight("outbound_click", { target: "booking" }),
+    ).toBeGreaterThan(signalWeight("outbound_click", { target: "website" }));
   });
 
   it("recency: now=1, one half-life=0.5, monotonically decreasing", () => {
@@ -46,7 +46,9 @@ describe("taste-vector (Stage 2.1)", () => {
       eventType: "save",
     }));
     const taste = buildTasteVector(signals);
-    expect(cosineSimilarity(taste, wineBar)).toBeGreaterThan(cosineSimilarity(taste, steak));
+    expect(cosineSimilarity(taste, wineBar)).toBeGreaterThan(
+      cosineSimilarity(taste, steak),
+    );
     expect(cosineSimilarity(taste, wineBar)).toBeGreaterThan(0.7);
   });
 
@@ -66,7 +68,9 @@ describe("taste-vector (Stage 2.1)", () => {
       { vector: wineBar, eventType: "save", ageDays: 0 },
       { vector: steak, eventType: "save", ageDays: 365 },
     ]);
-    expect(cosineSimilarity(taste, wineBar)).toBeGreaterThan(cosineSimilarity(taste, steak));
+    expect(cosineSimilarity(taste, wineBar)).toBeGreaterThan(
+      cosineSimilarity(taste, steak),
+    );
   });
 
   it("no net signal → all-zero vector (cold-start handoff)", () => {
@@ -82,7 +86,9 @@ describe("taste-vector (Stage 2.1)", () => {
     ]);
     let acc = new Array<number>(HYBRID_DIM).fill(0);
     acc = accumulateSignal(acc, near(wineBar, 2), "save");
-    acc = accumulateSignal(acc, near(wineBar, 7), "open", { daysSinceLastUpdate: 0 });
+    acc = accumulateSignal(acc, near(wineBar, 7), "open", {
+      daysSinceLastUpdate: 0,
+    });
     expect(cosineSimilarity(normalise(acc), batch)).toBeCloseTo(1, 5);
   });
 });

@@ -64,7 +64,10 @@ export function signalWeight(
 // Recency decay — older taps fade so taste tracks the user's CURRENT mood.
 // Exponential half-life: a signal HALF_LIFE_DAYS old counts half as much.
 export const HALF_LIFE_DAYS = 45;
-export function recencyWeight(ageDays: number, halfLifeDays = HALF_LIFE_DAYS): number {
+export function recencyWeight(
+  ageDays: number,
+  halfLifeDays = HALF_LIFE_DAYS,
+): number {
   if (ageDays <= 0) return 1;
   return Math.pow(2, -ageDays / halfLifeDays);
 }
@@ -87,7 +90,8 @@ export function buildTasteVector(signals: TasteSignal[]): number[] {
   const acc = new Array<number>(HYBRID_DIM).fill(0);
   for (const s of signals) {
     if (s.vector.length !== HYBRID_DIM) continue;
-    const w = signalWeight(s.eventType, s.context) * recencyWeight(s.ageDays ?? 0);
+    const w =
+      signalWeight(s.eventType, s.context) * recencyWeight(s.ageDays ?? 0);
     if (w === 0) continue;
     for (let i = 0; i < HYBRID_DIM; i++) acc[i] += w * s.vector[i];
   }
@@ -105,11 +109,15 @@ export function accumulateSignal(
   taste: number[],
   venueVector: number[],
   eventType: SignalType,
-  opts: { context?: Record<string, unknown> | null; daysSinceLastUpdate?: number } = {},
+  opts: {
+    context?: Record<string, unknown> | null;
+    daysSinceLastUpdate?: number;
+  } = {},
 ): number[] {
   const decay = recencyWeight(opts.daysSinceLastUpdate ?? 0);
   const w = signalWeight(eventType, opts.context ?? null);
-  const base = taste.length === HYBRID_DIM ? taste : new Array<number>(HYBRID_DIM).fill(0);
+  const base =
+    taste.length === HYBRID_DIM ? taste : new Array<number>(HYBRID_DIM).fill(0);
   const useVenue = venueVector.length === HYBRID_DIM;
   const out = new Array<number>(HYBRID_DIM).fill(0);
   for (let i = 0; i < HYBRID_DIM; i++) {

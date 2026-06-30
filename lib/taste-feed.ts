@@ -13,7 +13,12 @@
 import { createServiceClient } from "@/lib/supabase/admin";
 import { buildHybridVector } from "@/lib/hybrid-vector";
 import { buildTasteVector, type TasteSignal } from "@/lib/taste-vector";
-import { centroidOf, centerVector, mmrRerank, type RankItem } from "@/lib/ranker";
+import {
+  centroidOf,
+  centerVector,
+  mmrRerank,
+  type RankItem,
+} from "@/lib/ranker";
 import { cosineSimilarity, type Tag } from "@/lib/tag-vocabulary";
 import type { SignalType } from "@/lib/signals";
 
@@ -58,7 +63,10 @@ async function getTasteIndex(): Promise<Map<string, number[]> | null> {
 
   const emb = new Map<string, number[]>();
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from("venue_embeddings").select("venue_id, review_embedding").range(from, from + 999);
+    const { data, error } = await sb
+      .from("venue_embeddings")
+      .select("venue_id, review_embedding")
+      .range(from, from + 999);
     if (error) return null; // table absent (e.g. a preview DB) → fall back
     if (!data?.length) break;
     for (const r of data as { venue_id: string; review_embedding: unknown }[]) {
@@ -71,10 +79,15 @@ async function getTasteIndex(): Promise<Map<string, number[]> | null> {
 
   const tags = new Map<string, string[]>();
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from("venues").select("id, canonical_tags").is("hidden_at", null).range(from, from + 999);
+    const { data, error } = await sb
+      .from("venues")
+      .select("id, canonical_tags")
+      .is("hidden_at", null)
+      .range(from, from + 999);
     if (error) return null;
     if (!data?.length) break;
-    for (const r of data as { id: string; canonical_tags: string[] | null }[]) tags.set(r.id, r.canonical_tags ?? []);
+    for (const r of data as { id: string; canonical_tags: string[] | null }[])
+      tags.set(r.id, r.canonical_tags ?? []);
     if (data.length < 1000) break;
   }
 
@@ -92,7 +105,10 @@ async function getTasteIndex(): Promise<Map<string, number[]> | null> {
 }
 
 /** The user's taste vector in the centred space, or null if no usable signal. */
-async function loadUserTaste(userId: string, idx: Map<string, number[]>): Promise<number[] | null> {
+async function loadUserTaste(
+  userId: string,
+  idx: Map<string, number[]>,
+): Promise<number[] | null> {
   const sb = createServiceClient();
   if (!sb) return null;
   const { data, error } = await sb
@@ -102,7 +118,12 @@ async function loadUserTaste(userId: string, idx: Map<string, number[]>): Promis
   if (error || !data?.length) return null;
   const now = Date.now();
   const signals: TasteSignal[] = [];
-  for (const e of data as { venue_id: string | null; event_type: string; context: Record<string, unknown> | null; created_at: string }[]) {
+  for (const e of data as {
+    venue_id: string | null;
+    event_type: string;
+    context: Record<string, unknown> | null;
+    created_at: string;
+  }[]) {
     const v = e.venue_id ? idx.get(e.venue_id) : null;
     if (!v) continue;
     signals.push({
@@ -135,7 +156,13 @@ export async function rankRowsByTaste<T extends { id: string; type: string }>(
   const noVec: T[] = [];
   for (const row of rows) {
     const vec = idx.get(row.id);
-    if (vec) withVec.push({ row, vec, rel: cosineSimilarity(taste, vec), cat: categoryOf(row.type) });
+    if (vec)
+      withVec.push({
+        row,
+        vec,
+        rel: cosineSimilarity(taste, vec),
+        cat: categoryOf(row.type),
+      });
     else noVec.push(row);
   }
   withVec.sort((a, b) => b.rel - a.rel);
@@ -151,8 +178,19 @@ export async function rankRowsByTaste<T extends { id: string; type: string }>(
     poolMap.set(x.row.id, x);
     perCat[x.cat] = (perCat[x.cat] ?? 0) + 1;
   }
-  const pool = [...poolMap.values()].map((x) => ({ id: x.row.id, vec: x.vec, rel: x.rel, category: x.cat, row: x.row }));
-  const diversified = mmrRerank<RankItem & { row: T }>(pool, pool.length, MMR_LAMBDA, CATEGORY_PENALTY);
+  const pool = [...poolMap.values()].map((x) => ({
+    id: x.row.id,
+    vec: x.vec,
+    rel: x.rel,
+    category: x.cat,
+    row: x.row,
+  }));
+  const diversified = mmrRerank<RankItem & { row: T }>(
+    pool,
+    pool.length,
+    MMR_LAMBDA,
+    CATEGORY_PENALTY,
+  );
 
   const headIds = new Set(diversified.map((d) => d.id));
   return [
@@ -168,7 +206,9 @@ export async function rankRowsByTaste<T extends { id: string; type: string }>(
  * (which can't read the service-role embeddings itself). null = no signal /
  * no embeddings → the planner runs without personalisation. Stage 4.1 / 5.1.
  */
-export async function tasteScoresForUser(userId: string): Promise<Record<string, number> | null> {
+export async function tasteScoresForUser(
+  userId: string,
+): Promise<Record<string, number> | null> {
   const idx = await getTasteIndex();
   if (!idx) return null;
   const taste = await loadUserTaste(userId, idx);
