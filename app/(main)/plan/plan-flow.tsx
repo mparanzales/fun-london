@@ -520,6 +520,16 @@ export function PlanFlow({
                 <div className="text-[11px] text-muted-fg italic mt-1">
                   &quot;{s.venue.vibe}&quot;
                 </div>
+                {s.venue.planNote && (
+                  <div className="text-[12px] text-fg mt-1.5 flex items-start gap-1 leading-snug">
+                    <Sparkles
+                      className="w-3.5 h-3.5 mt-px shrink-0 text-accent"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    />
+                    <span>{s.venue.planNote}</span>
+                  </div>
+                )}
               </div>
             </Link>
             {s.walkToNextMins != null && (
