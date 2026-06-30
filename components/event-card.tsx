@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { sizedImageUrl } from "@/lib/img";
 import type { Event } from "@/lib/types";
 
 type Props = {
@@ -44,7 +45,12 @@ export function EventCard({
         style={{ aspectRatio: "16/12" }}
       >
         <Image
-          src={event.imgUrl}
+          // Right-size the poster at the CDN (the optimizer is off — see
+          // lib/img.ts). The card is full-width on mobile, ~400px on desktop;
+          // 768 covers a 2× DPR phone. Most posters are Ticketmaster/Universe
+          // (non-resizable) so this is mostly a no-op there, but Supabase- and
+          // Google-hosted posters shrink. `sizes`/`fill` unchanged.
+          src={sizedImageUrl(event.imgUrl, 768)}
           alt={event.name}
           fill
           sizes="(max-width: 640px) 100vw, 400px"

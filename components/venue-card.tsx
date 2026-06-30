@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
 import { recordSignal, type SignalSurface } from "@/lib/signals";
+import { sizedImageUrl } from "@/lib/img";
 import type { Venue } from "@/lib/types";
 
 type Props = {
@@ -74,6 +75,13 @@ export function VenueCard({
   // `open` (step 0.4): the user tapped into the venue detail from this surface.
   const onOpen = () => recordSignal("open", { surface, venueId: venue.id });
 
+  // Request a card-sized source from the CDN instead of the full-res photo.
+  // The optimizer is off (unoptimized: true), so without this every card pulls
+  // a multi-thousand-px JPEG. `tall` renders ~170px wide, `wide` up to ~50vw;
+  // these widths cover a 2× DPR display. Non-resizable hosts pass through.
+  const imgWidth = variant === "tall" ? 384 : 512;
+  const imgSrc = sizedImageUrl(venue.imgUrl, imgWidth);
+
   // The whole card is wrapped in a Link to /venue/[slug]. The heart
   // button is rendered INSIDE the link's positioned ancestor but its
   // onHeart handler calls e.preventDefault() to suppress navigation when
@@ -103,7 +111,7 @@ export function VenueCard({
           style={{ aspectRatio: variant === "tall" ? "3/4" : "16/12" }}
         >
           <Image
-            src={venue.imgUrl}
+            src={imgSrc}
             alt={venue.name}
             fill
             sizes={
