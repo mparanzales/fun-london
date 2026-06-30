@@ -196,3 +196,29 @@ describe("computePlan", () => {
     expect(plan.steps.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("computePlan — taste-aware (Stage 4.1)", () => {
+  const venues: Venue[] = [
+    makeVenue({ id: "r-meh", type: "Restaurant", neighbourhood: "Soho", price: "££", rating: 4.6 }),
+    makeVenue({ id: "r-fav", type: "Restaurant", neighbourhood: "Soho", price: "££", rating: 4.5 }),
+    makeVenue({ id: "bar", type: "Bar", neighbourhood: "Soho", price: "££", rating: 4.5 }),
+    makeVenue({ id: "music", type: "Live Music", neighbourhood: "Soho", price: "££", rating: 4.5 }),
+  ];
+  const opts = { area: "Soho", vibe: "Fancy" as const, budget: "Any" as const };
+  const startId = (p: ReturnType<typeof computePlan>) =>
+    p.steps.find((s) => s.role === "Start")?.venue.id;
+
+  it("taste promotes the on-brief venue the user actually likes", () => {
+    // Without taste the slightly higher-rated 'r-meh' starts the night…
+    expect(startId(computePlan(venues, opts))).toBe("r-meh");
+    // …with taste, the favourite wins the Start slot.
+    expect(
+      startId(computePlan(venues, { ...opts, tasteScores: { "r-fav": 0.6, "r-meh": 0 } })),
+    ).toBe("r-fav");
+  });
+
+  it("no taste scores → identical to the non-personalised plan (backward compatible)", () => {
+    const base = computePlan(venues, opts).steps.map((s) => s.venue.id);
+    expect(computePlan(venues, { ...opts, tasteScores: null }).steps.map((s) => s.venue.id)).toEqual(base);
+  });
+});
