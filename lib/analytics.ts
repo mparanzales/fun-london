@@ -32,6 +32,7 @@ export type AnalyticsEvent =
   | "plan_generate" // solo Plan My Night generated an itinerary
   | "plan_reshuffle"
   | "plan_save" // user saved a generated plan to their account (funnel end)
+  | "plan_open_maps" // opened the plan's walking route in Google Maps
   | "together_room_create"
   | "together_room_join"
   | "together_swipe"
