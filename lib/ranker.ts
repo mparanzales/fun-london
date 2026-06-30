@@ -57,17 +57,26 @@ export interface RankItem {
   id: string;
   vec: number[]; // centred hybrid vector (for novelty comparisons)
   rel: number; // relevance to the user (taste cosine, or cold-start quality)
+  category?: string; // optional coarse category (eats/bars/cafes/…) for category diversity
 }
 
 /**
  * Maximal Marginal Relevance: greedily pick items that are relevant but NOT
  * near-duplicates of what's already picked.
- *   score'(d) = λ·rel(d) − (1−λ)·max_{p∈picked} cos(d, p)
- * λ=1 → pure relevance; lower λ → more diverse. Default 0.7 leans relevance.
+ *   score'(d) = λ·rel(d) − (1−λ)·max_{p∈picked} cos(d, p) − categoryPenalty·(#picked same category)
+ * λ=1 → pure relevance; lower λ → more vibe-diverse. categoryPenalty>0 spreads
+ * coarse categories so a taste that's all one type (e.g. all restaurants) still
+ * gets some variety. Default penalty 0 → pure vibe-MMR (unchanged behaviour).
  */
-export function mmrRerank<T extends RankItem>(items: T[], k: number, lambda = 0.7): T[] {
+export function mmrRerank<T extends RankItem>(
+  items: T[],
+  k: number,
+  lambda = 0.7,
+  categoryPenalty = 0,
+): T[] {
   const pool = [...items].sort((a, b) => b.rel - a.rel);
   const picked: T[] = [];
+  const catCount: Record<string, number> = {};
   while (picked.length < k && pool.length > 0) {
     let bestIdx = 0;
     let bestScore = -Infinity;
@@ -77,13 +86,17 @@ export function mmrRerank<T extends RankItem>(items: T[], k: number, lambda = 0.
         const s = cosineSimilarity(pool[i].vec, p.vec);
         if (s > maxSim) maxSim = s;
       }
-      const score = lambda * pool[i].rel - (1 - lambda) * maxSim;
+      const cat = pool[i].category;
+      const catPen = cat ? categoryPenalty * (catCount[cat] ?? 0) : 0;
+      const score = lambda * pool[i].rel - (1 - lambda) * maxSim - catPen;
       if (score > bestScore) {
         bestScore = score;
         bestIdx = i;
       }
     }
-    picked.push(pool.splice(bestIdx, 1)[0]);
+    const chosen = pool.splice(bestIdx, 1)[0];
+    picked.push(chosen);
+    if (chosen.category) catCount[chosen.category] = (catCount[chosen.category] ?? 0) + 1;
   }
   return picked;
 }
