@@ -28,6 +28,7 @@ import {
   Moon,
   Globe,
   Navigation,
+  ChevronDown,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -189,6 +190,15 @@ export function PlanFlow({
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
   }, [venues]);
 
+  // Quick-access chips = the most-stocked handful. The full list (60+ hoods)
+  // lives in a "More neighbourhoods" dropdown so the chip row never becomes a
+  // wall; alphabetical there so a known neighbourhood is easy to find.
+  const topAreas = useMemo(() => areas.slice(0, 8), [areas]);
+  const allAreasAlpha = useMemo(
+    () => [...areas].sort((a, b) => a.localeCompare(b)),
+    [areas],
+  );
+
   const [step, setStep] = useState<"setup" | "result">("setup");
   const [when, setWhen] = useState<WhenChoice>("now");
   const [customTime, setCustomTime] = useState<string>("20:00");
@@ -250,6 +260,20 @@ export function PlanFlow({
   );
 
   const display: DisplayPlan = openedSaved ?? toDisplay(computed);
+
+  // Editorial eyebrow, same convention as the Explore header: 06:00–17:59 reads
+  // "today,", 18:00–05:59 "tonight,". `now` is null until mount, so SSR + first
+  // client render agree (default "tonight,") and it settles after mount.
+  const eyebrow =
+    now && now.getHours() >= 6 && now.getHours() < 18 ? "today," : "tonight,";
+
+  // A specific neighbourhood chosen from the "More neighbourhoods" dropdown that
+  // isn't one of the quick chips — surface it as its own selected chip so the
+  // choice stays visible (and the dropdown stays a pure picker, value "").
+  const specificArea =
+    area !== ANYWHERE && area !== NEAR_YOU && !topAreas.includes(area)
+      ? area
+      : null;
 
   // ── Saved plans (signed-in only) ────────────────────────────────────
   const loadSavedPlans = useCallback(async () => {
@@ -396,15 +420,20 @@ export function PlanFlow({
   if (step === "setup") {
     return (
       <div>
-        <div className="px-5 pb-3.5">
-          <h1 className="text-[28px] font-extrabold text-primary tracking-tight m-0 leading-[1.08]">
-            Don&apos;t pick a place.
-            <br />
-            Get a plan.
+        <div className="px-5 pt-8 pb-5">
+          <h1 className="flex items-baseline gap-2.5 m-0 leading-none">
+            <span
+              className="text-xl italic font-medium text-muted-fg lowercase"
+              suppressHydrationWarning
+            >
+              {eyebrow}
+            </span>
+            <span className="text-[32px] font-extrabold fl-grad-text lowercase tracking-tight">
+              the plan
+            </span>
           </h1>
-          <div className="text-[13px] text-muted-fg mt-1.5">
-            Tell us when and what you&apos;re feeling — we&apos;ll build the
-            whole thing, walkable end to end.
+          <div className="text-[13px] text-muted-fg mt-2">
+            Tell us a few things. We&apos;ll plan the rest.
           </div>
         </div>
 
@@ -485,15 +514,44 @@ export function PlanFlow({
               />
               {geoState === "pending" ? "Locating…" : "Near you"}
             </Chip>
-            {areas.map((a) => (
+            {specificArea && (
+              <Chip on onClick={() => chooseArea(specificArea)}>
+                {specificArea}
+              </Chip>
+            )}
+            {topAreas.map((a) => (
               <Chip key={a} on={area === a} onClick={() => chooseArea(a)}>
                 {a}
               </Chip>
             ))}
           </div>
+          {allAreasAlpha.length > topAreas.length && (
+            <div className="relative mt-2">
+              <select
+                value=""
+                aria-label="More neighbourhoods"
+                onChange={(e) => {
+                  if (e.target.value) chooseArea(e.target.value);
+                }}
+                className="w-full h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] pl-3.5 pr-9 appearance-none"
+              >
+                <option value="">More neighbourhoods…</option>
+                {allAreasAlpha.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-fg pointer-events-none"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </div>
+          )}
           {geoState === "denied" && (
             <div className="text-[11px] text-muted-fg mt-2">
-              Couldn&apos;t get your location — showing spots across London
+              Couldn&apos;t get your location. Showing spots across London
               instead.
             </div>
           )}
