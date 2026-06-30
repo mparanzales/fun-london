@@ -209,8 +209,7 @@ function toDisplay(
 ): DisplayPlan {
   const items = plan.steps.map((s, i) => {
     const alt = swaps[i];
-    const v =
-      alt != null && alt >= 0 ? plan.alternatives[i]?.[alt] : undefined;
+    const v = alt != null && alt >= 0 ? plan.alternatives[i]?.[alt] : undefined;
     return { venue: v ?? s.venue, role: s.role };
   });
   const steps = relinkSteps(items, when);
@@ -454,7 +453,8 @@ export function PlanFlow({
     setSwaps((prev) => {
       const next = { ...prev };
       const nextIdx = (prev[i] ?? -1) + 1;
-      if (nextIdx >= alts.length) delete next[i]; // back to the original
+      if (nextIdx >= alts.length)
+        delete next[i]; // back to the original
       else next[i] = nextIdx;
       return next;
     });
@@ -996,7 +996,11 @@ export function PlanFlow({
                   aria-label={`Change the ${s.role} stop`}
                   className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
                 >
-                  <RotateCw className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />
+                  <RotateCw
+                    className="w-3.5 h-3.5"
+                    strokeWidth={2}
+                    aria-hidden
+                  />
                   Change
                 </button>
               )}

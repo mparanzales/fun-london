@@ -534,10 +534,20 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
 
 describe("computePlan · per-stop swap (alternatives + relinkSteps)", () => {
   const venues: Venue[] = [
-    makeVenue({ id: "rest", type: "Restaurant", neighbourhood: "Soho", rating: 4.6 }),
+    makeVenue({
+      id: "rest",
+      type: "Restaurant",
+      neighbourhood: "Soho",
+      rating: 4.6,
+    }),
     makeVenue({ id: "bar1", type: "Bar", neighbourhood: "Soho", rating: 4.6 }),
     makeVenue({ id: "bar2", type: "Bar", neighbourhood: "Soho", rating: 4.4 }),
-    makeVenue({ id: "music", type: "Live Music", neighbourhood: "Soho", rating: 4.5 }),
+    makeVenue({
+      id: "music",
+      type: "Live Music",
+      neighbourhood: "Soho",
+      rating: 4.5,
+    }),
   ];
 
   it("offers per-stop alternatives that aren't already in the plan", () => {

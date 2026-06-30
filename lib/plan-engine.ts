@@ -582,7 +582,13 @@ export function relinkSteps(
         arrival.getTime() + (dwellMins + (walkToNextMins ?? 0)) * 60_000,
       );
     }
-    return { venue: it.venue, role: it.role, dwellMins, walkToNextMins, arriveAt };
+    return {
+      venue: it.venue,
+      role: it.role,
+      dwellMins,
+      walkToNextMins,
+      arriveAt,
+    };
   });
 }
 
