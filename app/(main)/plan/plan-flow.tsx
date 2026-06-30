@@ -594,7 +594,7 @@ export function PlanFlow({
         </Group>
 
         <Group label="Area">
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
             <Chip on={areaSel.kind === "anywhere"} onClick={chooseAnywhere}>
               <Globe
                 className="w-3.5 h-3.5 inline-block align-[-2px] mr-1"
@@ -611,57 +611,67 @@ export function PlanFlow({
               />
               {geoState === "pending" ? "Locating…" : "Near you"}
             </Chip>
-          </div>
 
-          {/* "Area" ghost dropdown — pick a region (Central/North/…) without a
-              wall of chips. Editorial border-y disclosure, like venue hours. */}
-          {regionsWith.length > 0 && (
-            <div className="mt-2.5 border-y border-border">
-              <button
-                type="button"
-                onClick={() => setAreaOpen((v) => !v)}
-                aria-expanded={areaOpen}
-                className="w-full flex items-center justify-between py-3 text-left"
-              >
-                <span className="text-[13px]">
-                  <span className="font-extrabold text-fg">Area</span>
-                  {activeRegion && (
-                    <span className="text-muted-fg"> · {activeRegion}</span>
-                  )}
-                </span>
-                <ChevronDown
-                  className={
-                    "w-4 h-4 text-muted-fg transition-transform " +
-                    (areaOpen ? "rotate-180" : "")
+            {/* "Area" chip — its region list pops out FROM the chip. */}
+            {regionsWith.length > 0 && (
+              <div className="relative">
+                <Chip
+                  on={
+                    areaSel.kind === "region" ||
+                    areaSel.kind === "neighbourhood"
                   }
-                  strokeWidth={2}
-                  aria-hidden
-                />
-              </button>
-              {areaOpen && (
-                <div className="flex flex-col pb-1.5">
-                  {regionsWith.map((r) => (
+                  onClick={() => setAreaOpen((v) => !v)}
+                >
+                  {activeRegion ?? "Area"}
+                  <ChevronDown
+                    className={
+                      "w-3.5 h-3.5 inline-block align-[-2px] ml-1 transition-transform " +
+                      (areaOpen ? "rotate-180" : "")
+                    }
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                </Chip>
+                {areaOpen && (
+                  <>
+                    {/* click-away */}
                     <button
-                      key={r}
                       type="button"
-                      onClick={() => chooseRegion(r)}
-                      className={
-                        "flex items-center justify-between py-2.5 text-left text-[13px] " +
-                        (activeRegion === r
-                          ? "font-extrabold text-accent"
-                          : "text-fg")
-                      }
-                    >
-                      <span>{r}</span>
-                      {activeRegion === r && (
-                        <Check className="w-4 h-4" strokeWidth={2} aria-hidden />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                      aria-hidden
+                      tabIndex={-1}
+                      onClick={() => setAreaOpen(false)}
+                      className="fixed inset-0 z-10 cursor-default"
+                    />
+                    <div className="absolute left-0 top-full mt-1.5 z-20 min-w-[170px] rounded-2xl border border-border bg-card py-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.35)]">
+                      {regionsWith.map((r) => {
+                        const on = activeRegion === r;
+                        return (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => chooseRegion(r)}
+                            className={
+                              "w-full flex items-center justify-between px-3.5 py-2 text-left text-[13px] " +
+                              (on ? "font-extrabold text-accent" : "text-fg")
+                            }
+                          >
+                            <span>{r}</span>
+                            {on && (
+                              <Check
+                                className="w-4 h-4"
+                                strokeWidth={2}
+                                aria-hidden
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* "A spot in {region}" ghost dropdown — only once a region is chosen.
               Pick a specific neighbourhood, or stay region-wide. */}
