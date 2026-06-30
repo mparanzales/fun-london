@@ -56,6 +56,9 @@ type DisplayPlan = {
     role: PlanRole;
     dwellMins: number;
     walkToNextMins: number | null;
+    // Estimated arrival time (Stage 4.2). Present only on a freshly computed
+    // plan; re-opened saved plans omit it (the time is relative to "now").
+    arriveAt?: Date | null;
   }[];
 };
 
@@ -74,6 +77,17 @@ type SavedPlanRow = {
 function fmtHours(mins: number): string {
   const h = mins / 60;
   return `~${h.toFixed(1)} h total`;
+}
+
+// "11:01 pm" — the estimated arrival time at a stop (Stage 4.2).
+function fmtTime(d: Date): string {
+  return d
+    .toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .toLowerCase();
 }
 
 function toDisplay(plan: Plan): DisplayPlan {
@@ -133,7 +147,15 @@ export function PlanFlow({
   }, [venues]);
 
   const computed = useMemo(
-    () => computePlan(venues, { area, vibe, budget, offset, when: now, tasteScores }),
+    () =>
+      computePlan(venues, {
+        area,
+        vibe,
+        budget,
+        offset,
+        when: now,
+        tasteScores,
+      }),
     [venues, area, vibe, budget, offset, now, tasteScores],
   );
 
@@ -486,6 +508,14 @@ export function PlanFlow({
                     />{" "}
                     ~{s.dwellMins} min
                   </span>
+                  {s.arriveAt && (
+                    <>
+                      <span>·</span>
+                      <span className="font-bold text-fg">
+                        arrive ~{fmtTime(s.arriveAt)}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <div className="text-[11px] text-muted-fg italic mt-1">
                   &quot;{s.venue.vibe}&quot;

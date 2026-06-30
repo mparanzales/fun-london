@@ -197,12 +197,36 @@ describe("computePlan", () => {
   });
 });
 
-describe("computePlan — taste-aware (Stage 4.1)", () => {
+describe("computePlan · taste-aware (Stage 4.1)", () => {
   const venues: Venue[] = [
-    makeVenue({ id: "r-meh", type: "Restaurant", neighbourhood: "Soho", price: "££", rating: 4.6 }),
-    makeVenue({ id: "r-fav", type: "Restaurant", neighbourhood: "Soho", price: "££", rating: 4.5 }),
-    makeVenue({ id: "bar", type: "Bar", neighbourhood: "Soho", price: "££", rating: 4.5 }),
-    makeVenue({ id: "music", type: "Live Music", neighbourhood: "Soho", price: "££", rating: 4.5 }),
+    makeVenue({
+      id: "r-meh",
+      type: "Restaurant",
+      neighbourhood: "Soho",
+      price: "££",
+      rating: 4.6,
+    }),
+    makeVenue({
+      id: "r-fav",
+      type: "Restaurant",
+      neighbourhood: "Soho",
+      price: "££",
+      rating: 4.5,
+    }),
+    makeVenue({
+      id: "bar",
+      type: "Bar",
+      neighbourhood: "Soho",
+      price: "££",
+      rating: 4.5,
+    }),
+    makeVenue({
+      id: "music",
+      type: "Live Music",
+      neighbourhood: "Soho",
+      price: "££",
+      rating: 4.5,
+    }),
   ];
   const opts = { area: "Soho", vibe: "Fancy" as const, budget: "Any" as const };
   const startId = (p: ReturnType<typeof computePlan>) =>
@@ -213,12 +237,111 @@ describe("computePlan — taste-aware (Stage 4.1)", () => {
     expect(startId(computePlan(venues, opts))).toBe("r-meh");
     // …with taste, the favourite wins the Start slot.
     expect(
-      startId(computePlan(venues, { ...opts, tasteScores: { "r-fav": 0.6, "r-meh": 0 } })),
+      startId(
+        computePlan(venues, {
+          ...opts,
+          tasteScores: { "r-fav": 0.6, "r-meh": 0 },
+        }),
+      ),
     ).toBe("r-fav");
   });
 
   it("no taste scores → identical to the non-personalised plan (backward compatible)", () => {
     const base = computePlan(venues, opts).steps.map((s) => s.venue.id);
-    expect(computePlan(venues, { ...opts, tasteScores: null }).steps.map((s) => s.venue.id)).toEqual(base);
+    expect(
+      computePlan(venues, { ...opts, tasteScores: null }).steps.map(
+        (s) => s.venue.id,
+      ),
+    ).toEqual(base);
+  });
+});
+
+describe("computePlan · time-window orienteering (Stage 4.2)", () => {
+  // Each stop is checked open at its ARRIVAL time, not the plan start. With no
+  // coordinates walkMins falls back to 8 min, so from a 20:30 start the slots
+  // arrive at ~20:30 (Start), ~21:53 (Then), ~23:01 (Finish).
+  const day = new Date(2026, 5, 10, 20, 30).getDay();
+  const hours = (oh: { o: number; c: number }): OpeningHours => ({
+    periods: [
+      {
+        open: { day, hour: oh.o, minute: 0 },
+        close: { day, hour: oh.c, minute: 0 },
+      },
+    ],
+  });
+  const when = new Date(2026, 5, 10, 20, 30);
+
+  const venues: Venue[] = [
+    // Start: open all evening (unknown hours → fail-open).
+    makeVenue({
+      id: "restaurant",
+      neighbourhood: "Soho",
+      type: "Restaurant",
+      openingHours: null,
+    }),
+    // Then: an early bar OPEN at 20:30 but SHUT (closes 21:00) by the ~21:53
+    // arrival — must be dropped despite being open at the plan start.
+    makeVenue({
+      id: "early-bar",
+      neighbourhood: "Soho",
+      type: "Bar",
+      openingHours: hours({ o: 17, c: 21 }),
+    }),
+    // …and a bar that's open late, to fill Then cleanly.
+    makeVenue({
+      id: "late-bar",
+      neighbourhood: "Soho",
+      type: "Bar",
+      openingHours: null,
+    }),
+    // Finish: a club CLOSED now (opens 22:00) but OPEN by the ~23:01 arrival —
+    // must be eligible even though it's shut at the plan start.
+    makeVenue({
+      id: "late-club",
+      neighbourhood: "Soho",
+      type: "Live Music",
+      openingHours: hours({ o: 22, c: 3 }),
+    }),
+  ];
+  const opts = {
+    area: "Soho",
+    vibe: "Lively" as const,
+    budget: "Any" as const,
+    when,
+  };
+
+  const stepFor = (
+    p: ReturnType<typeof computePlan>,
+    role: "Start" | "Then" | "Finish",
+  ) => p.steps.find((s) => s.role === role)?.venue.id;
+
+  it("drops a venue open at the start but shut by its arrival time", () => {
+    const plan = computePlan(venues, opts);
+    expect(stepFor(plan, "Then")).toBe("late-bar");
+    expect(plan.steps.map((s) => s.venue.id)).not.toContain("early-bar");
+  });
+
+  it("keeps a venue shut at the start but open by its arrival time (late club)", () => {
+    const plan = computePlan(venues, opts);
+    expect(stepFor(plan, "Finish")).toBe("late-club");
+  });
+
+  it("populates arriveAt for each stop in increasing order", () => {
+    const plan = computePlan(venues, opts);
+    const times = plan.steps.map((s) => s.arriveAt);
+    expect(times.every((t) => t instanceof Date)).toBe(true);
+    expect(times[0]!.getTime()).toBe(when.getTime()); // first stop arrives at `when`
+    for (let i = 1; i < times.length; i++) {
+      expect(times[i]!.getTime()).toBeGreaterThan(times[i - 1]!.getTime());
+    }
+  });
+
+  it("leaves arriveAt null when no start time is supplied (server render)", () => {
+    const plan = computePlan(venues, {
+      area: "Soho",
+      vibe: "Lively",
+      budget: "Any",
+    });
+    expect(plan.steps.every((s) => s.arriveAt === null)).toBe(true);
   });
 });
