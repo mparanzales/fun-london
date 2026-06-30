@@ -51,7 +51,7 @@ import {
 import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
 import { googleMapsWalkingUrl } from "@/lib/plan-maps";
-import { PlanRouteMap } from "./plan-route-map";
+import { PlanRouteMapLive } from "./plan-route-map-live";
 import type { Venue } from "@/lib/types";
 
 const VIBES: { v: PlanVibe; icon: LucideIcon }[] = [
@@ -1019,7 +1019,7 @@ export function PlanFlow({
           <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase mb-2.5">
             The walk
           </div>
-          <PlanRouteMap steps={display.steps} />
+          <PlanRouteMapLive steps={display.steps} />
           <a
             href={mapsUrl}
             target="_blank"
