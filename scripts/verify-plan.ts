@@ -10,6 +10,7 @@ dotenv.config({ path: ".env.local" });
 import { createServiceClient } from "@/lib/supabase/admin";
 import { tasteScoresForUser } from "@/lib/taste-feed";
 import { computePlan, type PlanVibe, type PlanBudget } from "@/lib/plan-engine";
+import type { PlanArea } from "@/lib/regions";
 import type { Venue } from "@/lib/types";
 
 async function main() {
@@ -44,16 +45,31 @@ async function main() {
   console.log(`${venues.length} venues · user ${userId?.slice(0, 8)}… · taste=${ts ? "loaded" : "none"}\n`);
 
   const show = (label: string, plan: ReturnType<typeof computePlan>) => {
-    console.log(`${label}  [${plan.daypart}] pool ${plan.poolStage}/${plan.poolSize} · ~${Math.round((plan.totalMins / 60) * 10) / 10}h`);
+    // Max single walk between stops = the walkability proof: a region / Anywhere
+    // pick should still keep every hop a short walk.
+    const maxWalk = Math.max(
+      0,
+      ...plan.steps.map((s) => s.walkToNextMins ?? 0),
+    );
+    console.log(
+      `${label}  [${plan.daypart}] around ${plan.area} · pool ${plan.poolStage}/${plan.poolSize} · ~${Math.round((plan.totalMins / 60) * 10) / 10}h · max hop ${maxWalk}min`,
+    );
     for (const s of plan.steps)
-      console.log(`   ${s.role.padEnd(7)} ${s.venue.name} (${s.venue.type}) · ${s.dwellMins}min`);
+      console.log(
+        `   ${s.role.padEnd(7)} ${s.venue.name} (${s.venue.type}) · ${s.venue.neighbourhood} · ${s.dwellMins}min`,
+      );
     console.log("");
   };
 
   const vibe: PlanVibe = "Chill";
   const budget: PlanBudget = "Any";
-  for (const area of ["Soho", "Anywhere"]) {
-    console.log(`━━ ${area} · ${vibe} (taste-aware) ━━`);
+  const scopes: { label: string; area: PlanArea }[] = [
+    { label: "Region: East", area: { kind: "region", region: "East" } },
+    { label: "Anywhere", area: { kind: "anywhere" } },
+    { label: "Neighbourhood: Soho", area: { kind: "neighbourhood", name: "Soho" } },
+  ];
+  for (const { label, area } of scopes) {
+    console.log(`━━ ${label} · ${vibe} (taste-aware) ━━`);
     show("DAY:    ", computePlan(venues, { area, vibe, budget, daypart: "day", tasteScores: ts }));
     show("EVENING:", computePlan(venues, { area, vibe, budget, daypart: "evening", tasteScores: ts }));
   }

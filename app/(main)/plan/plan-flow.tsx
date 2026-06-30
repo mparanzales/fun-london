@@ -42,6 +42,12 @@ import {
   type PlanVibe,
   type PlanDaypart,
 } from "@/lib/plan-engine";
+import {
+  REGIONS,
+  regionOf,
+  type Region,
+  type PlanArea,
+} from "@/lib/regions";
 import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
 import type { Venue } from "@/lib/types";
@@ -68,10 +74,27 @@ const WHENS: { v: WhenChoice; label: string; icon: LucideIcon }[] = [
   { v: "custom", label: "Pick a day", icon: CalendarClock },
 ];
 
-// Special area chips beyond the real neighbourhoods. ANYWHERE comes from the
-// engine (builds across all of London); NEAR_YOU uses the browser's location to
-// keep the night within a short walk of where the user is.
-const NEAR_YOU = "Near you";
+// ── Area ─────────────────────────────────────────────────────────────────
+// The user's WHERE selection. Four shapes: Anywhere (let the engine find a good
+// walkable pocket anywhere in London), Near you (geolocation + walk radius), a
+// region (Central/North/East/South/West — the engine clusters to a walkable
+// pocket WITHIN it), or a specific neighbourhood. Regions + their drill-down
+// neighbourhoods come from lib/regions.ts, shared with Plan Together.
+type AreaSel =
+  | { kind: "anywhere" }
+  | { kind: "nearYou" }
+  | { kind: "region"; region: Region }
+  | { kind: "neighbourhood"; name: string };
+
+// Translate the UI selection into the engine's (PlanArea, centre) inputs. Near
+// you passes a centre (which overrides the area scope with a walk radius); the
+// rest pass a PlanArea.
+function toPlanArea(sel: AreaSel): PlanArea {
+  if (sel.kind === "region") return { kind: "region", region: sel.region };
+  if (sel.kind === "neighbourhood")
+    return { kind: "neighbourhood", name: sel.name };
+  return { kind: "anywhere" }; // anywhere + nearYou both scope to anywhere
+}
 
 // Resolve a When choice into the daypart (plan shape) + the start clock the
 // engine walks. `base` is the live clock, passed in so this stays pure and the
@@ -161,16 +184,12 @@ function fmtTime(d: Date): string {
 }
 
 // A descriptive name for saving + the saved-list (NOT the result header, which
-// is the dynamic "Tonight/Today, the plan:"). Daypart- and area-aware so a saved
-// night reads right: "Chill Night in Soho", "Lively Day Out near you".
+// is the dynamic "Tonight/Today, the plan:"). plan.area is the RESOLVED pocket
+// the night landed in, so a saved night reads as a real place: "Chill Night in
+// Shoreditch" even when the user only picked "East" or "Anywhere".
 function toDisplay(plan: Plan): DisplayPlan {
   const kind = plan.daypart === "day" ? "Day Out" : "Night";
-  const where =
-    plan.area === ANYWHERE
-      ? "London"
-      : plan.area === NEAR_YOU
-        ? "your area"
-        : plan.area;
+  const where = plan.area === ANYWHERE ? "London" : plan.area;
   return {
     title: `${plan.vibe} ${kind} in ${where}`,
     area: plan.area,
@@ -189,36 +208,42 @@ export function PlanFlow({
   authUserId: string | null;
   tasteScores: Record<string, number> | null;
 }) {
-  // Area chips are derived from the catalog so every chip has venues — ALL
-  // neighbourhoods we cover, most-stocked first (plus the Anywhere / Near you
-  // options rendered separately). Blank neighbourhoods are dropped.
-  const areas = useMemo(() => {
+  // Regions that actually have venues + each region's specific neighbourhoods
+  // (most-stocked first) for the drill-down. Built once from the catalogue so a
+  // chip never points at an empty region and the drill-down lists only places
+  // we cover.
+  const { regionsWith, hoodsByRegion } = useMemo(() => {
     const counts = new Map<string, number>();
     for (const v of venues) {
       const n = v.neighbourhood?.trim();
       if (n) counts.set(n, (counts.get(n) ?? 0) + 1);
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+    const byRegion = new Map<Region, { name: string; n: number }[]>();
+    for (const [name, n] of counts) {
+      const r = regionOf(name);
+      if (!r) continue;
+      (byRegion.get(r) ?? byRegion.set(r, []).get(r)!).push({ name, n });
+    }
+    for (const arr of byRegion.values()) arr.sort((a, b) => b.n - a.n);
+    return {
+      regionsWith: REGIONS.filter((r) => byRegion.has(r)),
+      hoodsByRegion: byRegion,
+    };
   }, [venues]);
-
-  // Quick-access chips = the most-stocked handful. The full list (60+ hoods)
-  // lives in a "More neighbourhoods" dropdown so the chip row never becomes a
-  // wall; alphabetical there so a known neighbourhood is easy to find.
-  const topAreas = useMemo(() => areas.slice(0, 8), [areas]);
-  const allAreasAlpha = useMemo(
-    () => [...areas].sort((a, b) => a.localeCompare(b)),
-    [areas],
-  );
 
   const [step, setStep] = useState<"setup" | "result">("setup");
   const [when, setWhen] = useState<WhenChoice>("now");
   // For the "Pick a day" path: a day offset (0 = today) + a clock time.
   const [customDay, setCustomDay] = useState<number>(0);
   const [customTime, setCustomTime] = useState<string>("20:00");
-  const [area, setArea] = useState<string>(() => areas[0] ?? "");
+  // WHERE. Defaults to Anywhere — never a single neighbourhood — so the engine
+  // is free to find the best walkable pocket. (See AreaSel above.)
+  const [areaSel, setAreaSel] = useState<AreaSel>({ kind: "anywhere" });
+  // Which region's neighbourhood drill-down is open (null = none).
+  const [openRegion, setOpenRegion] = useState<Region | null>(null);
   // Set when the user picks "Near you" and the browser grants location — the
-  // engine then keeps the night within a short walk of this point instead of a
-  // named neighbourhood. Cleared whenever another area is chosen.
+  // engine then keeps the night within a short walk of this point. Cleared
+  // whenever another area is chosen.
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
     null,
   );
@@ -278,16 +303,16 @@ export function PlanFlow({
   const computed = useMemo(
     () =>
       computePlan(venues, {
-        area,
+        area: toPlanArea(areaSel),
         vibe,
         budget,
         offset,
         when: timing?.when,
         daypart: timing?.daypart,
-        center: area === NEAR_YOU ? center : null,
+        center: areaSel.kind === "nearYou" ? center : null,
         tasteScores,
       }),
-    [venues, area, vibe, budget, offset, timing, center, tasteScores],
+    [venues, areaSel, vibe, budget, offset, timing, center, tasteScores],
   );
 
   const display: DisplayPlan = openedSaved ?? toDisplay(computed);
@@ -297,14 +322,6 @@ export function PlanFlow({
   // client render agree (default "tonight,") and it settles after mount.
   const eyebrow =
     now && now.getHours() >= 6 && now.getHours() < 18 ? "today," : "tonight,";
-
-  // A specific neighbourhood chosen from the "More neighbourhoods" dropdown that
-  // isn't one of the quick chips — surface it as its own selected chip so the
-  // choice stays visible (and the dropdown stays a pure picker, value "").
-  const specificArea =
-    area !== ANYWHERE && area !== NEAR_YOU && !topAreas.includes(area)
-      ? area
-      : null;
 
   // ── Saved plans (signed-in only) ────────────────────────────────────
   const loadSavedPlans = useCallback(async () => {
@@ -399,19 +416,26 @@ export function PlanFlow({
     fn();
   };
 
-  // Pick a normal neighbourhood or Anywhere: clear any near-you location.
-  const chooseArea = (a: string) =>
+  // Select Anywhere / a region / a specific neighbourhood: clear any near-you
+  // location. Tapping a region also opens its neighbourhood drill-down.
+  const chooseArea = (sel: AreaSel, region?: Region) =>
     editInputs(() => {
-      setArea(a);
+      setAreaSel(sel);
       setCenter(null);
       setGeoState("idle");
+      if (sel.kind === "region") setOpenRegion(region ?? sel.region);
+      else if (sel.kind === "anywhere" || sel.kind === "nearYou")
+        setOpenRegion(null);
     });
 
   // "Near you" — ask the browser for location and keep the night within walking
   // distance of it. On denial/failure fall back to Anywhere so a plan still
   // builds (just London-wide) rather than dead-ending.
   const pickNearYou = () => {
-    editInputs(() => setArea(NEAR_YOU));
+    editInputs(() => {
+      setAreaSel({ kind: "nearYou" });
+      setOpenRegion(null);
+    });
     if (center) return; // already located — just reselect
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setGeoState("denied");
@@ -425,24 +449,25 @@ export function PlanFlow({
       },
       () => {
         setGeoState("denied");
-        editInputs(() => setArea(ANYWHERE));
+        editInputs(() => setAreaSel({ kind: "anywhere" }));
       },
       { timeout: 8000, maximumAge: 300_000 },
     );
   };
 
-  // The effective (daypart, clock, center) for a build/reshuffle click — uses
-  // the live wall clock at click time, same resolution as the memoised preview.
+  // The effective (daypart, clock, area, centre) for a build/reshuffle click —
+  // uses the live wall clock at click time, same resolution as the memoised
+  // preview.
   const planOpts = (offsetOverride: number) => {
     const t = resolveTiming(when, customDay, customTime, new Date());
     return {
-      area,
+      area: toPlanArea(areaSel),
       vibe,
       budget,
       offset: offsetOverride,
       when: t.when,
       daypart: t.daypart,
-      center: area === NEAR_YOU ? center : null,
+      center: areaSel.kind === "nearYou" ? center : null,
       tasteScores,
     };
   };
@@ -542,7 +567,10 @@ export function PlanFlow({
 
         <Group label="Area">
           <div className="flex gap-2 flex-wrap">
-            <Chip on={area === ANYWHERE} onClick={() => chooseArea(ANYWHERE)}>
+            <Chip
+              on={areaSel.kind === "anywhere"}
+              onClick={() => chooseArea({ kind: "anywhere" })}
+            >
               <Globe
                 className="w-3.5 h-3.5 inline-block align-[-2px] mr-1"
                 strokeWidth={1.75}
@@ -550,7 +578,7 @@ export function PlanFlow({
               />
               Anywhere
             </Chip>
-            <Chip on={area === NEAR_YOU} onClick={pickNearYou}>
+            <Chip on={areaSel.kind === "nearYou"} onClick={pickNearYou}>
               <Navigation
                 className="w-3.5 h-3.5 inline-block align-[-2px] mr-1"
                 strokeWidth={1.75}
@@ -558,41 +586,55 @@ export function PlanFlow({
               />
               {geoState === "pending" ? "Locating…" : "Near you"}
             </Chip>
-            {specificArea && (
-              <Chip on onClick={() => chooseArea(specificArea)}>
-                {specificArea}
-              </Chip>
-            )}
-            {topAreas.map((a) => (
-              <Chip key={a} on={area === a} onClick={() => chooseArea(a)}>
-                {a}
-              </Chip>
-            ))}
+            {regionsWith.map((r) => {
+              const on =
+                (areaSel.kind === "region" && areaSel.region === r) ||
+                (areaSel.kind === "neighbourhood" &&
+                  regionOf(areaSel.name) === r);
+              return (
+                <Chip
+                  key={r}
+                  on={on}
+                  onClick={() => chooseArea({ kind: "region", region: r }, r)}
+                >
+                  {r}
+                  <ChevronDown
+                    className={
+                      "w-3.5 h-3.5 inline-block align-[-2px] ml-1 transition-transform " +
+                      (openRegion === r ? "rotate-180" : "")
+                    }
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                </Chip>
+              );
+            })}
           </div>
-          {allAreasAlpha.length > topAreas.length && (
-            <div className="relative mt-2">
-              <select
-                value=""
-                aria-label="More neighbourhoods"
-                onChange={(e) => {
-                  if (e.target.value) chooseArea(e.target.value);
-                }}
-                className="w-full h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] pl-3.5 pr-9 appearance-none"
-              >
-                <option value="">More neighbourhoods…</option>
-                {allAreasAlpha.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
+
+          {/* Drill-down: the open region's specific neighbourhoods. */}
+          {openRegion && (hoodsByRegion.get(openRegion)?.length ?? 0) > 0 && (
+            <div className="mt-2 rounded-2xl border border-border bg-muted/40 p-2.5">
+              <div className="text-[10px] font-extrabold tracking-[0.12em] text-muted-fg uppercase mb-2 px-0.5">
+                a spot in {openRegion}
+              </div>
+              <div className="flex gap-2 flex-wrap max-h-44 overflow-y-auto">
+                {hoodsByRegion.get(openRegion)!.map(({ name }) => (
+                  <Chip
+                    key={name}
+                    on={
+                      areaSel.kind === "neighbourhood" && areaSel.name === name
+                    }
+                    onClick={() =>
+                      chooseArea({ kind: "neighbourhood", name })
+                    }
+                  >
+                    {name}
+                  </Chip>
                 ))}
-              </select>
-              <ChevronDown
-                className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-fg pointer-events-none"
-                strokeWidth={1.75}
-                aria-hidden
-              />
+              </div>
             </div>
           )}
+
           {geoState === "denied" && (
             <div className="text-[11px] text-muted-fg mt-2">
               Couldn&apos;t get your location. Showing spots across London
@@ -637,7 +679,8 @@ export function PlanFlow({
               setStep("result");
               recordSignal("plan_started", { surface: "plan" });
               track("plan_generate", {
-                area,
+                area: result.area, // resolved walkable pocket
+                areaKind: areaSel.kind, // anywhere | nearYou | region | neighbourhood
                 vibe,
                 budget,
                 daypart: result.daypart, // day out vs night
@@ -745,7 +788,10 @@ export function PlanFlow({
             strokeWidth={1.75}
             aria-hidden
           />{" "}
-          {display.area === ANYWHERE ? "Across London" : display.area} ·{" "}
+          {display.area === ANYWHERE
+            ? "Across London"
+            : `Around ${display.area}`}{" "}
+          ·{" "}
           <Clock
             className="w-3.5 h-3.5 inline-block align-[-3px]"
             strokeWidth={1.75}
@@ -855,7 +901,8 @@ export function PlanFlow({
               setSaveState("idle");
               setOffset(nextOffset);
               track("plan_reshuffle", {
-                area,
+                area: result.area, // resolved walkable pocket
+                areaKind: areaSel.kind,
                 vibe,
                 budget,
                 daypart: result.daypart,

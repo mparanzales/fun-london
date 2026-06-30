@@ -277,50 +277,106 @@ export function walkMins(a: Venue, b: Venue): number {
 
 // ── Plan builder ─────────────────────────────────────────────────────────
 
-function pick(
-  pool: Venue[],
-  role: PlanRole,
-  scoreOf: (v: Venue) => number,
-  used: Set<string>,
-  usedTypes: Set<VenueType>,
-  offset: number,
-  openOK: (v: Venue) => boolean,
-  matchRole: (v: Venue, role: PlanRole) => boolean,
-): Venue | null {
-  const matches = pool.filter(
-    (v) => !used.has(v.id) && matchRole(v, role) && openOK(v),
-  );
-  // Keep the night varied: prefer a venue TYPE we haven't used yet, so we
-  // don't recommend e.g. a Pub then another Pub. Only relax to any role-match
-  // when every fresh type is already taken (a genuinely thin area).
-  const fresh = matches.filter((v) => !usedTypes.has(v.type));
-  const ranked = (fresh.length > 0 ? fresh : matches).sort(
-    (a, b) => scoreOf(b) - scoreOf(a),
-  );
-  if (ranked.length === 0) return null;
-  // offset rotates through the ranked list for "Try another", starting at
-  // the best fit (offset 0).
-  return ranked[offset % ranked.length];
+// Is a venue within `radiusKm` of a centre point (the "Near you" mode)?
+function withinRadius(
+  v: Venue,
+  center: { lat: number; lng: number },
+  radiusKm: number,
+): boolean {
+  if (v.lat == null || v.lng == null) return false;
+  const km = haversineKm({ lat: center.lat, lng: center.lng } as Venue, v);
+  return km != null && km <= radiusKm;
 }
 
-// Any best-scoring unused venue, ignoring role — used to backfill a slot
-// when an area is too thin to satisfy a role cleanly.
-function pickAny(
+// A short human label for a requested scope — used only when a plan can't be
+// filled, so there's no resolved pocket to name.
+function scopeLabel(area: PlanArea): string {
+  switch (area.kind) {
+    case "anywhere":
+      return ANYWHERE;
+    case "region":
+      return area.region;
+    case "neighbourhood":
+      return area.name;
+  }
+}
+
+// Build ONE walkable cluster from a seed: the seed first, then for each later
+// role the best-scoring open role-match within an expanding WALK radius of the
+// stops already chosen. This is the group planner's proximity clustering, but
+// kept on the solo engine's terms — vibe/taste score, daypart role-matching,
+// per-arrival open check and type variety. Without this a region/"Anywhere"
+// pick would scatter the night across non-walkable distances.
+type ClusterStop = { venue: Venue; role: PlanRole; arriveAt: Date | null };
+function buildSoloCluster(
   pool: Venue[],
+  roles: PlanRole[],
+  seed: Venue,
   scoreOf: (v: Venue) => number,
-  used: Set<string>,
-  usedTypes: Set<VenueType>,
-  offset: number,
-  openOK: (v: Venue) => boolean,
-): Venue | null {
-  const avail = pool.filter((v) => !used.has(v.id) && openOK(v));
-  // Same variety preference as pick(): a fresh type beats repeating one.
-  const fresh = avail.filter((v) => !usedTypes.has(v.type));
-  const ranked = (fresh.length > 0 ? fresh : avail).sort(
-    (a, b) => scoreOf(b) - scoreOf(a),
-  );
-  if (ranked.length === 0) return null;
-  return ranked[offset % ranked.length];
+  matchRole: (v: Venue, role: PlanRole) => boolean,
+  when: Date | undefined,
+  enforceOpen: boolean,
+  radiusLadder: number[],
+): ClusterStop[] {
+  const addMins = (t: Date, mins: number) =>
+    new Date(t.getTime() + mins * 60_000);
+  const used = new Set<string>([seed.id]);
+  const usedTypes = new Set<VenueType>([seed.type]);
+  const chosen: ClusterStop[] = [
+    { venue: seed, role: roles[0], arriveAt: when ?? null },
+  ];
+
+  for (const role of roles.slice(1)) {
+    const prev = chosen[chosen.length - 1];
+    const chosenVenues = chosen.map((c) => c.venue);
+    const arrivalFor = (cand: Venue): Date | undefined => {
+      if (!when || !prev.arriveAt) return undefined;
+      const depart = addMins(prev.arriveAt, dwellFor(prev.venue));
+      return addMins(depart, walkMins(prev.venue, cand));
+    };
+    const openOK = (cand: Venue) =>
+      !when || !enforceOpen || isOpenAt(cand, arrivalFor(cand)!);
+    // Best open candidate within `maxKm` of the cluster (null = no limit).
+    // `requireRole` enforces the daypart role-match; prefer a fresh venue TYPE
+    // so a night doesn't repeat e.g. two bars.
+    const best = (maxKm: number | null, requireRole: boolean): Venue | null => {
+      const cands = pool.filter(
+        (v) =>
+          !used.has(v.id) &&
+          (!requireRole || matchRole(v, role)) &&
+          openOK(v) &&
+          (maxKm == null || minKmToChosen(v, chosenVenues) <= maxKm),
+      );
+      const fresh = cands.filter((v) => !usedTypes.has(v.type));
+      const ranked = (fresh.length > 0 ? fresh : cands).sort(
+        (a, b) => scoreOf(b) - scoreOf(a),
+      );
+      return ranked[0] ?? null;
+    };
+    // Stay within a WALKABLE radius of the cluster: prefer a role-match nearby,
+    // widen the radius, then relax the role — but never teleport outside the
+    // ladder (that would break the walkable promise). If nothing's near, leave
+    // the slot unfilled rather than stitch in a far stop.
+    let picked: Venue | null = null;
+    for (const R of radiusLadder) {
+      picked = best(R, true);
+      if (picked) break;
+    }
+    if (!picked)
+      for (const R of radiusLadder) {
+        picked = best(R, false);
+        if (picked) break;
+      }
+    if (!picked) continue; // nothing walkable for this role — leave it unfilled
+    used.add(picked.id);
+    usedTypes.add(picked.type);
+    chosen.push({
+      venue: picked,
+      role,
+      arriveAt: when ? (arrivalFor(picked) ?? null) : null,
+    });
+  }
+  return chosen;
 }
 
 // How hard the personal taste vector pulls vs the chosen vibe/quality. The
@@ -329,28 +385,10 @@ function pickAny(
 // to a strong vibe match (~8), so taste leads but vibe still shapes the night.
 const PLAN_TASTE_WEIGHT = 8;
 
-// Is a venue in the requested area? Three modes: a "near me" centre+radius
-// (walk-radius planning) wins; else "Anywhere" matches everything; else the
-// venue must be in the named neighbourhood.
-function withinArea(
-  v: Venue,
-  area: string,
-  center: { lat: number; lng: number } | null | undefined,
-  radiusKm: number,
-): boolean {
-  if (center) {
-    if (v.lat == null || v.lng == null) return false;
-    const km = haversineKm({ lat: center.lat, lng: center.lng } as Venue, v);
-    return km != null && km <= radiusKm;
-  }
-  if (area === ANYWHERE) return true;
-  return v.neighbourhood === area;
-}
-
 export function computePlan(
   venues: Venue[],
   opts: {
-    area: string;
+    area: PlanArea;
     vibe: PlanVibe;
     budget: PlanBudget;
     offset?: number;
@@ -383,13 +421,13 @@ export function computePlan(
     vibeScore(v, vibe) +
     (tasteScores ? PLAN_TASTE_WEIGHT * (tasteScores[v.id] ?? 0) : 0);
 
-  // Prefer venues in the chosen area + budget; widen gracefully if too thin.
-  // poolStage records which rung of the ladder we landed on (see Plan type).
-  // Opening hours are NOT a pool rung any more (Stage 4.2): a venue closed at
-  // the plan's start but open by a later slot — a club, a late bar — is still a
-  // valid candidate for that slot, so open-ness is judged per stop at arrival.
+  // Scope the pool: a "Near you" centre+radius wins; else the PlanArea
+  // (Anywhere / a region / a single neighbourhood). Widen gracefully if the
+  // scope + budget is too thin; poolStage records which rung we landed on.
+  const inScope = (v: Venue) =>
+    center ? withinRadius(v, center, radiusKm) : venueInArea(v, area);
   const inArea = venues.filter(
-    (v) => withinArea(v, area, center, radiusKm) && withinBudget(v.price, budget),
+    (v) => inScope(v) && withinBudget(v.price, budget),
   );
   const inBudget = venues.filter((v) => withinBudget(v.price, budget));
   let pool: Venue[];
@@ -406,56 +444,66 @@ export function computePlan(
   }
 
   const roles: PlanRole[] = ["Start", "Then", "Finish"];
+  // "Near you" is already radius-bounded, so its cluster just keeps the stops
+  // mutually close; a broad scope (a region / Anywhere) uses the widening
+  // ladder to settle on a single WALKABLE pocket rather than scatter the night.
+  const radiusLadder = center ? [radiusKm] : RADIUS_LADDER_KM;
 
-  // Stage 4.2 — time-window orienteering. Walk the night's clock forward as we
-  // build: each stop is checked open at its own ARRIVAL time, not the plan
-  // start. Arrival at a candidate = (previous stop's arrival + its dwell) +
-  // walk(previous → candidate); the first stop arrives at `when`. With no
-  // `when` (server render) there's no clock, so every venue reads open.
-  type Chosen = { venue: Venue; role: PlanRole; arriveAt: Date | null };
-  const addMins = (t: Date, mins: number) =>
-    new Date(t.getTime() + mins * 60_000);
-
-  const assemble = (enforceOpen: boolean): Chosen[] => {
-    const used = new Set<string>();
-    const usedTypes = new Set<VenueType>();
-    const chosen: Chosen[] = [];
-    let prevVenue: Venue | null = null;
-    let prevRole: PlanRole | null = null;
-    let prevArrival: Date | null = null;
-
-    const arrivalFor = (cand: Venue): Date | undefined => {
-      if (!when) return undefined;
-      if (!prevVenue || !prevRole || !prevArrival) return when;
-      const depart = addMins(prevArrival, dwellFor(prevVenue));
-      return addMins(depart, walkMins(prevVenue, cand));
-    };
-    const openOK = (cand: Venue): boolean => {
-      if (!when || !enforceOpen) return true;
-      return isOpenAt(cand, arrivalFor(cand)!);
-    };
-
-    for (const role of roles) {
-      const v =
-        pick(pool, role, scoreOf, used, usedTypes, offset, openOK, matchRole) ??
-        pickAny(pool, scoreOf, used, usedTypes, offset, openOK);
-      if (!v) continue;
-      const arriveAt = when ? arrivalFor(v)! : null;
-      used.add(v.id);
-      usedTypes.add(v.type);
-      chosen.push({ venue: v, role, arriveAt });
-      prevVenue = v;
-      prevRole = role;
-      prevArrival = arriveAt;
+  // Try several seeds (the top Start-matches by score) and keep the cluster
+  // that fills the most stops, then the highest quality — so we never seed on
+  // an isolated top venue and strand a one-stop night. `offset` cycles the
+  // distinct clusters for "Try another".
+  const buildClusters = (enforceOpen: boolean) => {
+    const seedMatches = pool.filter((v) => matchRole(v, "Start"));
+    const seeds = (seedMatches.length > 0 ? seedMatches : pool)
+      .slice()
+      .sort((a, b) => scoreOf(b) - scoreOf(a))
+      .slice(0, 10);
+    const clusters = seeds.map((seed) => {
+      const chosen = buildSoloCluster(
+        pool,
+        roles,
+        seed,
+        scoreOf,
+        matchRole,
+        when,
+        enforceOpen,
+        radiusLadder,
+      );
+      const quality = chosen.reduce((s, c) => s + scoreOf(c.venue), 0);
+      let totalWalk = 0;
+      for (let i = 1; i < chosen.length; i++)
+        totalWalk += walkMins(chosen[i - 1].venue, chosen[i].venue);
+      // Fill first (a complete night beats a short one), then prefer the
+      // TIGHTEST cluster, then quality — so a scattered 3-stop never beats a
+      // walkable one.
+      return { chosen, score: chosen.length * 1000 + quality - totalWalk };
+    });
+    // Distinct by venue set, best first, so "Try another" actually changes.
+    const distinct: typeof clusters = [];
+    const seen = new Set<string>();
+    for (const c of clusters.sort((a, b) => b.score - a.score)) {
+      const key = c.chosen
+        .map((x) => x.venue.id)
+        .sort()
+        .join(",");
+      if (!seen.has(key)) {
+        seen.add(key);
+        distinct.push(c);
+      }
     }
-    return chosen;
+    return distinct;
   };
 
   // Honour opening hours; only if that can't fill a single stop do we relax it
   // (last-resort fail-open), so a planned night never routes to a shut door yet
   // never empties out before the hours backfill has run.
-  let chosen = assemble(true);
-  if (chosen.length === 0) chosen = assemble(false);
+  let clusters = buildClusters(true);
+  if (clusters.length === 0 || clusters[0].chosen.length === 0) {
+    clusters = buildClusters(false);
+  }
+  const chosen =
+    clusters.length > 0 ? clusters[offset % clusters.length].chosen : [];
 
   const steps: PlanStep[] = chosen.map((c, i) => {
     const next = chosen[i + 1]?.venue;
@@ -473,8 +521,12 @@ export function computePlan(
     0,
   );
 
+  // The plan's resolved POCKET — the neighbourhood it actually landed in — so a
+  // region / Anywhere pick reads as a real place ("a night around Shoreditch").
+  const resolvedArea = chosen[0]?.venue.neighbourhood || scopeLabel(area);
+
   return {
-    area,
+    area: resolvedArea,
     vibe,
     budget,
     daypart,
