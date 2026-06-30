@@ -42,12 +42,7 @@ import {
   type PlanVibe,
   type PlanDaypart,
 } from "@/lib/plan-engine";
-import {
-  REGIONS,
-  regionOf,
-  type Region,
-  type PlanArea,
-} from "@/lib/regions";
+import { REGIONS, regionOf, type Region, type PlanArea } from "@/lib/regions";
 import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
 import type { Venue } from "@/lib/types";
@@ -292,9 +287,7 @@ export function PlanFlow({
   // matching the SSR render so there's no hydration mismatch.
   const timing = useMemo(
     () =>
-      now
-        ? resolveTiming(when, customDate || todayISO, customTime, now)
-        : null,
+      now ? resolveTiming(when, customDate || todayISO, customTime, now) : null,
     [when, customDate, todayISO, customTime, now],
   );
 
@@ -440,7 +433,9 @@ export function PlanFlow({
   // to the whole region with a null name).
   const chooseSpot = (region: Region, name: string | null) =>
     editInputs(() => {
-      setAreaSel(name ? { kind: "neighbourhood", name } : { kind: "region", region });
+      setAreaSel(
+        name ? { kind: "neighbourhood", name } : { kind: "region", region },
+      );
       setCenter(null);
       setGeoState("idle");
       setSpotOpen(false);
@@ -488,7 +483,12 @@ export function PlanFlow({
   // preview.
   const planOpts = (offsetOverride: number) => {
     const now = new Date();
-    const t = resolveTiming(when, customDate || toISODate(now), customTime, now);
+    const t = resolveTiming(
+      when,
+      customDate || toISODate(now),
+      customTime,
+      now,
+    );
     return {
       area: toPlanArea(areaSel),
       vibe,
@@ -675,76 +675,78 @@ export function PlanFlow({
 
           {/* "A spot in {region}" ghost dropdown — only once a region is chosen.
               Pick a specific neighbourhood, or stay region-wide. */}
-          {activeRegion && (hoodsByRegion.get(activeRegion)?.length ?? 0) > 0 && (
-            <div className="border-b border-border">
-              <button
-                type="button"
-                onClick={() => setSpotOpen((v) => !v)}
-                aria-expanded={spotOpen}
-                className="w-full flex items-center justify-between py-3 text-left"
-              >
-                <span className="text-[13px]">
-                  <span className="font-extrabold text-fg">
-                    A spot in {activeRegion}
+          {activeRegion &&
+            (hoodsByRegion.get(activeRegion)?.length ?? 0) > 0 && (
+              <div className="border-b border-border">
+                <button
+                  type="button"
+                  onClick={() => setSpotOpen((v) => !v)}
+                  aria-expanded={spotOpen}
+                  className="w-full flex items-center justify-between py-3 text-left"
+                >
+                  <span className="text-[13px]">
+                    <span className="font-extrabold text-fg">
+                      A spot in {activeRegion}
+                    </span>
+                    <span className="text-muted-fg">
+                      {" · "}
+                      {areaSel.kind === "neighbourhood"
+                        ? areaSel.name
+                        : "anywhere here"}
+                    </span>
                   </span>
-                  <span className="text-muted-fg">
-                    {" · "}
-                    {areaSel.kind === "neighbourhood"
-                      ? areaSel.name
-                      : "anywhere here"}
-                  </span>
-                </span>
-                <ChevronDown
-                  className={
-                    "w-4 h-4 text-muted-fg transition-transform " +
-                    (spotOpen ? "rotate-180" : "")
-                  }
-                  strokeWidth={2}
-                  aria-hidden
-                />
-              </button>
-              {spotOpen && (
-                <div className="flex flex-col pb-1.5 max-h-56 overflow-y-auto">
-                  <button
-                    type="button"
-                    onClick={() => chooseSpot(activeRegion, null)}
+                  <ChevronDown
                     className={
-                      "py-2.5 text-left text-[13px] " +
-                      (areaSel.kind === "region"
-                        ? "font-extrabold text-accent"
-                        : "text-muted-fg")
+                      "w-4 h-4 text-muted-fg transition-transform " +
+                      (spotOpen ? "rotate-180" : "")
                     }
-                  >
-                    Anywhere in {activeRegion}
-                  </button>
-                  {(hoodsByRegion.get(activeRegion) ?? []).map(({ name }) => {
-                    const on =
-                      areaSel.kind === "neighbourhood" && areaSel.name === name;
-                    return (
-                      <button
-                        key={name}
-                        type="button"
-                        onClick={() => chooseSpot(activeRegion, name)}
-                        className={
-                          "flex items-center justify-between py-2.5 text-left text-[13px] " +
-                          (on ? "font-extrabold text-accent" : "text-fg")
-                        }
-                      >
-                        <span>{name}</span>
-                        {on && (
-                          <Check
-                            className="w-4 h-4"
-                            strokeWidth={2}
-                            aria-hidden
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
+                    strokeWidth={2}
+                    aria-hidden
+                  />
+                </button>
+                {spotOpen && (
+                  <div className="flex flex-col pb-1.5 max-h-56 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => chooseSpot(activeRegion, null)}
+                      className={
+                        "py-2.5 text-left text-[13px] " +
+                        (areaSel.kind === "region"
+                          ? "font-extrabold text-accent"
+                          : "text-muted-fg")
+                      }
+                    >
+                      Anywhere in {activeRegion}
+                    </button>
+                    {(hoodsByRegion.get(activeRegion) ?? []).map(({ name }) => {
+                      const on =
+                        areaSel.kind === "neighbourhood" &&
+                        areaSel.name === name;
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => chooseSpot(activeRegion, name)}
+                          className={
+                            "flex items-center justify-between py-2.5 text-left text-[13px] " +
+                            (on ? "font-extrabold text-accent" : "text-fg")
+                          }
+                        >
+                          <span>{name}</span>
+                          {on && (
+                            <Check
+                              className="w-4 h-4"
+                              strokeWidth={2}
+                              aria-hidden
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
           {geoState === "denied" && (
             <div className="text-[11px] text-muted-fg mt-2">

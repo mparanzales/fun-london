@@ -367,11 +367,16 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
   };
 
   it("a DAY plan can place daytime activities (Culture/Market); an EVENING plan can't", () => {
-    const dayTypes = computePlan(venues, { ...base, daypart: "day" }).steps.map((s) => s.venue.type);
+    const dayTypes = computePlan(venues, { ...base, daypart: "day" }).steps.map(
+      (s) => s.venue.type,
+    );
     expect(dayTypes.some((t) => t === "Culture" || t === "Market")).toBe(true);
     expect(dayTypes).not.toContain("Live Music"); // no club in a daytime plan
 
-    const eveTypes = computePlan(venues, { ...base, daypart: "evening" }).steps.map((s) => s.venue.type);
+    const eveTypes = computePlan(venues, {
+      ...base,
+      daypart: "evening",
+    }).steps.map((s) => s.venue.type);
     expect(eveTypes).not.toContain("Culture");
     expect(eveTypes).not.toContain("Market"); // markets aren't a night stop
   });
@@ -393,19 +398,48 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
     // rather than stitch Soho → far-east.
     const soho = { lat: 51.5135, lng: -0.1336 };
     const venues = [
-      makeVenue({ id: "soho-r", type: "Restaurant", neighbourhood: "Soho", lat: soho.lat, lng: soho.lng }),
-      makeVenue({ id: "soho-b", type: "Bar", neighbourhood: "Soho", lat: 51.5138, lng: -0.134 }),
-      makeVenue({ id: "soho-m", type: "Live Music", neighbourhood: "Soho", lat: 51.5132, lng: -0.1331 }),
+      makeVenue({
+        id: "soho-r",
+        type: "Restaurant",
+        neighbourhood: "Soho",
+        lat: soho.lat,
+        lng: soho.lng,
+      }),
+      makeVenue({
+        id: "soho-b",
+        type: "Bar",
+        neighbourhood: "Soho",
+        lat: 51.5138,
+        lng: -0.134,
+      }),
+      makeVenue({
+        id: "soho-m",
+        type: "Live Music",
+        neighbourhood: "Soho",
+        lat: 51.5132,
+        lng: -0.1331,
+      }),
       // ~12 km east — must never join the Soho cluster.
-      makeVenue({ id: "far-b", type: "Bar", neighbourhood: "Walthamstow", lat: 51.583, lng: 0.02 }),
+      makeVenue({
+        id: "far-b",
+        type: "Bar",
+        neighbourhood: "Walthamstow",
+        lat: 51.583,
+        lng: 0.02,
+      }),
     ];
     const plan = computePlan(venues, {
-      area: { kind: "anywhere" }, vibe: "Lively", budget: "Any", daypart: "evening",
+      area: { kind: "anywhere" },
+      vibe: "Lively",
+      budget: "Any",
+      daypart: "evening",
     });
     expect(plan.steps.length).toBeGreaterThanOrEqual(2);
     expect(plan.steps.map((s) => s.venue.id)).not.toContain("far-b");
     // Every hop is a short walk, and the resolved pocket is named.
-    expect(Math.max(...plan.steps.map((s) => s.walkToNextMins ?? 0))).toBeLessThanOrEqual(20);
+    expect(
+      Math.max(...plan.steps.map((s) => s.walkToNextMins ?? 0)),
+    ).toBeLessThanOrEqual(20);
     expect(plan.area).toBe("Soho");
   });
 
@@ -413,13 +447,40 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
     // East spans Shoreditch (central-east) to Walthamstow (far NE). A region pick
     // should settle on a walkable pocket, not span the whole region.
     const venues = [
-      makeVenue({ id: "sh-r", type: "Restaurant", neighbourhood: "Shoreditch", lat: 51.5265, lng: -0.0784 }),
-      makeVenue({ id: "sh-b", type: "Bar", neighbourhood: "Shoreditch", lat: 51.5258, lng: -0.0772 }),
-      makeVenue({ id: "sh-m", type: "Live Music", neighbourhood: "Shoreditch", lat: 51.527, lng: -0.079 }),
-      makeVenue({ id: "wow-b", type: "Bar", neighbourhood: "Walthamstow", lat: 51.583, lng: -0.02 }), // ~7 km NE
+      makeVenue({
+        id: "sh-r",
+        type: "Restaurant",
+        neighbourhood: "Shoreditch",
+        lat: 51.5265,
+        lng: -0.0784,
+      }),
+      makeVenue({
+        id: "sh-b",
+        type: "Bar",
+        neighbourhood: "Shoreditch",
+        lat: 51.5258,
+        lng: -0.0772,
+      }),
+      makeVenue({
+        id: "sh-m",
+        type: "Live Music",
+        neighbourhood: "Shoreditch",
+        lat: 51.527,
+        lng: -0.079,
+      }),
+      makeVenue({
+        id: "wow-b",
+        type: "Bar",
+        neighbourhood: "Walthamstow",
+        lat: 51.583,
+        lng: -0.02,
+      }), // ~7 km NE
     ];
     const plan = computePlan(venues, {
-      area: { kind: "region", region: "East" }, vibe: "Lively", budget: "Any", daypart: "evening",
+      area: { kind: "region", region: "East" },
+      vibe: "Lively",
+      budget: "Any",
+      daypart: "evening",
     });
     expect(plan.steps.length).toBeGreaterThanOrEqual(2);
     expect(plan.steps.map((s) => s.venue.id)).not.toContain("wow-b");
@@ -429,13 +490,42 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
   it("a 'near me' centre restricts the plan to its radius", () => {
     const here = { lat: 51.5141, lng: -0.1494 };
     const venuesGeo = [
-      makeVenue({ id: "near-r", type: "Restaurant", neighbourhood: "X", lat: 51.5141, lng: -0.1494 }),
-      makeVenue({ id: "near-b", type: "Bar", neighbourhood: "X", lat: 51.5145, lng: -0.1496 }),
-      makeVenue({ id: "near-m", type: "Live Music", neighbourhood: "X", lat: 51.5139, lng: -0.1492 }),
-      makeVenue({ id: "far", type: "Restaurant", neighbourhood: "X", lat: 51.62, lng: -0.32 }), // ~20 km
+      makeVenue({
+        id: "near-r",
+        type: "Restaurant",
+        neighbourhood: "X",
+        lat: 51.5141,
+        lng: -0.1494,
+      }),
+      makeVenue({
+        id: "near-b",
+        type: "Bar",
+        neighbourhood: "X",
+        lat: 51.5145,
+        lng: -0.1496,
+      }),
+      makeVenue({
+        id: "near-m",
+        type: "Live Music",
+        neighbourhood: "X",
+        lat: 51.5139,
+        lng: -0.1492,
+      }),
+      makeVenue({
+        id: "far",
+        type: "Restaurant",
+        neighbourhood: "X",
+        lat: 51.62,
+        lng: -0.32,
+      }), // ~20 km
     ];
     const ids = computePlan(venuesGeo, {
-      area: { kind: "neighbourhood", name: "X" }, vibe: "Lively", budget: "Any", daypart: "evening", center: here, radiusKm: 1,
+      area: { kind: "neighbourhood", name: "X" },
+      vibe: "Lively",
+      budget: "Any",
+      daypart: "evening",
+      center: here,
+      radiusKm: 1,
     }).steps.map((s) => s.venue.id);
     expect(ids).not.toContain("far");
   });
