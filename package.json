@@ -60,7 +60,8 @@
     "verify:sources:curated": "tsx scripts/verify-editorial-sources.ts -- --curated",
     "verify:sources:curated:write": "tsx scripts/verify-editorial-sources.ts -- --write --curated",
     "test": "vitest run",
-    "verify-feed-rank": "tsx scripts/verify-feed-rank.ts"
+    "verify-feed-rank": "tsx scripts/verify-feed-rank.ts",
+    "verify-plan": "tsx scripts/verify-plan.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

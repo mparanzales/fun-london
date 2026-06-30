@@ -226,7 +226,7 @@ export function walkMins(a: Venue, b: Venue): number {
 function pick(
   pool: Venue[],
   role: PlanRole,
-  vibe: PlanVibe,
+  scoreOf: (v: Venue) => number,
   used: Set<string>,
   usedTypes: Set<VenueType>,
   offset: number,
@@ -237,7 +237,7 @@ function pick(
   // when every fresh type is already taken (a genuinely thin area).
   const fresh = matches.filter((v) => !usedTypes.has(v.type));
   const ranked = (fresh.length > 0 ? fresh : matches).sort(
-    (a, b) => vibeScore(b, vibe) - vibeScore(a, vibe),
+    (a, b) => scoreOf(b) - scoreOf(a),
   );
   if (ranked.length === 0) return null;
   // offset rotates through the ranked list for "Try another", starting at
@@ -249,7 +249,7 @@ function pick(
 // when an area is too thin to satisfy a role cleanly.
 function pickAny(
   pool: Venue[],
-  vibe: PlanVibe,
+  scoreOf: (v: Venue) => number,
   used: Set<string>,
   usedTypes: Set<VenueType>,
   offset: number,
@@ -258,11 +258,17 @@ function pickAny(
   // Same variety preference as pick(): a fresh type beats repeating one.
   const fresh = avail.filter((v) => !usedTypes.has(v.type));
   const ranked = (fresh.length > 0 ? fresh : avail).sort(
-    (a, b) => vibeScore(b, vibe) - vibeScore(a, vibe),
+    (a, b) => scoreOf(b) - scoreOf(a),
   );
   if (ranked.length === 0) return null;
   return ranked[offset % ranked.length];
 }
+
+// How hard the personal taste vector pulls vs the chosen vibe/quality. The
+// chosen vibe/budget/area are tonight's brief (hard-ish); taste personalises
+// WHICH on-brief venue leads. Centred cosine ~[-0.3,0.7] × this is comparable
+// to a strong vibe match (~8), so taste leads but vibe still shapes the night.
+const PLAN_TASTE_WEIGHT = 8;
 
 export function computePlan(
   venues: Venue[],
@@ -272,9 +278,14 @@ export function computePlan(
     budget: PlanBudget;
     offset?: number;
     when?: Date;
+    tasteScores?: Record<string, number> | null;
   },
 ): Plan {
-  const { area, vibe, budget, offset = 0, when } = opts;
+  const { area, vibe, budget, offset = 0, when, tasteScores } = opts;
+  // Blended desirability: tonight's vibe/quality + the user's personal taste
+  // (Stage 4.1). No taste (anon / no signals) → pure vibe, unchanged behaviour.
+  const scoreOf = (v: Venue) =>
+    vibeScore(v, vibe) + (tasteScores ? PLAN_TASTE_WEIGHT * (tasteScores[v.id] ?? 0) : 0);
 
   // Skip CLOSED venues so a planned night never opens on a shut door. Fail-OPEN
   // when `when` is omitted or a venue's hours are unknown (isOpenAt), so this
@@ -315,8 +326,8 @@ export function computePlan(
 
   for (const role of roles) {
     const v =
-      pick(pool, role, vibe, used, usedTypes, offset) ??
-      pickAny(pool, vibe, used, usedTypes, offset);
+      pick(pool, role, scoreOf, used, usedTypes, offset) ??
+      pickAny(pool, scoreOf, used, usedTypes, offset);
     if (v) {
       used.add(v.id);
       usedTypes.add(v.type);
