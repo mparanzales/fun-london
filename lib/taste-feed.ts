@@ -18,8 +18,22 @@ import { cosineSimilarity, type Tag } from "@/lib/tag-vocabulary";
 import type { SignalType } from "@/lib/signals";
 
 const TTL_MS = 10 * 60 * 1000;
-const MMR_POOL = 60; // diversify the top N; deeper pages stay relevance-sorted (bounds MMR cost)
-const MMR_LAMBDA = 0.7;
+const POOL_HEAD = 36; // top-relevance head of the diversified pool
+const POOL_PER_CAT = 8; // guarantee the best N of EACH category reach the pool, so a
+// restaurant-heavy taste still surfaces its best bars/cafés/culture to interleave.
+const MMR_LAMBDA = 0.78; // relevance-leaning; the category penalty does the spreading
+const CATEGORY_PENALTY = 0.06;
+
+// Coarse category for diversity (groups micro-types: all bars count as one).
+const BAR_TYPES = new Set(["Bar", "Wine Bar", "Pub", "Listening Bar"]);
+function categoryOf(type: string): string {
+  if (type === "Restaurant") return "eats";
+  if (BAR_TYPES.has(type)) return "bars";
+  if (type === "Cafe") return "cafes";
+  if (type === "Live Music") return "music";
+  if (type === "Culture") return "culture";
+  return "other";
+}
 
 let indexCache: { at: number; idx: Map<string, number[]> } | null = null;
 
@@ -108,7 +122,7 @@ async function loadUserTaste(userId: string, idx: Map<string, number[]>): Promis
  * Returns null to fall back to the default order. Rows without a vector keep
  * their original relative order at the tail.
  */
-export async function rankRowsByTaste<T extends { id: string }>(
+export async function rankRowsByTaste<T extends { id: string; type: string }>(
   userId: string,
   rows: T[],
 ): Promise<T[] | null> {
@@ -117,18 +131,33 @@ export async function rankRowsByTaste<T extends { id: string }>(
   const taste = await loadUserTaste(userId, idx);
   if (!taste) return null;
 
-  const withVec: { row: T; vec: number[]; rel: number }[] = [];
+  const withVec: { row: T; vec: number[]; rel: number; cat: string }[] = [];
   const noVec: T[] = [];
   for (const row of rows) {
     const vec = idx.get(row.id);
-    if (vec) withVec.push({ row, vec, rel: cosineSimilarity(taste, vec) });
+    if (vec) withVec.push({ row, vec, rel: cosineSimilarity(taste, vec), cat: categoryOf(row.type) });
     else noVec.push(row);
   }
   withVec.sort((a, b) => b.rel - a.rel);
 
-  const poolN = Math.min(MMR_POOL, withVec.length);
-  const pool = withVec.slice(0, poolN).map((x) => ({ id: x.row.id, vec: x.vec, rel: x.rel, row: x.row }));
-  const diversified = mmrRerank<RankItem & { row: T }>(pool, poolN, MMR_LAMBDA);
+  // Category-balanced pool: the top-relevance head PLUS the best few of EACH
+  // category — so an all-one-type taste still has cross-category candidates.
+  // Then re-rank with a category-spread penalty so the feed interleaves.
+  const poolMap = new Map<string, (typeof withVec)[number]>();
+  for (const x of withVec.slice(0, POOL_HEAD)) poolMap.set(x.row.id, x);
+  const perCat: Record<string, number> = {};
+  for (const x of withVec) {
+    if ((perCat[x.cat] ?? 0) >= POOL_PER_CAT) continue;
+    poolMap.set(x.row.id, x);
+    perCat[x.cat] = (perCat[x.cat] ?? 0) + 1;
+  }
+  const pool = [...poolMap.values()].map((x) => ({ id: x.row.id, vec: x.vec, rel: x.rel, category: x.cat, row: x.row }));
+  const diversified = mmrRerank<RankItem & { row: T }>(pool, pool.length, MMR_LAMBDA, CATEGORY_PENALTY);
 
-  return [...diversified.map((d) => d.row), ...withVec.slice(poolN).map((x) => x.row), ...noVec];
+  const headIds = new Set(diversified.map((d) => d.id));
+  return [
+    ...diversified.map((d) => d.row),
+    ...withVec.filter((x) => !headIds.has(x.row.id)).map((x) => x.row),
+    ...noVec,
+  ];
 }

@@ -54,6 +54,21 @@ describe("ranker (Stage 3)", () => {
     expect(relevanceOnly).toEqual(["x", "xDup"]); // λ=1 → pure relevance
   });
 
+  it("category penalty interleaves a one-type-heavy pool (more variety)", () => {
+    const v = (s: number) => normalise([Math.sin(s), Math.cos(s), 0.1]);
+    const items: RankItem[] = [
+      { id: "e1", vec: v(1), rel: 0.9, category: "eats" },
+      { id: "e2", vec: v(2), rel: 0.85, category: "eats" },
+      { id: "e3", vec: v(3), rel: 0.8, category: "eats" },
+      { id: "e4", vec: v(4), rel: 0.75, category: "eats" },
+      { id: "b1", vec: v(5), rel: 0.6, category: "bars" },
+    ];
+    // No penalty (pure relevance) → all eats first, the lone bar last.
+    expect(mmrRerank(items, 5, 1, 0).map((i) => i.id)[4]).toBe("b1");
+    // With a category penalty the bar is promoted ahead of some eats.
+    expect(mmrRerank(items, 5, 1, 0.2).map((i) => i.id).indexOf("b1")).toBeLessThan(4);
+  });
+
   it("rankForTaste personalises when taste has signal", () => {
     const liked = normalise([1, 0, 0]);
     const other = normalise([0, 1, 0]);
