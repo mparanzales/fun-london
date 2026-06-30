@@ -672,3 +672,18 @@ revoke all on public.venue_embeddings from anon, authenticated;
 alter table public.venues
   add column if not exists plan_note text,
   add column if not exists plan_note_synced_at timestamptz;
+
+-- 2026-06-30 · Perf — index the catalogue feed read (getVenueIndex/fetchVenues) ─
+-- The live catalogue is read with
+--   WHERE google_place_id IS NOT NULL AND hidden_at IS NULL
+--   ORDER BY curation_tier, created_at
+-- on every COLD serverless instance (lib/queries.ts: the in-memory venue index
+-- is per-lambda, so a fresh function re-runs this from scratch). No existing
+-- index covered that predicate + sort, so Postgres did a full scan + sort of
+-- the whole table (~2,100 live rows) each cold hit. This PARTIAL index matches
+-- the predicate and serves the ORDER BY directly, so the read becomes an index
+-- scan. Safe + instant to build at this row count (no CONCURRENTLY needed).
+-- Idempotent — paste-and-run in the Supabase SQL Editor.
+create index if not exists venues_feed_order_idx
+  on public.venues (curation_tier, created_at)
+  where google_place_id is not null and hidden_at is null;
