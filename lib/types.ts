@@ -178,6 +178,10 @@ export type Venue = {
   mapUrl: string | null;
   // Phase 2 — verbatim Google reviews (signed-in only); null until synced.
   reviews: VenueReview[] | null;
+  // Stage 4.3 — one grounded "why this stop" line for Plan My Night, distilled
+  // from a real review and groundedness-gated (lib/plan-note.ts). Review-derived
+  // → moat field (signed-in only); null until scripts/generate-plan-notes.ts runs.
+  planNote: string | null;
   // Real menu URL discovered from the venue's own website (detail-only). Null
   // when none found; the "See the menu" button falls back to "Visit website".
   menuUrl: string | null;

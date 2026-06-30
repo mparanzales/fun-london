@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildHybridVector,
-  HYBRID_DIM,
-  REVIEW_DIM,
-} from "../hybrid-vector";
+import { buildHybridVector, HYBRID_DIM, REVIEW_DIM } from "../hybrid-vector";
 import {
   TAG_COUNT,
   tagsToWeightedVector,
@@ -29,10 +25,15 @@ describe("hybrid-vector (Stage 1.3)", () => {
   });
 
   it("tag-only weights recover the tag vector (review slots zero)", () => {
-    const v = buildHybridVector(["sushi"], unitReview(2), { tag: 1, review: 0 });
+    const v = buildHybridVector(["sushi"], unitReview(2), {
+      tag: 1,
+      review: 0,
+    });
     const tagPart = v.slice(0, TAG_COUNT);
     const reviewPart = v.slice(TAG_COUNT);
-    expect(cosineSimilarity(tagPart, tagsToWeightedVector(["sushi"]))).toBeCloseTo(1, 5);
+    expect(
+      cosineSimilarity(tagPart, tagsToWeightedVector(["sushi"])),
+    ).toBeCloseTo(1, 5);
     expect(reviewPart.every((x) => x === 0)).toBe(true);
   });
 
@@ -41,7 +42,8 @@ describe("hybrid-vector (Stage 1.3)", () => {
     const v = buildHybridVector(["sushi"], r, { tag: 0, review: 1 });
     expect(v.slice(0, TAG_COUNT).every((x) => x === 0)).toBe(true);
     const reviewPart = v.slice(TAG_COUNT);
-    for (let i = 0; i < REVIEW_DIM; i++) expect(reviewPart[i]).toBeCloseTo(r[i], 5);
+    for (let i = 0; i < REVIEW_DIM; i++)
+      expect(reviewPart[i]).toBeCloseTo(r[i], 5);
   });
 
   it("degrades gracefully to tags-only when the review embedding is null", () => {

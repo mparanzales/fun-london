@@ -76,6 +76,8 @@ type VenueRow = {
   opening_hours: OpeningHours | null;
   map_url: string | null;
   reviews: VenueReview[] | null;
+  // Optional so this stays safe if a row predates the plan_note column.
+  plan_note?: string | null;
   menu_url: string | null;
   // Optional so this stays safe if a row predates the curation_tier column.
   curation_tier?: string | null;
@@ -156,6 +158,7 @@ function mapVenue(r: VenueRow): Venue {
     openingHours: r.opening_hours,
     mapUrl: r.map_url ?? null,
     reviews: r.reviews,
+    planNote: r.plan_note ?? null,
     menuUrl: r.menu_url ?? null,
     curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
     createdAt: r.created_at,
@@ -297,6 +300,7 @@ export function mapVenuePreview(r: VenueCardRow): Venue {
     openingHours: null,
     mapUrl: null,
     reviews: null,
+    planNote: null,
     menuUrl: null,
     curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
     createdAt: r.created_at,

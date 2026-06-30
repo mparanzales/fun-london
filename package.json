@@ -61,7 +61,9 @@
     "verify:sources:curated:write": "tsx scripts/verify-editorial-sources.ts -- --write --curated",
     "test": "vitest run",
     "verify-feed-rank": "tsx scripts/verify-feed-rank.ts",
-    "verify-plan": "tsx scripts/verify-plan.ts"
+    "verify-plan": "tsx scripts/verify-plan.ts",
+    "generate-plan-notes:dry": "tsx scripts/generate-plan-notes.ts --dry-run",
+    "generate-plan-notes": "tsx scripts/generate-plan-notes.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

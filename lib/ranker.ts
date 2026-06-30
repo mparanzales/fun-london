@@ -44,9 +44,15 @@ const BAYES_PRIOR_WEIGHT = 50; // ~reviews needed to trust a venue's own rating
 /** Neutral quality relevance for users with no taste yet (new / opted-out).
  *  Bayesian-weighted rating (rewards well-reviewed quality, not lucky 5.0s) plus
  *  a small curated bump. Spreads scores so the cold-start feed isn't all ties. */
-export function coldStartRelevance(rating: number, reviewCount: number, curated: boolean): number {
+export function coldStartRelevance(
+  rating: number,
+  reviewCount: number,
+  curated: boolean,
+): number {
   const n = Math.max(0, reviewCount);
-  const bayes = (n * rating + BAYES_PRIOR_WEIGHT * BAYES_PRIOR_MEAN) / (n + BAYES_PRIOR_WEIGHT);
+  const bayes =
+    (n * rating + BAYES_PRIOR_WEIGHT * BAYES_PRIOR_MEAN) /
+    (n + BAYES_PRIOR_WEIGHT);
   const quality = Math.max(0, Math.min(1, (bayes - 3.8) / (5 - 3.8)));
   return quality + (curated ? 0.1 : 0);
 }
@@ -96,7 +102,8 @@ export function mmrRerank<T extends RankItem>(
     }
     const chosen = pool.splice(bestIdx, 1)[0];
     picked.push(chosen);
-    if (chosen.category) catCount[chosen.category] = (catCount[chosen.category] ?? 0) + 1;
+    if (chosen.category)
+      catCount[chosen.category] = (catCount[chosen.category] ?? 0) + 1;
   }
   return picked;
 }
@@ -141,7 +148,9 @@ export function rankForTaste(
   const items: RankItem[] = candidates.map((c) => ({
     id: c.id,
     vec: c.vec,
-    rel: personalised ? cosineSimilarity(taste, c.vec) : coldStartRelevance(c.rating, c.reviewCount, c.curated),
+    rel: personalised
+      ? cosineSimilarity(taste, c.vec)
+      : coldStartRelevance(c.rating, c.reviewCount, c.curated),
   }));
   const ordered =
     opts.diversify === false

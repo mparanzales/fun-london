@@ -20,6 +20,10 @@ export type PlanStep = {
   role: PlanRole;
   dwellMins: number; // time spent at this stop
   walkToNextMins: number | null; // walk to the next stop (null on the last)
+  // Estimated arrival time at this stop, walking the night's clock forward
+  // from the plan start (`when`): arrival(N) = arrival(N-1) + dwell(N-1) +
+  // walk(N-1→N). null when no start time was supplied (server-side render).
+  arriveAt: Date | null;
 };
 
 export type Plan = {
@@ -33,6 +37,8 @@ export type Plan = {
   //   "area"   = honoured the chosen area + budget
   //   "budget" = dropped the area (kept budget) to find enough venues
   //   "all"    = last resort: ignored area AND budget
+  // Opening hours are NOT a pool rung — each stop is checked open at its own
+  // arrival time (Stage 4.2), independent of how the pool was widened.
   poolStage: "area" | "budget" | "all";
   poolSize: number; // candidates considered after widening
 };
@@ -230,8 +236,11 @@ function pick(
   used: Set<string>,
   usedTypes: Set<VenueType>,
   offset: number,
+  openOK: (v: Venue) => boolean,
 ): Venue | null {
-  const matches = pool.filter((v) => !used.has(v.id) && roleMatches(v, role));
+  const matches = pool.filter(
+    (v) => !used.has(v.id) && roleMatches(v, role) && openOK(v),
+  );
   // Keep the night varied: prefer a venue TYPE we haven't used yet, so we
   // don't recommend e.g. a Pub then another Pub. Only relax to any role-match
   // when every fresh type is already taken (a genuinely thin area).
@@ -253,8 +262,9 @@ function pickAny(
   used: Set<string>,
   usedTypes: Set<VenueType>,
   offset: number,
+  openOK: (v: Venue) => boolean,
 ): Venue | null {
-  const avail = pool.filter((v) => !used.has(v.id));
+  const avail = pool.filter((v) => !used.has(v.id) && openOK(v));
   // Same variety preference as pick(): a fresh type beats repeating one.
   const fresh = avail.filter((v) => !usedTypes.has(v.type));
   const ranked = (fresh.length > 0 ? fresh : avail).sort(
@@ -285,63 +295,91 @@ export function computePlan(
   // Blended desirability: tonight's vibe/quality + the user's personal taste
   // (Stage 4.1). No taste (anon / no signals) → pure vibe, unchanged behaviour.
   const scoreOf = (v: Venue) =>
-    vibeScore(v, vibe) + (tasteScores ? PLAN_TASTE_WEIGHT * (tasteScores[v.id] ?? 0) : 0);
+    vibeScore(v, vibe) +
+    (tasteScores ? PLAN_TASTE_WEIGHT * (tasteScores[v.id] ?? 0) : 0);
 
-  // Skip CLOSED venues so a planned night never opens on a shut door. Fail-OPEN
-  // when `when` is omitted or a venue's hours are unknown (isOpenAt), so this
-  // never empties a plan; the open-check is dropped only as the last resort
-  // below. Mirrors computeWalkablePlan, which already does this.
-  const isOpen = (v: Venue) => (when ? isOpenAt(v, when) : true);
-
-  // Prefer venues in the chosen area + budget + open; widen gracefully if too
-  // thin. poolStage records which rung of the ladder we landed on (see Plan type).
+  // Prefer venues in the chosen area + budget; widen gracefully if too thin.
+  // poolStage records which rung of the ladder we landed on (see Plan type).
+  // Opening hours are NOT a pool rung any more (Stage 4.2): a venue closed at
+  // the plan's start but open by a later slot — a club, a late bar — is still a
+  // valid candidate for that slot, so open-ness is judged per stop at arrival.
   const inArea = venues.filter(
-    (v) =>
-      v.neighbourhood === area && withinBudget(v.price, budget) && isOpen(v),
+    (v) => v.neighbourhood === area && withinBudget(v.price, budget),
   );
-  const inBudget = venues.filter(
-    (v) => withinBudget(v.price, budget) && isOpen(v),
-  );
-  const openOnly = venues.filter(isOpen);
+  const inBudget = venues.filter((v) => withinBudget(v.price, budget));
   let pool: Venue[];
   let poolStage: Plan["poolStage"];
   if (inArea.length >= 3) {
     pool = inArea;
     poolStage = "area";
   } else if (inBudget.length >= 3) {
-    pool = inBudget;
+    pool = inBudget; // dropped area, kept budget
     poolStage = "budget";
-  } else if (openOnly.length >= 3) {
-    pool = openOnly; // dropped area + budget, but still open
-    poolStage = "all";
   } else {
-    pool = venues; // last resort: ignore area, budget AND open
+    pool = venues; // last resort: ignore area AND budget
     poolStage = "all";
   }
 
-  const used = new Set<string>();
-  const usedTypes = new Set<VenueType>();
   const roles: PlanRole[] = ["Start", "Then", "Finish"];
-  const chosen: Venue[] = [];
 
-  for (const role of roles) {
-    const v =
-      pick(pool, role, scoreOf, used, usedTypes, offset) ??
-      pickAny(pool, scoreOf, used, usedTypes, offset);
-    if (v) {
+  // Stage 4.2 — time-window orienteering. Walk the night's clock forward as we
+  // build: each stop is checked open at its own ARRIVAL time, not the plan
+  // start. Arrival at a candidate = (previous stop's arrival + its dwell) +
+  // walk(previous → candidate); the first stop arrives at `when`. With no
+  // `when` (server render) there's no clock, so every venue reads open.
+  type Chosen = { venue: Venue; role: PlanRole; arriveAt: Date | null };
+  const addMins = (t: Date, mins: number) =>
+    new Date(t.getTime() + mins * 60_000);
+
+  const assemble = (enforceOpen: boolean): Chosen[] => {
+    const used = new Set<string>();
+    const usedTypes = new Set<VenueType>();
+    const chosen: Chosen[] = [];
+    let prevVenue: Venue | null = null;
+    let prevRole: PlanRole | null = null;
+    let prevArrival: Date | null = null;
+
+    const arrivalFor = (cand: Venue): Date | undefined => {
+      if (!when) return undefined;
+      if (!prevVenue || !prevRole || !prevArrival) return when;
+      const depart = addMins(prevArrival, DWELL[prevRole]);
+      return addMins(depart, walkMins(prevVenue, cand));
+    };
+    const openOK = (cand: Venue): boolean => {
+      if (!when || !enforceOpen) return true;
+      return isOpenAt(cand, arrivalFor(cand)!);
+    };
+
+    for (const role of roles) {
+      const v =
+        pick(pool, role, scoreOf, used, usedTypes, offset, openOK) ??
+        pickAny(pool, scoreOf, used, usedTypes, offset, openOK);
+      if (!v) continue;
+      const arriveAt = when ? arrivalFor(v)! : null;
       used.add(v.id);
       usedTypes.add(v.type);
-      chosen.push(v);
+      chosen.push({ venue: v, role, arriveAt });
+      prevVenue = v;
+      prevRole = role;
+      prevArrival = arriveAt;
     }
-  }
+    return chosen;
+  };
 
-  const steps: PlanStep[] = chosen.map((venue, i) => {
-    const next = chosen[i + 1];
+  // Honour opening hours; only if that can't fill a single stop do we relax it
+  // (last-resort fail-open), so a planned night never routes to a shut door yet
+  // never empties out before the hours backfill has run.
+  let chosen = assemble(true);
+  if (chosen.length === 0) chosen = assemble(false);
+
+  const steps: PlanStep[] = chosen.map((c, i) => {
+    const next = chosen[i + 1]?.venue;
     return {
-      venue,
-      role: roles[i],
-      dwellMins: DWELL[roles[i]],
-      walkToNextMins: next ? walkMins(venue, next) : null,
+      venue: c.venue,
+      role: c.role,
+      dwellMins: DWELL[c.role],
+      walkToNextMins: next ? walkMins(c.venue, next) : null,
+      arriveAt: c.arriveAt,
     };
   });
 
