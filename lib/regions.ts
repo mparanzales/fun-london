@@ -106,6 +106,7 @@ export const REGION_OF: Record<string, Region> = {
   "East Dulwich": "South",
   Highgate: "North",
   Tottenham: "North",
+  Barbican: "Central",
 };
 
 export function regionOf(neighbourhood: string): Region | null {
