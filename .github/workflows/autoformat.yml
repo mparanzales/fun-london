@@ -1,0 +1,62 @@
+name: autoformat
+
+# Keeps `main` from ever going red on Prettier drift. On every pull request,
+# run `pnpm format` and, if anything changed, commit the formatting back to the
+# PR branch. So a contributor (human or agent) who forgets to run `pnpm format`
+# gets it applied automatically instead of the `check` gate failing and the
+# drift later landing on main. Pairs with the `check` workflow (which still
+# verifies format:check); this one just removes the manual step.
+
+on:
+  pull_request:
+    branches: [main]
+
+# Need write access to push the formatting commit back to the PR branch.
+permissions:
+  contents: write
+
+concurrency:
+  group: autoformat-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  autoformat:
+    name: prettier --write
+    # Forks can't receive a push from the base repo's token, so skip them
+    # (their `check` job still enforces formatting the normal way).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prettier --write
+        run: pnpm format
+
+      - name: Commit formatting if needed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: auto-format (prettier)"
+            git push origin HEAD:${{ github.head_ref }}
+          else
+            echo "Already formatted — nothing to do."
+          fi
