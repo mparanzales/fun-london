@@ -23,15 +23,22 @@ import {
   RotateCw,
   Check,
   Star,
+  Zap,
+  Sun,
+  Moon,
+  Globe,
+  Navigation,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
   planRationale,
+  ANYWHERE,
   type Plan,
   type PlanBudget,
   type PlanRole,
   type PlanVibe,
+  type PlanDaypart,
 } from "@/lib/plan-engine";
 import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
@@ -46,10 +53,61 @@ const VIBES: { v: PlanVibe; icon: LucideIcon }[] = [
 
 const BUDGETS: PlanBudget[] = ["£", "££", "Any"];
 
+// ── When ────────────────────────────────────────────────────────────────
+// The first question. It drives BOTH the plan shape (a day out vs a night —
+// different venue types fill each stop) and the clock the engine walks for the
+// open-at-arrival checks. "Now" adapts to the real time; the others force a
+// daypart; "Pick a time" reveals a time input.
+type WhenChoice = "now" | "day" | "evening" | "custom";
+const WHENS: { v: WhenChoice; label: string; icon: LucideIcon }[] = [
+  { v: "now", label: "Right now", icon: Zap },
+  { v: "day", label: "Daytime", icon: Sun },
+  { v: "evening", label: "Tonight", icon: Moon },
+  { v: "custom", label: "Pick a time", icon: Clock },
+];
+
+// Special area chips beyond the real neighbourhoods. ANYWHERE comes from the
+// engine (builds across all of London); NEAR_YOU uses the browser's location to
+// keep the night within a short walk of where the user is.
+const NEAR_YOU = "Near you";
+
+// Resolve a When choice into the daypart (plan shape) + the start clock the
+// engine walks. `base` is the live clock, passed in so this stays pure and the
+// caller controls hydration timing (no Date() before mount).
+function resolveTiming(
+  choice: WhenChoice,
+  customTime: string,
+  base: Date,
+): { daypart: PlanDaypart; when: Date } {
+  const at = (h: number, m = 0) => {
+    const d = new Date(base);
+    d.setHours(h, m, 0, 0);
+    return d;
+  };
+  // Before 5pm reads as "day"; from 5pm on, "evening".
+  const isDayNow = base.getHours() < 17;
+  switch (choice) {
+    case "day":
+      // A daytime plan: use now if it's still daytime, else a representative 1pm.
+      return { daypart: "day", when: isDayNow ? base : at(13) };
+    case "evening":
+      // A night out: use now if it's already evening, else 7pm tonight.
+      return { daypart: "evening", when: isDayNow ? at(19) : base };
+    case "custom": {
+      const [h, m] = customTime.split(":").map(Number);
+      const when = Number.isFinite(h) ? at(h, Number.isFinite(m) ? m : 0) : base;
+      return { daypart: when.getHours() < 17 ? "day" : "evening", when };
+    }
+    default: // "now" — plan for this moment, shape follows the clock.
+      return { daypart: isDayNow ? "day" : "evening", when: base };
+  }
+}
+
 // A render-ready plan shared by freshly-computed and re-opened-saved plans.
 type DisplayPlan = {
   title: string;
   area: string;
+  daypart: PlanDaypart;
   totalMins: number;
   steps: {
     venue: Venue;
@@ -90,10 +148,21 @@ function fmtTime(d: Date): string {
     .toLowerCase();
 }
 
+// A descriptive name for saving + the saved-list (NOT the result header, which
+// is the dynamic "Tonight/Today, the plan:"). Daypart- and area-aware so a saved
+// night reads right: "Chill Night in Soho", "Lively Day Out near you".
 function toDisplay(plan: Plan): DisplayPlan {
+  const kind = plan.daypart === "day" ? "Day Out" : "Night";
+  const where =
+    plan.area === ANYWHERE
+      ? "London"
+      : plan.area === NEAR_YOU
+        ? "your area"
+        : plan.area;
   return {
-    title: `${plan.vibe} Night in ${plan.area}`,
+    title: `${plan.vibe} ${kind} in ${where}`,
     area: plan.area,
+    daypart: plan.daypart,
     totalMins: plan.totalMins,
     steps: plan.steps,
   };
@@ -108,20 +177,31 @@ export function PlanFlow({
   authUserId: string | null;
   tasteScores: Record<string, number> | null;
 }) {
-  // Area chips are derived from the catalog so every chip has venues —
-  // most-stocked neighbourhoods first.
+  // Area chips are derived from the catalog so every chip has venues — ALL
+  // neighbourhoods we cover, most-stocked first (plus the Anywhere / Near you
+  // options rendered separately). Blank neighbourhoods are dropped.
   const areas = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const v of venues)
-      counts.set(v.neighbourhood, (counts.get(v.neighbourhood) ?? 0) + 1);
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([n]) => n);
+    for (const v of venues) {
+      const n = v.neighbourhood?.trim();
+      if (n) counts.set(n, (counts.get(n) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
   }, [venues]);
 
   const [step, setStep] = useState<"setup" | "result">("setup");
+  const [when, setWhen] = useState<WhenChoice>("now");
+  const [customTime, setCustomTime] = useState<string>("20:00");
   const [area, setArea] = useState<string>(() => areas[0] ?? "");
+  // Set when the user picks "Near you" and the browser grants location — the
+  // engine then keeps the night within a short walk of this point instead of a
+  // named neighbourhood. Cleared whenever another area is chosen.
+  const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
+  const [geoState, setGeoState] = useState<"idle" | "pending" | "denied">(
+    "idle",
+  );
   const [vibe, setVibe] = useState<PlanVibe>("Chill");
   const [budget, setBudget] = useState<PlanBudget>("££");
   const [offset, setOffset] = useState(0);
@@ -146,6 +226,14 @@ export function PlanFlow({
     return m;
   }, [venues]);
 
+  // Resolve the When answer into (daypart, start clock) once the live clock is
+  // known (post-mount). null before mount → engine infers + fails open on hours,
+  // matching the SSR render so there's no hydration mismatch.
+  const timing = useMemo(
+    () => (now ? resolveTiming(when, customTime, now) : null),
+    [when, customTime, now],
+  );
+
   const computed = useMemo(
     () =>
       computePlan(venues, {
@@ -153,10 +241,12 @@ export function PlanFlow({
         vibe,
         budget,
         offset,
-        when: now,
+        when: timing?.when,
+        daypart: timing?.daypart,
+        center: area === NEAR_YOU ? center : null,
         tasteScores,
       }),
-    [venues, area, vibe, budget, offset, now, tasteScores],
+    [venues, area, vibe, budget, offset, timing, center, tasteScores],
   );
 
   const display: DisplayPlan = openedSaved ?? toDisplay(computed);
@@ -208,6 +298,7 @@ export function PlanFlow({
       area: computed.area,
       vibe: computed.vibe,
       budget: computed.budget,
+      daypart: computed.daypart,
       stops: computed.steps.length,
       poolStage: computed.poolStage,
       poolSize: computed.poolSize,
@@ -237,6 +328,9 @@ export function PlanFlow({
     setOpenedSaved({
       title: row.title,
       area: row.neighbourhood,
+      // Saved rows predate a stored daypart; infer it from the title we wrote
+      // ("… Day Out …" vs "… Night …") so the header label reads right.
+      daypart: row.title.includes("Day Out") ? "day" : "evening",
       totalMins,
       steps,
     });
@@ -250,31 +344,103 @@ export function PlanFlow({
     fn();
   };
 
+  // Pick a normal neighbourhood or Anywhere: clear any near-you location.
+  const chooseArea = (a: string) =>
+    editInputs(() => {
+      setArea(a);
+      setCenter(null);
+      setGeoState("idle");
+    });
+
+  // "Near you" — ask the browser for location and keep the night within walking
+  // distance of it. On denial/failure fall back to Anywhere so a plan still
+  // builds (just London-wide) rather than dead-ending.
+  const pickNearYou = () => {
+    editInputs(() => setArea(NEAR_YOU));
+    if (center) return; // already located — just reselect
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGeoState("denied");
+      return;
+    }
+    setGeoState("pending");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGeoState("idle");
+      },
+      () => {
+        setGeoState("denied");
+        editInputs(() => setArea(ANYWHERE));
+      },
+      { timeout: 8000, maximumAge: 300_000 },
+    );
+  };
+
+  // The effective (daypart, clock, center) for a build/reshuffle click — uses
+  // the live wall clock at click time, same resolution as the memoised preview.
+  const planOpts = (offsetOverride: number) => {
+    const t = resolveTiming(when, customTime, new Date());
+    return {
+      area,
+      vibe,
+      budget,
+      offset: offsetOverride,
+      when: t.when,
+      daypart: t.daypart,
+      center: area === NEAR_YOU ? center : null,
+      tasteScores,
+    };
+  };
+
   // ── Setup screen ────────────────────────────────────────────────────
   if (step === "setup") {
     return (
       <div>
         <div className="px-5 pb-3.5">
-          <h1 className="text-[28px] font-extrabold text-primary tracking-tight m-0">
-            Plan My Night
+          <h1 className="text-[28px] font-extrabold text-primary tracking-tight m-0 leading-[1.08]">
+            Don&apos;t pick a place.
+            <br />
+            Get a plan.
           </h1>
-          <div className="text-[13px] text-muted-fg mt-1">
-            Tell us what you&apos;re feeling. We&apos;ll do the rest.
+          <div className="text-[13px] text-muted-fg mt-1.5">
+            Tell us when and what you&apos;re feeling — we&apos;ll build the
+            whole thing, walkable end to end.
           </div>
         </div>
 
-        <Group label="Area">
-          <div className="flex gap-2 flex-wrap">
-            {areas.map((a) => (
-              <Chip
-                key={a}
-                on={area === a}
-                onClick={() => editInputs(() => setArea(a))}
-              >
-                {a}
-              </Chip>
-            ))}
+        <Group label="When">
+          <div className="grid grid-cols-2 gap-2">
+            {WHENS.map((w) => {
+              const on = when === w.v;
+              return (
+                <button
+                  key={w.v}
+                  type="button"
+                  onClick={() => editInputs(() => setWhen(w.v))}
+                  className={
+                    "px-3.5 py-3 rounded-[14px] border-[1.5px] text-fg text-left flex items-center gap-2 text-[13px] font-bold " +
+                    (on
+                      ? "border-accent bg-accent/10"
+                      : "border-border bg-card")
+                  }
+                >
+                  <w.icon className="w-5 h-5" strokeWidth={1.75} aria-hidden />
+                  {w.label}
+                </button>
+              );
+            })}
           </div>
+          {when === "custom" && (
+            <input
+              type="time"
+              value={customTime}
+              onChange={(e) =>
+                editInputs(() => setCustomTime(e.target.value))
+              }
+              aria-label="Pick a start time"
+              className="mt-2 w-full h-11 rounded-xl border-[1.5px] border-border bg-card text-fg font-bold text-[13px] px-3.5"
+            />
+          )}
         </Group>
 
         <Group label="Vibe">
@@ -299,6 +465,38 @@ export function PlanFlow({
               );
             })}
           </div>
+        </Group>
+
+        <Group label="Area">
+          <div className="flex gap-2 flex-wrap">
+            <Chip on={area === ANYWHERE} onClick={() => chooseArea(ANYWHERE)}>
+              <Globe
+                className="w-3.5 h-3.5 inline-block align-[-2px] mr-1"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+              Anywhere
+            </Chip>
+            <Chip on={area === NEAR_YOU} onClick={pickNearYou}>
+              <Navigation
+                className="w-3.5 h-3.5 inline-block align-[-2px] mr-1"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+              {geoState === "pending" ? "Locating…" : "Near you"}
+            </Chip>
+            {areas.map((a) => (
+              <Chip key={a} on={area === a} onClick={() => chooseArea(a)}>
+                {a}
+              </Chip>
+            ))}
+          </div>
+          {geoState === "denied" && (
+            <div className="text-[11px] text-muted-fg mt-2">
+              Couldn&apos;t get your location — showing spots across London
+              instead.
+            </div>
+          )}
         </Group>
 
         <Group label="Budget">
@@ -331,14 +529,7 @@ export function PlanFlow({
               // Compute with the offset this click will apply (0) so the event
               // reflects the plan actually shown — useMemo's `computed` is a
               // render behind the setOffset below.
-              const result = computePlan(venues, {
-                area,
-                vibe,
-                budget,
-                offset: 0,
-                when: new Date(),
-                tasteScores,
-              });
+              const result = computePlan(venues, planOpts(0));
               setOffset(0);
               setOpenedSaved(null);
               setStep("result");
@@ -347,6 +538,7 @@ export function PlanFlow({
                 area,
                 vibe,
                 budget,
+                daypart: result.daypart, // day out vs night
                 stops: result.steps.length, // engine outcome: 0–3 stops filled
                 full: result.steps.length === 3, // did it fill a complete night?
                 poolStage: result.poolStage, // area | budget | all (had to widen?)
@@ -355,7 +547,7 @@ export function PlanFlow({
             }}
             className="w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
           >
-            Build the night{" "}
+            Build the plan{" "}
             <Sparkles
               className="w-4 h-4 inline-block align-[-3px]"
               strokeWidth={1.75}
@@ -440,14 +632,18 @@ export function PlanFlow({
         >
           ← Edit
         </button>
-        <h2 className="text-[22px] font-extrabold m-0">{display.title}</h2>
+        <h2 className="text-[22px] font-extrabold m-0">
+          {display.daypart === "day"
+            ? "Today, the plan:"
+            : "Tonight, the plan:"}
+        </h2>
         <div className="text-xs opacity-90 mt-1.5">
           <MapPin
             className="w-3.5 h-3.5 inline-block align-[-3px]"
             strokeWidth={1.75}
             aria-hidden
           />{" "}
-          {display.area} ·{" "}
+          {display.area === ANYWHERE ? "Across London" : display.area} ·{" "}
           <Clock
             className="w-3.5 h-3.5 inline-block align-[-3px]"
             strokeWidth={1.75}
@@ -553,20 +749,14 @@ export function PlanFlow({
             type="button"
             onClick={() => {
               const nextOffset = offset + 1;
-              const result = computePlan(venues, {
-                area,
-                vibe,
-                budget,
-                offset: nextOffset,
-                when: new Date(),
-                tasteScores,
-              });
+              const result = computePlan(venues, planOpts(nextOffset));
               setSaveState("idle");
               setOffset(nextOffset);
               track("plan_reshuffle", {
                 area,
                 vibe,
                 budget,
+                daypart: result.daypart,
                 stops: result.steps.length,
                 full: result.steps.length === 3,
                 poolStage: result.poolStage,
