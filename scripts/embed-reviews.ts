@@ -15,7 +15,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
-import { pipeline } from "@xenova/transformers";
+import { pipeline } from "@huggingface/transformers";
 
 const MODEL = "Xenova/all-MiniLM-L6-v2";
 const DIM = 384;
