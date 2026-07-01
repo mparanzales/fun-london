@@ -33,6 +33,7 @@ export type AnalyticsEvent =
   | "plan_reshuffle"
   | "plan_save" // user saved a generated plan to their account (funnel end)
   | "plan_open_maps" // opened the plan's walking route in Google Maps
+  | "plan_swap" // swapped a single stop for an alternative
   | "together_room_create"
   | "together_room_join"
   | "together_swipe"

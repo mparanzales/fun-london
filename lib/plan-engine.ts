@@ -47,6 +47,11 @@ export type Plan = {
   // arrival time (Stage 4.2), independent of how the pool was widened.
   poolStage: "area" | "budget" | "all";
   poolSize: number; // candidates considered after widening
+  // Per-stop swap options: alternatives[i] is the ranked list of other venues
+  // that fit stop i's role, stay within a short walk of the OTHER stops (so a
+  // swap keeps the night walkable) and are open at that stop's arrival. Powers
+  // "don't like this one — change it" without rebuilding the whole plan.
+  alternatives: Venue[][];
 };
 
 // ── Budget ───────────────────────────────────────────────────────────────
@@ -525,6 +530,25 @@ export function computePlan(
   // region / Anywhere pick reads as a real place ("a night around Shoreditch").
   const resolvedArea = chosen[0]?.venue.neighbourhood || scopeLabel(area);
 
+  // Per-stop swap options (Stage 4.x — "change this one"): for each stop, the
+  // best other venues that fit its role, stay within a short walk of the OTHER
+  // stops (so a swap keeps the night walkable) and are open at its arrival.
+  const chosenIds = new Set(chosen.map((c) => c.venue.id));
+  const maxRadius = Math.max(...radiusLadder);
+  const alternatives: Venue[][] = chosen.map((c, i) => {
+    const others = chosen.filter((_, j) => j !== i).map((x) => x.venue);
+    return pool
+      .filter(
+        (v) =>
+          !chosenIds.has(v.id) &&
+          matchRole(v, c.role) &&
+          (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
+          (others.length === 0 || minKmToChosen(v, others) <= maxRadius),
+      )
+      .sort((a, b) => scoreOf(b) - scoreOf(a))
+      .slice(0, 8);
+  });
+
   return {
     area: resolvedArea,
     vibe,
@@ -534,7 +558,38 @@ export function computePlan(
     totalMins,
     poolStage,
     poolSize: pool.length,
+    alternatives,
   };
+}
+
+// Recompute a plan's steps (dwell, walk-to-next, and the arrival clock) for a
+// given venue sequence. Used when the UI swaps a single stop so the swapped
+// venue's dwell/distance/arrivals stay honest without rebuilding the whole plan.
+// With no `when`, arrivals stay null (server render / no clock), as in the
+// freshly-computed plan.
+export function relinkSteps(
+  items: { venue: Venue; role: PlanRole }[],
+  when?: Date,
+): PlanStep[] {
+  let arrival: Date | null = when ?? null;
+  return items.map((it, i) => {
+    const next = items[i + 1]?.venue;
+    const dwellMins = dwellFor(it.venue);
+    const walkToNextMins = next ? walkMins(it.venue, next) : null;
+    const arriveAt = arrival;
+    if (arrival && next) {
+      arrival = new Date(
+        arrival.getTime() + (dwellMins + (walkToNextMins ?? 0)) * 60_000,
+      );
+    }
+    return {
+      venue: it.venue,
+      role: it.role,
+      dwellMins,
+      walkToNextMins,
+      arriveAt,
+    };
+  });
 }
 
 // One-line rationale for the saved-plan record + the result header.

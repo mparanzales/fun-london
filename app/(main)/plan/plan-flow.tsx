@@ -34,7 +34,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
-  planRationale,
+  relinkSteps,
   ANYWHERE,
   type Plan,
   type PlanBudget,
@@ -191,15 +191,39 @@ function fmtTime(d: Date): string {
 // is the dynamic "Tonight/Today, the plan:"). plan.area is the RESOLVED pocket
 // the night landed in, so a saved night reads as a real place: "Chill Night in
 // Shoreditch" even when the user only picked "East" or "Anywhere".
-function toDisplay(plan: Plan): DisplayPlan {
+function titleFor(plan: Plan, area: string): string {
   const kind = plan.daypart === "day" ? "Day Out" : "Night";
-  const where = plan.area === ANYWHERE ? "London" : plan.area;
+  const where = area === ANYWHERE ? "London" : area;
+  return `${plan.vibe} ${kind} in ${where}`;
+}
+
+// A live plan, with any per-stop swaps applied. swaps[i] is the chosen
+// alternative index for stop i (absent / -1 = keep the original). Swapping a
+// venue changes its dwell, the walk to/from it and every downstream arrival, so
+// the whole sequence is relinked (lib/plan-engine.relinkSteps) to stay honest.
+// The resolved pocket (and title) follow the possibly-swapped first stop.
+function toDisplay(
+  plan: Plan,
+  swaps: Record<number, number> = {},
+  when?: Date,
+): DisplayPlan {
+  const items = plan.steps.map((s, i) => {
+    const alt = swaps[i];
+    const v = alt != null && alt >= 0 ? plan.alternatives[i]?.[alt] : undefined;
+    return { venue: v ?? s.venue, role: s.role };
+  });
+  const steps = relinkSteps(items, when);
+  const totalMins = steps.reduce(
+    (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+    0,
+  );
+  const area = steps[0]?.venue.neighbourhood || plan.area;
   return {
-    title: `${plan.vibe} ${kind} in ${where}`,
-    area: plan.area,
+    title: titleFor(plan, area),
+    area,
     daypart: plan.daypart,
-    totalMins: plan.totalMins,
-    steps: plan.steps,
+    totalMins,
+    steps,
   };
 }
 
@@ -259,6 +283,9 @@ export function PlanFlow({
   const [vibe, setVibe] = useState<PlanVibe>("Chill");
   const [budget, setBudget] = useState<PlanBudget>("££");
   const [offset, setOffset] = useState(0);
+  // Per-stop swaps on the live plan: stop index → chosen alternative index
+  // (absent = keep the original). Reset whenever the base plan changes.
+  const [swaps, setSwaps] = useState<Record<number, number>>({});
 
   // When set, the result view shows a re-opened saved plan instead of the
   // live-computed one. Cleared whenever the user edits inputs / tries again.
@@ -308,7 +335,8 @@ export function PlanFlow({
     [venues, areaSel, vibe, budget, offset, timing, center, tasteScores],
   );
 
-  const display: DisplayPlan = openedSaved ?? toDisplay(computed);
+  const display: DisplayPlan =
+    openedSaved ?? toDisplay(computed, swaps, timing?.when);
 
   // Editorial eyebrow, same convention as the Explore header: 06:00–17:59 reads
   // "today,", 18:00–05:59 "tonight,". `now` is null until mount, so SSR + first
@@ -340,12 +368,16 @@ export function PlanFlow({
     if (!authUserId || saveState === "saving") return;
     setSaveState("saving");
     const supabase = createClient();
+    // Save what's ON SCREEN — i.e. with any per-stop swaps applied (`display`).
+    const names = display.steps.map((s) => s.venue.name).join(" → ");
+    const where = display.area === ANYWHERE ? "London" : display.area;
+    const kind = computed.daypart === "day" ? "day out" : "night";
     const { error } = await supabase.from("plans").insert({
       user_id: authUserId,
-      title: toDisplay(computed).title,
-      neighbourhood: computed.area,
-      why_it_works: planRationale(computed),
-      steps: computed.steps.map((s) => ({
+      title: display.title,
+      neighbourhood: display.area,
+      why_it_works: `A ${computed.vibe.toLowerCase()} ${where} ${kind}: ${names}.`,
+      steps: display.steps.map((s) => ({
         venueId: s.venue.id,
         role: s.role,
         dwellMins: s.dwellMins,
@@ -360,11 +392,12 @@ export function PlanFlow({
     setSaveState("saved");
     recordSignal("plan_completed", { surface: "plan" });
     track("plan_save", {
-      area: computed.area,
+      area: display.area,
       vibe: computed.vibe,
       budget: computed.budget,
       daypart: computed.daypart,
-      stops: computed.steps.length,
+      stops: display.steps.length,
+      swapped: Object.values(swaps).filter((v) => v >= 0).length,
       poolStage: computed.poolStage,
       poolSize: computed.poolSize,
     });
@@ -402,11 +435,31 @@ export function PlanFlow({
     setStep("result");
   };
 
-  // Editing any input invalidates a re-opened saved plan + the saved flag.
+  // Editing any input invalidates a re-opened saved plan, the saved flag, and
+  // any per-stop swaps (the base plan is about to change).
   const editInputs = (fn: () => void) => {
     setOpenedSaved(null);
     setSaveState("idle");
+    setSwaps({});
     fn();
+  };
+
+  // "Change this one" — cycle stop `i` through its alternatives, wrapping back
+  // to the original. relinkSteps (via toDisplay) keeps the walk + arrivals + map
+  // honest after the swap.
+  const onSwap = (i: number) => {
+    const alts = computed.alternatives[i] ?? [];
+    if (alts.length === 0) return;
+    setSwaps((prev) => {
+      const next = { ...prev };
+      const nextIdx = (prev[i] ?? -1) + 1;
+      if (nextIdx >= alts.length)
+        delete next[i]; // back to the original
+      else next[i] = nextIdx;
+      return next;
+    });
+    setSaveState("idle");
+    track("plan_swap", { stop: i });
   };
 
   // Anywhere / Near you are the two quick chips; the rest goes through the
@@ -790,6 +843,7 @@ export function PlanFlow({
               // render behind the setOffset below.
               const result = computePlan(venues, planOpts(0));
               setOffset(0);
+              setSwaps({});
               setOpenedSaved(null);
               setStep("result");
               recordSignal("plan_started", { surface: "plan" });
@@ -935,6 +989,21 @@ export function PlanFlow({
               <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase">
                 {s.role}
               </div>
+              {!openedSaved && (computed.alternatives[i]?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onSwap(i)}
+                  aria-label={`Change the ${s.role} stop`}
+                  className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
+                >
+                  <RotateCw
+                    className="w-3.5 h-3.5"
+                    strokeWidth={2}
+                    aria-hidden
+                  />
+                  Change
+                </button>
+              )}
             </div>
             <Link
               href={`/venue/${s.venue.slug}`}
@@ -1047,6 +1116,7 @@ export function PlanFlow({
               const nextOffset = offset + 1;
               const result = computePlan(venues, planOpts(nextOffset));
               setSaveState("idle");
+              setSwaps({});
               setOffset(nextOffset);
               track("plan_reshuffle", {
                 area: result.area, // resolved walkable pocket
