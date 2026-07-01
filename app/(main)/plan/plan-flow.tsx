@@ -35,6 +35,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
   relinkSteps,
+  isDaytimeHour,
   ANYWHERE,
   type Plan,
   type PlanBudget,
@@ -113,8 +114,9 @@ function resolveTiming(
     d.setHours(h, m, 0, 0);
     return d;
   };
-  // Before 5pm reads as "day"; from 5pm on, "evening".
-  const isDayNow = base.getHours() < 17;
+  // 05:00–16:59 reads as "day"; from 5pm on — and through the small hours until
+  // 5am — "evening" (a plan built at 1am is a night out). See isDaytimeHour.
+  const isDayNow = isDaytimeHour(base.getHours());
   switch (choice) {
     case "day":
       // A daytime plan: use now if it's still daytime, else a representative 1pm.
@@ -135,7 +137,10 @@ function resolveTiming(
         0,
         0,
       );
-      return { daypart: when.getHours() < 17 ? "day" : "evening", when };
+      return {
+        daypart: isDaytimeHour(when.getHours()) ? "day" : "evening",
+        when,
+      };
     }
     default: // "now" — plan for this moment, shape follows the clock.
       return { daypart: isDayNow ? "day" : "evening", when: base };

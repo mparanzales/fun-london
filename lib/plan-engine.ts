@@ -390,6 +390,13 @@ function buildSoloCluster(
 // to a strong vibe match (~8), so taste leads but vibe still shapes the night.
 const PLAN_TASTE_WEIGHT = 8;
 
+// Does this clock hour read as "day" (vs evening/night)? Daytime is 05:00–16:59;
+// the small hours (00:00–04:59) are still the night before, so a plan built at
+// 1am is a night out, not a day out. Shared with the plan UI so both agree.
+export function isDaytimeHour(hour: number): boolean {
+  return hour >= 5 && hour < 17;
+}
+
 export function computePlan(
   venues: Venue[],
   opts: {
@@ -415,9 +422,10 @@ export function computePlan(
     radiusKm = 1.5,
   } = opts;
   // Day vs evening shapes the whole plan (which venue types fill each role).
-  // Explicit `daypart` wins; else infer from the clock (before 5pm reads day).
+  // Explicit `daypart` wins; else infer from the clock (05:00–16:59 reads day,
+  // and the small hours count as the night before — see isDaytimeHour).
   const daypart: PlanDaypart =
-    opts.daypart ?? (when && when.getHours() < 17 ? "day" : "evening");
+    opts.daypart ?? (when && isDaytimeHour(when.getHours()) ? "day" : "evening");
   const matchRole = (v: Venue, role: PlanRole) =>
     roleMatchesForDaypart(v, role, daypart);
   // Blended desirability: tonight's vibe/quality + the user's personal taste

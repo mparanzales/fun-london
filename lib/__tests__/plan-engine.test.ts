@@ -5,6 +5,7 @@ import {
   isOpenAt,
   computePlan,
   relinkSteps,
+  isDaytimeHour,
 } from "@/lib/plan-engine";
 import type { Venue, OpeningHours } from "@/lib/types";
 import { makeVenue } from "./_fixtures";
@@ -380,6 +381,35 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
     }).steps.map((s) => s.venue.type);
     expect(eveTypes).not.toContain("Culture");
     expect(eveTypes).not.toContain("Market"); // markets aren't a night stop
+  });
+
+  it("isDaytimeHour: 05:00–16:59 is day; the small hours read as night", () => {
+    expect(isDaytimeHour(5)).toBe(true); // 5am — day begins
+    expect(isDaytimeHour(12)).toBe(true); // noon
+    expect(isDaytimeHour(16)).toBe(true); // 4pm — last day hour
+    expect(isDaytimeHour(17)).toBe(false); // 5pm — evening
+    expect(isDaytimeHour(23)).toBe(false); // 11pm — night
+    expect(isDaytimeHour(0)).toBe(false); // midnight — still the night before
+    expect(isDaytimeHour(1)).toBe(false); // 1am — the bug case
+    expect(isDaytimeHour(4)).toBe(false); // 4:xx am — still night
+  });
+
+  it("infers evening for a plan built in the small hours (no explicit daypart)", () => {
+    // ~1am with no explicit daypart used to read as a DAY plan (hour < 17);
+    // it must now build an evening/night plan — no Culture/Market stop.
+    const oneAm = new Date(2026, 5, 10, 1, 0);
+    const eveTypes = computePlan(venues, { ...base, when: oneAm }).steps.map(
+      (s) => s.venue.type,
+    );
+    expect(eveTypes).not.toContain("Culture");
+    expect(eveTypes).not.toContain("Market");
+
+    // Sanity: midday with no explicit daypart still reads as a day plan.
+    const noon = new Date(2026, 5, 10, 12, 0);
+    const dayTypes = computePlan(venues, { ...base, when: noon }).steps.map(
+      (s) => s.venue.type,
+    );
+    expect(dayTypes.some((t) => t === "Culture" || t === "Market")).toBe(true);
   });
 
   it("dwell time depends on venue type (coffee ≠ dinner ≠ club), not the slot", () => {
