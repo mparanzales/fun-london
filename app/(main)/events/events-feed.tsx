@@ -222,12 +222,7 @@ export function EventsFeed({
           colour shift on selection (mirrors /explore). Sits directly under the
           header, Explore-style; the date rail follows below it. */}
       {categoryChips.length > 1 && (
-        <div
-          className="px-5 pt-1 pb-3 grid gap-1"
-          style={{
-            gridTemplateColumns: `repeat(${categoryChips.length}, minmax(0, 1fr))`,
-          }}
-        >
+        <div className="px-5 pt-1 pb-3 flex gap-1 overflow-x-auto no-scrollbar">
           {categoryChips.map((c) => {
             const on = category === c.id;
             const iconClass =
@@ -243,7 +238,7 @@ export function EventsFeed({
                 onClick={() => setCategory(c.id)}
                 aria-pressed={on}
                 className={
-                  "flex flex-col items-center gap-1 py-2 rounded-xl transition-colors " +
+                  "flex flex-col items-center gap-1 py-2 rounded-xl transition-colors shrink-0 w-14 " +
                   (on ? "bg-accent/10" : "")
                 }
               >
@@ -255,10 +250,9 @@ export function EventsFeed({
         </div>
       )}
 
-      {/* Quick date filters — slim, lowercase, single horizontal rail (no
-          wrap), under the category icons (Explore-style). The active one gets a
-          soft accent tint, the rest are quiet muted text. */}
-      <div className="px-5 pb-2.5 flex justify-between gap-1.5">
+      {/* Quick date filters — small pills in the same style as Explore's
+          "Near you" control: bg-muted when off, solid primary when active. */}
+      <div className="px-5 pb-2.5 grid grid-cols-5 gap-1.5">
         {QUICK_FILTERS.map((f) => {
           const on = quick === f.id;
           return (
@@ -272,10 +266,8 @@ export function EventsFeed({
                     : () => setWallFor("date")
               }
               className={
-                "shrink-0 px-3.5 h-9 rounded-full text-[13px] lowercase whitespace-nowrap transition-colors " +
-                (on
-                  ? "bg-accent/10 text-accent font-semibold"
-                  : "text-muted-fg font-medium hover:text-fg")
+                "flex items-center justify-center w-full h-7 rounded-full text-[11px] font-bold transition " +
+                (on ? "bg-primary text-primary-fg" : "bg-muted text-muted-fg")
               }
             >
               {f.label}
