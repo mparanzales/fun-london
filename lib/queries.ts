@@ -20,6 +20,8 @@ import { rankRowsByTaste } from "@/lib/taste-feed";
 import { createServiceClient } from "@/lib/supabase/admin";
 import { scoreVenue, hasPrefs } from "./ranking";
 import { FEED_PAGE_SIZE } from "./feed-constants";
+import { regionOf, type Region } from "@/lib/regions";
+import { isOpenNow } from "@/lib/opening-hours";
 import type {
   Venue,
   Event,
@@ -529,6 +531,10 @@ export async function fetchAllVenueSearchRows(): Promise<
 type FeedRankRow = VenueCardRow & {
   mood_tags: Mood[] | null;
   vibe_tags: string[] | null;
+  // opening_hours is a moat column but the `authenticated` role reads it fine.
+  // It stays on the server (feedPage filters "open now" here and never ships it
+  // to the client — mapVenuePreview blanks openingHours), so the moat holds.
+  opening_hours: OpeningHours | null;
 };
 
 function scoreFeedRow(r: FeedRankRow, prefs: UserPreferences): number {
@@ -564,7 +570,7 @@ async function getVenueIndex(): Promise<FeedRankRow[]> {
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("venues")
-      .select(`${VENUE_CARD_COLUMNS}, mood_tags, vibe_tags`)
+      .select(`${VENUE_CARD_COLUMNS}, mood_tags, vibe_tags, opening_hours`)
       .not("google_place_id", "is", null)
       .is("hidden_at", null)
       .not("img_url", "ilike", "%unsplash%")
@@ -582,7 +588,7 @@ async function getVenueIndex(): Promise<FeedRankRow[]> {
 }
 
 export type FeedFilter = "for-you" | "restaurants" | "bars" | "cafes" | "music";
-export type FeedSort = "taste" | "nearest";
+export type FeedSort = "taste" | "nearest" | "rating";
 
 const FEED_BAR_TYPES = ["Bar", "Wine Bar", "Pub", "Listening Bar"];
 const FEED_MUSIC_TYPES = ["Live Music"];
@@ -629,11 +635,38 @@ export async function feedPage(args: {
   lat?: number | null;
   lng?: number | null;
   userId?: string | null;
+  // Refine filters (applied server-side over the whole in-memory index, so a
+  // narrow filter still pages correctly instead of thinning out one page).
+  price?: PriceTier[] | null;
+  regions?: Region[] | null;
+  openNow?: boolean;
 }): Promise<{ venues: Venue[]; hasMore: boolean }> {
   const idx = await getVenueIndex();
   let rows = idx.filter((r) =>
     matchesFeedFilter(r.type as string, args.filter),
   );
+
+  // Price: keep rows whose tier is in the chosen set (empty/absent = all).
+  if (args.price && args.price.length > 0) {
+    const want = new Set(args.price);
+    rows = rows.filter((r) => want.has(r.price as PriceTier));
+  }
+
+  // Region: map each row's neighbourhood to its region and keep the chosen set.
+  if (args.regions && args.regions.length > 0) {
+    const want = new Set(args.regions);
+    rows = rows.filter((r) => {
+      const reg = r.neighbourhood ? regionOf(r.neighbourhood) : null;
+      return reg != null && want.has(reg);
+    });
+  }
+
+  // Open now: computed from opening_hours in Europe/London wall-clock. Rows with
+  // unknown hours are dropped (we can't claim they're open).
+  if (args.openNow) {
+    const now = new Date();
+    rows = rows.filter((r) => isOpenNow(r.opening_hours, now));
+  }
 
   const quizSort = (prefs: UserPreferences) => {
     rows = rows
@@ -642,7 +675,15 @@ export async function feedPage(args: {
       .map((x) => x.r);
   };
 
-  if (args.sort === "nearest" && args.lat != null && args.lng != null) {
+  if (args.sort === "rating") {
+    // Top rated: highest star rating first, ties broken by review volume so a
+    // 4.8 with 900 reviews outranks a 4.8 with 12.
+    rows = [...rows].sort(
+      (a, b) =>
+        Number(b.rating) - Number(a.rating) ||
+        Number(b.review_count) - Number(a.review_count),
+    );
+  } else if (args.sort === "nearest" && args.lat != null && args.lng != null) {
     const g = { lat: args.lat, lng: args.lng };
     rows = [...rows].sort((a, b) => {
       const da =

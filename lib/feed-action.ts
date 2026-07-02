@@ -12,7 +12,8 @@ import {
   type FeedFilter,
   type FeedSort,
 } from "./queries";
-import type { Venue } from "./types";
+import type { Region } from "./regions";
+import type { PriceTier, Venue } from "./types";
 
 export async function loadFeedPage(args: {
   filter: FeedFilter;
@@ -21,6 +22,9 @@ export async function loadFeedPage(args: {
   sort: FeedSort;
   lat?: number | null;
   lng?: number | null;
+  price?: PriceTier[] | null;
+  regions?: Region[] | null;
+  openNow?: boolean;
 }): Promise<{ venues: Venue[]; hasMore: boolean }> {
   const user = await getAuthUser();
   if (!user) return { venues: [], hasMore: false };
