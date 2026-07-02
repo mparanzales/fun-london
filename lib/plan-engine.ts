@@ -644,12 +644,20 @@ export type WalkablePlan = {
 const ROLE_ORDER: PlanRole[] = ["Start", "Then", "Finish"];
 const RADIUS_LADDER_KM = [0.8, 1.2, 1.6]; // widen per slot if nothing nearby
 const PROX_WEIGHT = 0.05; // rating points shaved per walking minute
+// How many rating points a full group-taste match is worth (Stage 5). Rating
+// spreads ~0.5 across a role's candidates, so this lets taste reorder within a
+// role without swamping quality entirely.
+const GROUP_TASTE_WEIGHT = 4;
 
-// Base desirability before the proximity penalty. Rating-led for now (yes/no
-// swipes don't capture chill-vs-lively); a real vibe question can feed
-// vibeScore in here later.
-function baseScore(v: Venue): number {
-  return v.rating;
+// A blended group taste map: venueId → the group's taste relevance for it
+// (centred cosine, ~[-0.3, 0.7]). Built server-side from the signed-in members'
+// taste vectors (Stage 5). Absent/off → pure rating, unchanged behaviour.
+export type GroupTaste = Record<string, number> | null | undefined;
+
+// Base desirability before the proximity penalty: the venue's rating, nudged by
+// how well it matches the GROUP's blended taste (Stage 5).
+function baseScore(v: Venue, taste?: GroupTaste): number {
+  return v.rating + (taste ? GROUP_TASTE_WEIGHT * (taste[v.id] ?? 0) : 0);
 }
 
 function minWalkToChosen(v: Venue, chosen: Venue[]): number {
@@ -665,12 +673,16 @@ function minKmToChosen(v: Venue, chosen: Venue[]): number {
   return ds.length ? Math.min(...ds) : 0;
 }
 
-function rankByScore(candidates: Venue[], near: Venue[]): Venue[] {
+function rankByScore(
+  candidates: Venue[],
+  near: Venue[],
+  taste?: GroupTaste,
+): Venue[] {
   return [...candidates].sort(
     (a, b) =>
-      baseScore(b) -
+      baseScore(b, taste) -
       PROX_WEIGHT * minWalkToChosen(b, near) -
-      (baseScore(a) - PROX_WEIGHT * minWalkToChosen(a, near)),
+      (baseScore(a, taste) - PROX_WEIGHT * minWalkToChosen(a, near)),
   );
 }
 
@@ -723,6 +735,7 @@ function buildClusterFromSeed(
   roles: PlanRole[],
   seed: Venue,
   intent: RoleIntent = EMPTY_INTENT,
+  taste?: GroupTaste,
 ): {
   chosen: { venue: Venue; role: PlanRole; radiusKm: number }[];
   unfilled: PlanRole[];
@@ -743,6 +756,7 @@ function buildClusterFromSeed(
             minKmToChosen(v, chosenVenues) <= R,
         ),
         chosenVenues,
+        taste,
       );
       if (candidates.length > 0) {
         picked = candidates[0];
@@ -767,6 +781,7 @@ export function computeWalkablePlan(
   events: Event[] = [],
   variant = 0,
   intent: RoleIntent = EMPTY_INTENT,
+  taste?: GroupTaste,
 ): WalkablePlan {
   const { area, budget, when } = settings;
   const open = (v: Venue) => isOpenAt(v, when);
@@ -791,16 +806,20 @@ export function computeWalkablePlan(
   let seedCandidates = rankByScore(
     pool.filter((v) => roleMatchesIntent(v, seedRole, intent)),
     [],
+    taste,
   ).slice(0, 10);
   if (seedCandidates.length === 0) {
-    seedCandidates = rankByScore(pool, []).slice(0, 10);
+    seedCandidates = rankByScore(pool, [], taste).slice(0, 10);
   }
 
   const clusters = seedCandidates
     .map((seed) => {
-      const c = buildClusterFromSeed(pool, roles, seed, intent);
+      const c = buildClusterFromSeed(pool, roles, seed, intent, taste);
       const filled = roles.length - c.unfilled.length;
-      const quality = c.chosen.reduce((s, x) => s + baseScore(x.venue), 0);
+      const quality = c.chosen.reduce(
+        (s, x) => s + baseScore(x.venue, taste),
+        0,
+      );
       return { ...c, score: filled * 1000 + quality };
     })
     .sort((a, b) => b.score - a.score);
@@ -849,6 +868,7 @@ export function computeWalkablePlan(
           (others.length === 0 || minKmToChosen(v, others) <= c.radiusKm),
       ),
       others,
+      taste,
     );
   });
 
