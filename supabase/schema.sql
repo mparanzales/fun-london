@@ -307,6 +307,19 @@ grant select (
   google_place_id, hidden_at
 ) on public.venues to anon;
 
+-- Lock anon to card-level columns on events (migration
+-- lock_anon_to_card_columns_on_events). Mirrors the venues lockdown above:
+-- without it, `using (true)` on the "events public read" policy lets anon read
+-- every column (incl. description, source_url, source_id) directly via
+-- PostgREST. `authenticated` + `service_role` keep full access. Keep this list
+-- in sync with EVENT_CARD_COLUMNS + the columns the anon feed/search
+-- filter/order on (cancelled_at).
+revoke select on public.events from anon;
+grant select (
+  id, name, venue_name, venue_id, area, date_label, time_label,
+  starts_at, price, category, img_url, source, ends_at, cancelled_at
+) on public.events to anon;
+
 -- Pop-up radar: admin may hide an auto-published pop-up (set cancelled_at)
 -- without the service-role key. Scoped to source='popup' + the admin email
 -- (mirror FL_ADMIN_EMAILS). Migration: events_admin_hide_popups_policy.
