@@ -12,11 +12,18 @@ import {
   MapPin,
   X,
   Sparkles,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { VenueCard } from "@/components/venue-card";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
+import {
+  FilterSheet,
+  EMPTY_FILTERS,
+  type ExploreFilters,
+  type LockedFeature,
+} from "@/components/filter-sheet";
 import { searchCatalog } from "@/lib/search-action";
 import { loadFeedPage } from "@/lib/feed-action";
 import { recordSignal } from "@/lib/signals";
@@ -26,6 +33,7 @@ import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { CITY } from "@/lib/config";
 import { hasPrefs } from "@/lib/ranking";
+import { regionOf } from "@/lib/regions";
 import {
   readFreshUserGeo,
   requestUserGeo,
@@ -52,10 +60,12 @@ type FilterKey =
 // Anon-only: which thing a soft AuthWall is gating. The CATEGORY chips are NOT
 // here — for anon they filter to a 4-card preview + the sign-up wall, just like
 // For You. Search is open to everyone now (signed-out search is server-side and
-// card-level); only the Near-you sort still raises the blur wall.
-type WallTarget = "near";
+// card-level). The Near-you sort and the signed-in-only refine filters ("open
+// now") raise the blur wall.
+type WallTarget = LockedFeature;
 const WALL_TITLES: Record<WallTarget, string> = {
   near: "Sign up to sort by distance",
+  open: "Sign up to filter by opening hours",
 };
 
 type FeedItem = { kind: "venue"; data: Venue } | { kind: "event"; data: Event };
@@ -120,10 +130,18 @@ export function ExploreFeed({
   // stays off, so we never claim personalisation we don't have.
   const personalized = hasPrefs(preferences);
 
+  // Refine filters (price / area / open-now) + sort. `sort` is the single source
+  // of truth; the "Near you" pill and the Filters sheet both drive it, and
+  // `nearestFirst` is derived so all the existing distance-label logic keeps
+  // working unchanged.
+  const [filters, setFilters] = useState<ExploreFilters>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const { price, regions, openNow, sort } = filters;
+  const nearestFirst = sort === "nearest";
+
   // "Near you" — read any previously captured location and let the user sort
   // the current view by walking distance.
   const [userGeo, setUserGeo] = useState<LatLng | null>(null);
-  const [nearestFirst, setNearestFirst] = useState(false);
   // idle = ready · locating = waiting on the browser · denied = permission off
   // · unavailable = no geolocation / hardware error.
   const [geoStatus, setGeoStatus] = useState<
@@ -158,26 +176,49 @@ export function ExploreFeed({
     setShowLocPrompt(false);
   }
 
-  async function toggleNearest() {
-    // Re-read in case a (still-fresh) fix was stored after this mounted.
+  // Switch sort to "nearest", acquiring a location fix first if we don't have
+  // one. requestUserGeo retries once on a slow/cold timeout (the root of the
+  // "sometimes works, sometimes doesn't" flakiness) and persists on success, so
+  // the next call is instant.
+  async function enableNearest() {
     const stored = userGeo ?? readFreshUserGeo();
     if (stored) {
       if (!userGeo) setUserGeo(stored);
-      setNearestFirst((v) => !v);
+      setFilters((f) => ({ ...f, sort: "nearest" }));
       return;
     }
-    // Acquire a fix. requestUserGeo retries once on a slow/cold timeout (the
-    // root of the "sometimes works, sometimes doesn't" flakiness) and persists
-    // on success, so the next toggle is instant.
     setGeoStatus("locating");
     const r = await requestUserGeo();
     if (r.ok) {
       setUserGeo(r.geo);
-      setNearestFirst(true);
+      setFilters((f) => ({ ...f, sort: "nearest" }));
       setGeoStatus("idle");
     } else {
       setGeoStatus(r.reason === "denied" ? "denied" : "unavailable");
     }
+  }
+
+  // "Near you" pill: toggle nearest on/off. Turning it off returns to the
+  // default "for-you" sort (not "top-rated", which only the sheet sets).
+  function toggleNearest() {
+    if (nearestFirst) setFilters((f) => ({ ...f, sort: "for-you" }));
+    else enableNearest();
+  }
+
+  // Apply the sheet's draft. Price / area / open-now are set directly; a
+  // "nearest" sort has to run the geo flow, so it's routed through enableNearest
+  // (which flips sort itself once a fix lands).
+  function applyFilters(next: ExploreFilters) {
+    const wantsNearest = next.sort === "nearest";
+    setFilters({ ...next, sort: wantsNearest ? sort : next.sort });
+    if (wantsNearest && !nearestFirst) enableNearest();
+    setFiltersOpen(false);
+  }
+
+  // Sheet tapped a signed-in-only control while anon → raise the soft wall.
+  function handleLockedFeature(feature: LockedFeature) {
+    setFiltersOpen(false);
+    setWallFor(feature);
   }
 
   const items = useMemo<FeedItem[]>(() => {
@@ -218,6 +259,26 @@ export function ExploreFeed({
       }
     })();
 
+    // Refine the anon preview client-side. (For signed-in visitors these same
+    // filters run server-side in feedPage, and displayItems reads the paginated
+    // `loaded` set, so this branch only shapes the anon teaser.) Price and area
+    // act on venues; events pass through untouched.
+    let refined = base;
+    if (price.length > 0) {
+      const wantP = new Set(price);
+      refined = refined.filter(
+        (it) => it.kind !== "venue" || wantP.has(it.data.price),
+      );
+    }
+    if (regions.length > 0) {
+      const wantR = new Set(regions);
+      refined = refined.filter((it) => {
+        if (it.kind !== "venue") return true;
+        const reg = regionOf(it.data.neighbourhood);
+        return reg != null && wantR.has(reg);
+      });
+    }
+
     // "Nearest first" — sort the filtered view by walking distance. Events and
     // coordinate-less venues sink to the bottom (Infinity).
     if (nearestFirst && userGeo) {
@@ -227,10 +288,27 @@ export function ExploreFeed({
         if (lat == null || lng == null) return Infinity;
         return haversineKm(userGeo, { lat, lng });
       };
-      return [...base].sort((a, b) => dist(a) - dist(b));
+      return [...refined].sort((a, b) => dist(a) - dist(b));
     }
-    return base;
-  }, [selectedFilter, allVenues, allEvents, nearestFirst, userGeo]);
+    // "Top rated" — highest-rated first; events sink below rated venues.
+    if (sort === "top-rated") {
+      return [...refined].sort((a, b) => {
+        const ra = a.kind === "venue" ? a.data.rating : -1;
+        const rb = b.kind === "venue" ? b.data.rating : -1;
+        return rb - ra;
+      });
+    }
+    return refined;
+  }, [
+    selectedFilter,
+    allVenues,
+    allEvents,
+    nearestFirst,
+    userGeo,
+    price,
+    regions,
+    sort,
+  ]);
 
   // ── Signed-in feed: cursor pagination ───────────────────────────────────────
   // Page 0 arrives server-rendered in `allVenues`; the rest paginate in via the
@@ -243,16 +321,32 @@ export function ExploreFeed({
   const firstRun = useRef(true);
   const lastKeyRef = useRef<string | null>(null);
 
-  // Reset + fetch page 0 whenever the view (category or nearest sort) changes.
+  // Map the UI sort mode onto the server's FeedSort. "top-rated" → "rating";
+  // "nearest" needs a geo fix (handled by the pill / sheet) else falls back.
+  const serverSort: FeedSort =
+    sort === "nearest" ? "nearest" : sort === "top-rated" ? "rating" : "taste";
+  const priceKey = [...price].sort().join(",");
+  const regionKey = [...regions].sort().join(",");
+  // Refinements active (for the Filters pill badge). "Nearest" is excluded — it
+  // has its own pill — so this only counts what lives inside the sheet.
+  const refineCount =
+    (price.length ? 1 : 0) +
+    (regions.length ? 1 : 0) +
+    (openNow ? 1 : 0) +
+    (sort === "top-rated" ? 1 : 0);
+
+  // Reset + fetch page 0 whenever the view (category / sort / refine filters)
+  // changes.
   useEffect(() => {
     if (!signedIn) return;
-    const sort: FeedSort = nearestFirst ? "nearest" : "taste";
     const filter =
       selectedFilter === "events" ? null : (selectedFilter as FeedFilter);
     const geoKey = userGeo
       ? `${userGeo.lat.toFixed(3)},${userGeo.lng.toFixed(3)}`
       : "";
-    const key = `${selectedFilter}|${sort}|${sort === "nearest" ? geoKey : ""}`;
+    const key = `${selectedFilter}|${serverSort}|${
+      serverSort === "nearest" ? geoKey : ""
+    }|${priceKey}|${regionKey}|${openNow ? "o" : ""}`;
     // Page 0 of the default view is already server-rendered; don't re-fetch it.
     if (firstRun.current) {
       firstRun.current = false;
@@ -275,9 +369,12 @@ export function ExploreFeed({
       filter,
       offset: 0,
       limit: FEED_PAGE_SIZE,
-      sort,
+      sort: serverSort,
       lat: userGeo?.lat ?? null,
       lng: userGeo?.lng ?? null,
+      price: price.length ? price : null,
+      regions: regions.length ? regions : null,
+      openNow,
     })
       .then((res) => {
         if (myReq !== reqIdRef.current) return;
@@ -287,7 +384,18 @@ export function ExploreFeed({
       .finally(() => {
         if (myReq === reqIdRef.current) loadingRef.current = false;
       });
-  }, [signedIn, selectedFilter, nearestFirst, userGeo]);
+    // priceKey/regionKey stand in for the price/regions arrays in the dep list
+    // (stable string identity), so an unrelated re-render can't refetch page 0.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    signedIn,
+    selectedFilter,
+    serverSort,
+    userGeo,
+    priceKey,
+    regionKey,
+    openNow,
+  ]);
 
   const loadMore = useCallback(() => {
     if (
@@ -297,16 +405,18 @@ export function ExploreFeed({
       selectedFilter === "events"
     )
       return;
-    const sort: FeedSort = nearestFirst ? "nearest" : "taste";
     loadingRef.current = true;
     const myReq = reqIdRef.current;
     loadFeedPage({
       filter: selectedFilter as FeedFilter,
       offset: loaded.length,
       limit: FEED_PAGE_SIZE,
-      sort,
+      sort: serverSort,
       lat: userGeo?.lat ?? null,
       lng: userGeo?.lng ?? null,
+      price: price.length ? price : null,
+      regions: regions.length ? regions : null,
+      openNow,
     })
       .then((res) => {
         if (myReq !== reqIdRef.current) return;
@@ -320,9 +430,12 @@ export function ExploreFeed({
     signedIn,
     feedHasMore,
     selectedFilter,
-    nearestFirst,
+    serverSort,
     userGeo,
     loaded.length,
+    price,
+    regions,
+    openNow,
   ]);
 
   const ioRef = useRef<IntersectionObserver | null>(null);
@@ -466,6 +579,21 @@ export function ExploreFeed({
               ? "Nearest first"
               : "Near you"}
         </button>
+        <button
+          type="button"
+          onClick={() => setFiltersOpen(true)}
+          aria-haspopup="dialog"
+          className={
+            "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[11px] font-bold transition " +
+            (refineCount > 0
+              ? "bg-primary text-primary-fg"
+              : "bg-muted text-muted-fg")
+          }
+        >
+          <SlidersHorizontal size={12} strokeWidth={2.4} />
+          Filters
+          {refineCount > 0 && ` · ${refineCount}`}
+        </button>
         {geoStatus === "denied" && (
           <span className="text-[11px] font-semibold text-muted-fg">
             Location is off. Turn it on for this site in your browser to sort by
@@ -479,7 +607,7 @@ export function ExploreFeed({
         )}
         {selectedFilter === "for-you" &&
           personalized &&
-          !nearestFirst &&
+          sort === "for-you" &&
           geoStatus === "idle" && (
             <span className="text-[11px] font-semibold text-muted-fg">
               <Sparkles
@@ -601,6 +729,16 @@ export function ExploreFeed({
           events={[]}
           searchAction={searchCatalog}
           onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {filtersOpen && (
+        <FilterSheet
+          value={filters}
+          signedIn={signedIn}
+          onApply={applyFilters}
+          onClose={() => setFiltersOpen(false)}
+          onLockedFeature={handleLockedFeature}
         />
       )}
 
