@@ -11,13 +11,21 @@ import {
   Store,
   Search,
   Moon,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { EventCard } from "@/components/event-card";
 import { SearchOverlay } from "@/components/search-overlay";
+import {
+  EventFilterSheet,
+  EMPTY_EVENT_FILTERS,
+  eventFilterCount,
+  type EventFilters,
+} from "@/components/event-filter-sheet";
 import { searchEvents } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
+import { regionOf } from "@/lib/regions";
 import type { Event, EventCategory } from "@/lib/types";
 
 // How many events a signed-out visitor sees before the sign-up wall (mirrors
@@ -45,11 +53,11 @@ type CategoryFilter = "all" | EventCategory | "popup";
 
 // Anon-only: which chrome interaction a soft AuthWall is gating. The CATEGORY
 // chips are NOT here — for anon they filter to a 4-card preview + the wall, just
-// like the "All" view. Search is open to anon (server-side, like Explore); only
-// the date pills raise the blur wall.
-type EventsWallTarget = "date";
+// like the "All" view. Search is open to anon (server-side, like Explore); the
+// date pills AND the Filters sheet (area + sort) raise the blur wall.
+type EventsWallTarget = "filter";
 function eventsWallTitle(): string {
-  return "Sign up to filter by date";
+  return "Sign up to filter events";
 }
 
 // Every category chip we COULD show, in display order. Which ones actually
@@ -123,6 +131,11 @@ export function EventsFeed({
   // Anon: a search / date / category interaction raises a soft blur wall
   // (sign-in on top) over the preview — never a redirect. null = no wall.
   const [wallFor, setWallFor] = useState<EventsWallTarget | null>(null);
+  // Refine filters (area + sort), applied from the Filters sheet.
+  const [filters, setFilters] = useState<EventFilters>(EMPTY_EVENT_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const { regions, sort } = filters;
+  const refineCount = eventFilterCount(filters);
 
   const filtered = useMemo(() => {
     const now = new Date();
@@ -154,32 +167,43 @@ export function EventsFeed({
     }
 
     const nowMs = now.getTime();
-    return events
-      .filter((e) => {
-        // A pop-up runs over a range, so test whether its run OVERLAPS the
-        // window, not just its start. Normal events have no endsAt, so
-        // start and end collapse to the same instant (original behaviour).
-        const startMs = new Date(e.startsAt).getTime();
-        const endMs = e.endsAt ? new Date(e.endsAt).getTime() : startMs;
-        if (lo && endMs < lo.getTime()) return false; // already finished
-        if (hi && startMs > hi.getTime()) return false; // starts after window
-        if (category === "popup") {
-          if (!e.isPopup) return false;
-        } else if (category !== "all" && e.category !== category) {
-          return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        // A pop-up already running (start in the past) sorts as if it were
-        // "now" so it sits with today's items rather than weeks above them.
-        const key = (e: Event) => {
-          const s = new Date(e.startsAt).getTime();
-          return e.isPopup ? Math.max(s, nowMs) : s;
-        };
-        return key(a) - key(b);
-      });
-  }, [events, quick, fromDate, toDate, category]);
+    const wantRegions = regions.length > 0 ? new Set(regions) : null;
+    const list = events.filter((e) => {
+      // A pop-up runs over a range, so test whether its run OVERLAPS the
+      // window, not just its start. Normal events have no endsAt, so
+      // start and end collapse to the same instant (original behaviour).
+      const startMs = new Date(e.startsAt).getTime();
+      const endMs = e.endsAt ? new Date(e.endsAt).getTime() : startMs;
+      if (lo && endMs < lo.getTime()) return false; // already finished
+      if (hi && startMs > hi.getTime()) return false; // starts after window
+      if (category === "popup") {
+        if (!e.isPopup) return false;
+      } else if (category !== "all" && e.category !== category) {
+        return false;
+      }
+      // Area: map the event's area to a region and keep the chosen set.
+      if (wantRegions) {
+        const reg = e.area ? regionOf(e.area) : null;
+        if (reg == null || !wantRegions.has(reg)) return false;
+      }
+      return true;
+    });
+
+    if (sort === "az") {
+      return list.sort((a, b) =>
+        a.name.localeCompare(b.name, "en", { sensitivity: "base" }),
+      );
+    }
+    return list.sort((a, b) => {
+      // Soonest first. A pop-up already running (start in the past) sorts as if
+      // it were "now" so it sits with today's items rather than weeks above.
+      const key = (e: Event) => {
+        const s = new Date(e.startsAt).getTime();
+        return e.isPopup ? Math.max(s, nowMs) : s;
+      };
+      return key(a) - key(b);
+    });
+  }, [events, quick, fromDate, toDate, category, regions, sort]);
 
   // Data-driven category chips: "All", then only the categories actually
   // present in the feed (in display order), then "Pop-ups" if any exist. This
@@ -263,7 +287,7 @@ export function EventsFeed({
                   ? () => setQuick(f.id)
                   : f.id === "all"
                     ? () => setQuick("all")
-                    : () => setWallFor("date")
+                    : () => setWallFor("filter")
               }
               className={
                 "flex items-center justify-center w-full h-7 rounded-full text-[11px] font-bold transition " +
@@ -274,6 +298,28 @@ export function EventsFeed({
             </button>
           );
         })}
+      </div>
+
+      {/* Filters (area + sort) — a sheet, like Explore. Signed-in opens it; anon
+          taps raise the sign-in wall, matching the date pills. */}
+      <div className="px-5 pb-2.5">
+        <button
+          type="button"
+          onClick={
+            signedIn ? () => setFiltersOpen(true) : () => setWallFor("filter")
+          }
+          aria-haspopup="dialog"
+          className={
+            "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[11px] font-bold transition " +
+            (refineCount > 0
+              ? "bg-primary text-primary-fg"
+              : "bg-muted text-muted-fg")
+          }
+        >
+          <SlidersHorizontal size={12} strokeWidth={2.4} />
+          Filters
+          {refineCount > 0 && ` · ${refineCount}`}
+        </button>
       </div>
 
       {/* Custom date range picker — only shown when "Custom" is selected */}
@@ -331,6 +377,17 @@ export function EventsFeed({
           events={signedIn ? events : []}
           searchAction={signedIn ? undefined : searchEvents}
           onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {filtersOpen && (
+        <EventFilterSheet
+          value={filters}
+          onApply={(next) => {
+            setFilters(next);
+            setFiltersOpen(false);
+          }}
+          onClose={() => setFiltersOpen(false)}
         />
       )}
 
