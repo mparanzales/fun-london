@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -10,7 +9,6 @@ import {
   Calendar,
   Clock,
   Star,
-  ChevronDown,
   MapPin,
   Globe,
   Phone,
@@ -18,12 +16,7 @@ import {
 import { EventActions } from "@/components/event-actions";
 import { applyAffiliate } from "@/lib/affiliate";
 import { track } from "@/lib/analytics";
-import {
-  getOpenState,
-  londonWallClock,
-  type OpenState,
-} from "@/lib/opening-hours";
-import type { Event, Venue, OpeningPeriod } from "@/lib/types";
+import type { Event, Venue } from "@/lib/types";
 
 // Event detail — mirrors the venue detail composition so a tap from /events
 // lands in the same visual language as a tap from /explore. The venue-level
@@ -31,51 +24,6 @@ import type { Event, Venue, OpeningPeriod } from "@/lib/types";
 // (Google Places, resolved by venue name+area — facts only, never an LLM). Every
 // Places section is guarded, so an event whose venue didn't resolve still
 // renders with what we have. placeDetails is signed-in only (moat).
-
-const DAY_NAMES = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
-
-// Dash-free time formatting for the hours strip ("6pm", "1:30am", "midnight").
-function fmtClock(hour: number, minute: number): string {
-  if (hour === 0 && minute === 0) return "midnight";
-  if (hour === 12 && minute === 0) return "noon";
-  const h12 = hour % 12 === 0 ? 12 : hour % 12;
-  const suffix = hour < 12 ? "am" : "pm";
-  return minute === 0
-    ? `${h12}${suffix}`
-    : `${h12}:${String(minute).padStart(2, "0")}${suffix}`;
-}
-
-function dayHoursLine(periods: OpeningPeriod[], day: number): string {
-  const todays = periods.filter((p) => p.open.day === day);
-  if (todays.length === 0) return "Closed";
-  return todays
-    .map((p) =>
-      p.close === null
-        ? "Open 24 hours"
-        : `${fmtClock(p.open.hour, p.open.minute)} until ${fmtClock(p.close.hour, p.close.minute)}`,
-    )
-    .join(", ");
-}
-
-function openSummary(state: OpenState): string {
-  if (state.status === "open") {
-    return state.closesAt === null
-      ? "Open 24 hours"
-      : `closes at ${fmtClock(state.closesAt.hour, state.closesAt.minute)}`;
-  }
-  if (state.status === "closed" && state.opensAt) {
-    return `opens ${DAY_NAMES[state.opensAt.day]} ${fmtClock(state.opensAt.hour, state.opensAt.minute)}`;
-  }
-  return "";
-}
 
 export function EventDetail({
   event,
@@ -110,19 +58,6 @@ export function EventDetail({
 
   // Prefer the event's own blurb; fall back to Google's factual one-liner.
   const blurb = event.description ?? place?.editorial ?? null;
-
-  // Live open/closed of the venue, in Europe/London, computed post-mount to
-  // avoid a hydration mismatch.
-  const [hoursOpen, setHoursOpen] = useState(false);
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-  }, []);
-  const openState: OpenState =
-    now && place?.openingHours
-      ? getOpenState(place.openingHours, now)
-      : { status: "unknown" };
-  const today = now ? londonWallClock(now).day : -1;
 
   const mapsHref =
     place?.mapsUrl ??
@@ -211,69 +146,9 @@ export function EventDetail({
         {/* Add to calendar (.ics) + share */}
         <EventActions event={event} />
 
-        {/* ── Hours / Open now (the venue's) ─────────────────────────── */}
-        {place?.openingHours && (
-          <div className="mt-6 border-y border-fg/10">
-            <button
-              type="button"
-              onClick={() => setHoursOpen((v) => !v)}
-              aria-expanded={hoursOpen}
-              className="w-full flex items-center justify-between py-3.5 text-left"
-            >
-              <span className="flex items-center gap-2.5 text-sm">
-                <span
-                  aria-hidden
-                  className={
-                    "w-2 h-2 rounded-full " +
-                    (openState.status === "open"
-                      ? "bg-green-600"
-                      : "bg-muted-fg")
-                  }
-                />
-                <span className="font-extrabold text-fg">
-                  {openState.status === "open"
-                    ? "Open now"
-                    : openState.status === "closed"
-                      ? "Closed"
-                      : "Venue hours"}
-                </span>
-                {openSummary(openState) && (
-                  <span className="text-muted-fg">
-                    · {openSummary(openState)}
-                  </span>
-                )}
-              </span>
-              <ChevronDown
-                className={
-                  "w-4 h-4 text-muted-fg transition-transform " +
-                  (hoursOpen ? "rotate-180" : "rotate-0")
-                }
-                strokeWidth={2}
-              />
-            </button>
-            {hoursOpen && (
-              <ul className="flex flex-col gap-1.5 pb-4 text-[13px]">
-                {[1, 2, 3, 4, 5, 6, 0].map((day) => {
-                  const isToday = day === today;
-                  return (
-                    <li
-                      key={day}
-                      className={
-                        "flex justify-between " +
-                        (isToday ? "font-bold text-fg" : "text-muted-fg")
-                      }
-                    >
-                      <span>{DAY_NAMES[day]}</span>
-                      <span>
-                        {dayHoursLine(place.openingHours!.periods, day)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        )}
+        {/* No venue opening-hours here on purpose: for an event, the time that
+            matters is the EVENT's (shown in the date/time pills above), not the
+            venue's regular hours, which would read as misleading. */}
 
         {/* ── Reviews (Google, verbatim + attribution) ───────────────── */}
         {place?.reviews && place.reviews.length > 0 && (
