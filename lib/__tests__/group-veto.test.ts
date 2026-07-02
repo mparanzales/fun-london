@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { vetoMajority, pruneReactions } from "@/lib/group-veto";
+import { vetoMajority, pruneReactions, countReactions } from "@/lib/group-veto";
 
 describe("vetoMajority · a stop swaps only on a strict group majority", () => {
   it("no vetoes never swaps", () => {
@@ -29,6 +29,27 @@ describe("vetoMajority · a stop swaps only on a strict group majority", () => {
   it("an empty group never swaps", () => {
     expect(vetoMajority(0, 0)).toBe(false);
     expect(vetoMajority(1, 0)).toBe(false);
+  });
+});
+
+describe("countReactions · counts only members still present", () => {
+  it("counts the value for present members", () => {
+    const present = new Set(["a", "b", "c"]);
+    expect(
+      countReactions({ a: "veto", b: "veto", c: "keep" }, "veto", present),
+    ).toBe(2);
+  });
+
+  it("ignores a lingering vote from a member who has left (race-proof)", () => {
+    // c already left; its stale veto must not count toward the majority.
+    const present = new Set(["a", "b"]);
+    expect(
+      countReactions({ a: "veto", b: "keep", c: "veto" }, "veto", present),
+    ).toBe(1);
+  });
+
+  it("returns 0 for an absent stop", () => {
+    expect(countReactions(undefined, "veto", new Set(["a"]))).toBe(0);
   });
 });
 

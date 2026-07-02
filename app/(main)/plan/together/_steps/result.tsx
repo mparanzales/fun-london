@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import type { Event, Venue } from "@/lib/types";
 import type { Member, Room, StopReaction } from "@/lib/realtime/room";
 import { averageTasteMaps } from "@/lib/group-taste";
-import { vetoMajority } from "@/lib/group-veto";
+import { vetoMajority, countReactions } from "@/lib/group-veto";
 import {
   computeWalkablePlan,
   walkMins,
@@ -155,10 +155,14 @@ export function Result({
 
   // Group react/veto. Swiping a stop (right = keep, left = change) or tapping
   // Keep / Change casts YOUR vote. My own reaction + per-value tallies:
+  const presentIds = new Set(room.members.map((m) => m.id));
   const myReact = (i: number): StopReaction | undefined =>
     room.reactions[i]?.[room.me.id];
+  // Count only members still in the room, so a vote lingering from someone who
+  // just left can never tip the majority or the tally (race-proof; see the
+  // proof harness scripts/prove-group-veto.ts).
   const countReact = (i: number, value: StopReaction) =>
-    Object.values(room.reactions[i] ?? {}).filter((v) => v === value).length;
+    countReactions(room.reactions[i], value, presentIds);
   const react = (i: number, value: StopReaction) =>
     room.sendReact(i, myReact(i) === value ? null : value);
 
