@@ -6,6 +6,7 @@ import {
   computePlan,
   relinkSteps,
   isDaytimeHour,
+  computeWalkablePlan,
 } from "@/lib/plan-engine";
 import type { Venue, OpeningHours } from "@/lib/types";
 import { makeVenue } from "./_fixtures";
@@ -618,5 +619,67 @@ describe("computePlan · per-stop swap (alternatives + relinkSteps)", () => {
       { venue: makeVenue({ type: "Cafe" }), role: "Start" },
     ]);
     expect(steps[0].arriveAt).toBeNull();
+  });
+});
+
+describe("computeWalkablePlan · group taste (Stage 5)", () => {
+  const settings = {
+    area: { kind: "anywhere" as const },
+    budget: "Any" as const,
+    when: new Date(2026, 5, 10, 20, 0),
+    groupSize: 3,
+  };
+  const venues: Venue[] = [
+    makeVenue({
+      id: "rest-hi",
+      type: "Restaurant",
+      neighbourhood: "Soho",
+      rating: 4.7,
+      lat: 51.5135,
+      lng: -0.1336,
+    }),
+    makeVenue({
+      id: "rest-lo",
+      type: "Restaurant",
+      neighbourhood: "Soho",
+      rating: 4.3,
+      lat: 51.5138,
+      lng: -0.134,
+    }),
+  ];
+
+  it("without taste, the higher-rated venue leads", () => {
+    const plan = computeWalkablePlan(venues, settings, ["Start"]);
+    expect(plan.steps[0]?.venue.id).toBe("rest-hi");
+  });
+
+  it("a strong group-taste match beats a higher rating", () => {
+    // 4.3 + GROUP_TASTE_WEIGHT(4) * 0.7 = 7.1 > 4.7 → the group's pick wins.
+    const plan = computeWalkablePlan(
+      venues,
+      settings,
+      ["Start"],
+      [],
+      0,
+      undefined,
+      { "rest-lo": 0.7 },
+    );
+    expect(plan.steps[0]?.venue.id).toBe("rest-lo");
+  });
+
+  it("null taste is identical to no taste (backward compatible)", () => {
+    const a = computeWalkablePlan(venues, settings, ["Start"]).steps.map(
+      (s) => s.venue.id,
+    );
+    const b = computeWalkablePlan(
+      venues,
+      settings,
+      ["Start"],
+      [],
+      0,
+      undefined,
+      null,
+    ).steps.map((s) => s.venue.id);
+    expect(b).toEqual(a);
   });
 });

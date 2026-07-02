@@ -217,3 +217,37 @@ export async function tasteScoresForUser(
   for (const [id, vec] of idx) out[id] = cosineSimilarity(taste, vec);
   return out;
 }
+
+/**
+ * The GROUP's taste scores (Stage 5): average the signed-in members' taste
+ * vectors into one group direction, then score every venue by centred cosine.
+ * Members with no usable signal are simply skipped; if no member has signal the
+ * result is null and the group plan falls back to rating-led selection. Handed
+ * to computeWalkablePlan as its `taste` map. One catalogue load + one taste read
+ * per member.
+ */
+export async function groupTasteScores(
+  userIds: string[],
+): Promise<Record<string, number> | null> {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return null;
+  const idx = await getTasteIndex();
+  if (!idx) return null;
+
+  const vectors: number[][] = [];
+  for (const id of ids) {
+    const t = await loadUserTaste(id, idx);
+    if (t) vectors.push(t);
+  }
+  if (vectors.length === 0) return null;
+
+  // Equal-weight average → the group's shared taste vector.
+  const dim = vectors[0].length;
+  const group = new Array<number>(dim).fill(0);
+  for (const v of vectors) for (let i = 0; i < dim; i++) group[i] += v[i];
+  for (let i = 0; i < dim; i++) group[i] /= vectors.length;
+
+  const out: Record<string, number> = {};
+  for (const [id, vec] of idx) out[id] = cosineSimilarity(group, vec);
+  return out;
+}
