@@ -136,6 +136,12 @@ create table if not exists public.events (
   cancelled_at timestamptz,                -- set once on provider cancellation (alert flag, not auto-hide)
   ends_at timestamptz,                      -- Pop-up radar: last day a source='popup' run is on (null for one-off events)
   created_at timestamptz not null default now(),
+  -- Google Places enrichment of the event's VENUE (resolved by name+area), so an
+  -- event page reaches venue-page richness. Facts only, from Places, never an LLM.
+  -- NOT in the anon SELECT grant below -> signed-in-only (moat holds).
+  google_place_id text,                    -- resolved Places id for the venue
+  place_details jsonb,                      -- {rating,address,lat,lng,openingHours,website,phone,mapsUrl,editorial,reviews[]}
+  place_synced_at timestamptz,             -- last Places re-pull
   constraint events_source_unique unique (source, source_id)
 );
 create index if not exists events_date_label_idx on public.events(date_label);
