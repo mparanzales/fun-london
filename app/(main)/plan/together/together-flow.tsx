@@ -17,6 +17,7 @@ import {
 } from "@/lib/realtime/room";
 import { venueInArea } from "@/lib/regions";
 import { isOpenAt, withinBudget } from "@/lib/plan-engine";
+import { loadMyTaste } from "@/lib/my-taste-action";
 import { track } from "@/lib/analytics";
 import type { Mood } from "@/lib/plan-together-moods";
 import { Lobby } from "./_steps/lobby";
@@ -94,6 +95,23 @@ function RoomFlow({
   events: Event[];
 }) {
   const room = useRoom(code, me, isHost);
+
+  // Share MY OWN taste into the room, once. A session-gated server fetch (the
+  // client can't read the service-role embeddings) → broadcast to the channel,
+  // so every device can average the group's (see _steps/result). No one else's
+  // taste is ever requested. Always broadcast — even an empty map for someone
+  // with no saved history — so "everyone's taste is in" is reachable and the
+  // result's convergence barrier can't wait forever on a signal-less member.
+  const sharedTasteRef = useRef(false);
+  useEffect(() => {
+    if (sharedTasteRef.current) return;
+    sharedTasteRef.current = true;
+    loadMyTaste()
+      .then((t) => room.sendTaste(t ?? {}))
+      .catch(() => room.sendTaste({}));
+    // room.sendTaste is stable for the room's lifetime — share exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const resolvedWhen = useMemo(
     () => (room.settings ? new Date(room.settings.when.at) : new Date()),

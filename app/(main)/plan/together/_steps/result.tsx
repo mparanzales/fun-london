@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { Event, Venue } from "@/lib/types";
 import type { Member, Room } from "@/lib/realtime/room";
+import { averageTasteMaps } from "@/lib/group-taste";
 import {
   computeWalkablePlan,
   walkMins,
@@ -62,6 +63,25 @@ export function Result({
     when,
     groupSize: room.settings?.groupSize ?? Math.max(1, room.members.length),
   };
+
+  // Group taste (Stage 5): every member broadcasts their OWN taste into the
+  // room (see together-flow), then each device averages the CURRENT members'
+  // maps into one group direction the engine uses to pick the actual spots
+  // within the mood-voted types.
+  //
+  // Convergence barrier: apply taste ONLY once EVERY current member's map has
+  // arrived — until then stay rating-led (null), which is deterministic on all
+  // devices. Because Broadcast has no replay, maps stream in at different
+  // moments per device; without the barrier two phones could average different
+  // subsets and build different plans (and a shared swap index would then point
+  // at different venues). Signal-less members broadcast {} so this is always
+  // reachable; an all-empty average collapses to null (nothing to tune).
+  const taste = useMemo(() => {
+    if (room.members.length === 0) return null;
+    const complete = room.members.every((m) => room.tasteByMember[m.id]);
+    if (!complete) return null;
+    return averageTasteMaps(room.members.map((m) => room.tasteByMember[m.id]));
+  }, [room.members, room.tasteByMember]);
   const hearted = useMemo(() => heartedMoods(room), [room]);
   const roles = useMemo<PlanRole[]>(() => {
     const order: PlanRole[] = ["Start", "Then", "Finish"];
@@ -94,9 +114,10 @@ export function Result({
         events,
         room.variant,
         intent,
+        taste,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [venues, events, roles, intent, room.settings, when, room.variant],
+    [venues, events, roles, intent, room.settings, when, room.variant, taste],
   );
 
   const memberById = new Map(room.members.map((m) => [m.id, m]));
@@ -163,7 +184,7 @@ export function Result({
         </div>
         <div className="text-[11.5px] text-fg mt-1 leading-snug">
           The group&apos;s vibe: {mixSummary}, kept it all within walking
-          distance.
+          distance{taste ? ", and tuned to your group's taste" : ""}.
         </div>
       </div>
 

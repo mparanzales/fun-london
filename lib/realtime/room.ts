@@ -14,6 +14,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type { PlanArea } from "@/lib/regions";
 import type { PlanBudget } from "@/lib/plan-engine";
+import type { TasteMap } from "@/lib/group-taste";
 
 export type Member = {
   id: string;
@@ -54,12 +55,14 @@ export type Room = {
   doneIds: string[];
   swaps: Record<number, number>; // stepIdx → active alternative index
   variant: number; // which whole-plan alternative ("another mix")
+  tasteByMember: Record<string, TasteMap>; // memberId → their broadcast taste
   sendPhase: (p: Phase) => void;
   sendSettings: (s: RoomSettings) => void;
   sendVote: (qIdx: number, value: boolean) => void;
   sendDone: () => void;
   sendSwap: (stepIdx: number, altIdx: number) => void;
   sendVariant: (n: number) => void;
+  sendTaste: (taste: TasteMap) => void;
 };
 
 // ── Identity helpers ──────────────────────────────────────────────────────
@@ -127,11 +130,18 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
   const [doneIds, setDoneIds] = useState<string[]>([]);
   const [swaps, setSwaps] = useState<Record<number, number>>({});
   const [variant, setVariant] = useState(0);
+  const [tasteByMember, setTasteByMember] = useState<Record<string, TasteMap>>(
+    {},
+  );
   const channelRef = useRef<RealtimeChannel | null>(null);
   // Refs so the presence-join replay handler reads the latest host state.
   const settingsRef = useRef<RoomSettings | null>(null);
   const swapsRef = useRef<Record<number, number>>({});
   const variantRef = useRef(0);
+  // My own broadcast taste, so I can re-emit it when a newcomer joins (Broadcast
+  // has no replay). Unlike settings/swaps/variant this is per-member, so EVERY
+  // member re-emits their own, not just the host.
+  const myTasteRef = useRef<TasteMap | null>(null);
   settingsRef.current = settings;
   swapsRef.current = swaps;
   variantRef.current = variant;
@@ -158,9 +168,17 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
       if (list.length > 0) setMembers(list);
     });
 
-    // Late-join replay: when anyone joins, the host re-broadcasts the plan
-    // state so the newcomer catches up (Broadcast doesn't replay history).
+    // Late-join replay: when anyone joins, re-broadcast state so the newcomer
+    // catches up (Broadcast doesn't replay history). The host owns the shared
+    // plan state; taste is per-member, so every member re-emits their OWN.
     channel.on("presence", { event: "join" }, () => {
+      if (myTasteRef.current) {
+        channel.send({
+          type: "broadcast",
+          event: "taste",
+          payload: { memberId: me.id, taste: myTasteRef.current },
+        });
+      }
       if (!isHost) return;
       if (settingsRef.current) {
         channel.send({
@@ -218,9 +236,33 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
       setVariant((payload as { variant: number }).variant);
       setSwaps({}); // a fresh mix clears per-stop swaps
     });
+    channel.on("broadcast", { event: "taste" }, ({ payload }) => {
+      const { memberId, taste } = payload as {
+        memberId: string;
+        taste: TasteMap;
+      };
+      if (memberId && taste)
+        setTasteByMember((prev) => ({ ...prev, [memberId]: taste }));
+    });
+    // A newcomer (or a device recovering from a dropped message) asks everyone
+    // to re-send their taste. Broadcast has no replay, so this is how a late
+    // joiner collects maps that were sent before it subscribed.
+    channel.on("broadcast", { event: "taste-sync" }, () => {
+      if (myTasteRef.current)
+        channel.send({
+          type: "broadcast",
+          event: "taste",
+          payload: { memberId: me.id, taste: myTasteRef.current },
+        });
+    });
 
     channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") void channel.track(me);
+      if (status === "SUBSCRIBED") {
+        void channel.track(me);
+        // Ask any members already here to re-send their taste (their earlier
+        // broadcasts predate this subscription and Broadcast has no replay).
+        channel.send({ type: "broadcast", event: "taste-sync", payload: {} });
+      }
     });
     channelRef.current = channel;
 
@@ -284,6 +326,19 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     });
   }, []);
 
+  const sendTaste = useCallback(
+    (taste: TasteMap) => {
+      myTasteRef.current = taste; // remember, so we can re-emit on late joins
+      setTasteByMember((prev) => ({ ...prev, [me.id]: taste })); // optimistic self
+      channelRef.current?.send({
+        type: "broadcast",
+        event: "taste",
+        payload: { memberId: me.id, taste },
+      });
+    },
+    [me.id],
+  );
+
   return {
     code,
     me,
@@ -295,11 +350,13 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     doneIds,
     swaps,
     variant,
+    tasteByMember,
     sendPhase,
     sendSettings,
     sendVote,
     sendDone,
     sendSwap,
     sendVariant,
+    sendTaste,
   };
 }
