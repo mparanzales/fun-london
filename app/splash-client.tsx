@@ -2,34 +2,22 @@
 
 // Splash animation + routing.
 //
-// Rendered as a child of app/page.tsx (a Server Component) which has resolved
-// whether the user is signed in. This plays the brand-mark animation, then:
-//   - signed in                       → /explore (home)
-//   - anonymous + has visited before  → /explore
-//   - anonymous + first time          → REVEAL the landing page underneath
-//                                       (no redirect, so funldn.com shows the
-//                                       product).
+// Rendered as a child of app/page.tsx. Plays the brand-mark animation on every
+// cold open of "/", then sends everyone to /explore (the home feed). There is
+// no marketing landing anymore — signed-in, returning and first-time visitors
+// all resolve to the app.
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 
-// "Has this anonymous visitor seen the landing before?" — set when they tap
-// into the app from the landing. The legacy onboarding key counts too, so
-// returning users from before this change skip straight to the app.
-const VISITED_KEYS = ["fl.visited.v1", "fl.onboarding.v1"];
 const TOTAL_DURATION_MS = 1700;
 // Reduce-motion users skip most of the brand-mark hold (the animation itself
 // is already disabled globally for them).
 const REDUCED_MOTION_DURATION_MS = 350;
-// How long the fade-out runs before the overlay is removed from the DOM.
-const FADE_OUT_MS = 450;
 
-type Phase = "hold" | "leaving" | "gone";
-
-export function SplashClient({ authed }: { authed: boolean }) {
+export function SplashClient() {
   const router = useRouter();
-  const [phase, setPhase] = useState<Phase>("hold");
 
   useEffect(() => {
     // Honour Reduce Motion: the brand-mark animation is already zeroed by the
@@ -43,45 +31,12 @@ export function SplashClient({ authed }: { authed: boolean }) {
     } catch {
       // matchMedia unavailable — keep the default hold.
     }
-    const t = setTimeout(() => {
-      // Home is now the "What's on" feed (/events). No taste quiz anymore.
-      if (authed) {
-        router.replace("/explore");
-        return;
-      }
-      // Anonymous: show the landing once, then go straight to the app on
-      // return. "Visited" is marked when they tap into the app from the
-      // landing; the legacy onboarding key counts too (existing users).
-      let visited = false;
-      try {
-        visited = VISITED_KEYS.some((k) => !!window.localStorage.getItem(k));
-      } catch {
-        // localStorage unavailable — treat as a first-time visitor.
-      }
-      if (visited) {
-        router.replace("/explore");
-        return;
-      }
-      // First-time, signed-out visitor → fade the splash to reveal the
-      // landing page rendered underneath. No navigation.
-      setPhase("leaving");
-    }, hold);
+    const t = setTimeout(() => router.replace("/explore"), hold);
     return () => clearTimeout(t);
-  }, [router, authed]);
-
-  // Once the fade-out finishes, drop the overlay entirely so it doesn't trap
-  // pointer events or focus over the revealed landing.
-  useEffect(() => {
-    if (phase !== "leaving") return;
-    const t = setTimeout(() => setPhase("gone"), FADE_OUT_MS);
-    return () => clearTimeout(t);
-  }, [phase]);
-
-  if (phase === "gone") return null;
+  }, [router]);
 
   return (
     <div
-      aria-hidden={phase === "leaving"}
       style={{
         position: "fixed",
         inset: 0,
@@ -90,9 +45,6 @@ export function SplashClient({ authed }: { authed: boolean }) {
         alignItems: "center",
         justifyContent: "center",
         zIndex: 100,
-        opacity: phase === "leaving" ? 0 : 1,
-        transition: `opacity ${FADE_OUT_MS}ms ease`,
-        pointerEvents: phase === "leaving" ? "none" : "auto",
       }}
     >
       <div className="fl-splash-mark">
