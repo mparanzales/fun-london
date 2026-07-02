@@ -35,6 +35,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
   relinkSteps,
+  isDaytimeHour,
   ANYWHERE,
   type Plan,
   type PlanBudget,
@@ -47,6 +48,7 @@ import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
 import { googleMapsWalkingUrl } from "@/lib/plan-maps";
 import { PlanRouteMapLive } from "./plan-route-map-live";
+import { SwipeStop } from "./swipe-stop";
 import type { Venue } from "@/lib/types";
 
 const VIBES: { v: PlanVibe; icon: LucideIcon }[] = [
@@ -113,8 +115,9 @@ function resolveTiming(
     d.setHours(h, m, 0, 0);
     return d;
   };
-  // Before 5pm reads as "day"; from 5pm on, "evening".
-  const isDayNow = base.getHours() < 17;
+  // 05:00–16:59 reads as "day"; from 5pm on — and through the small hours until
+  // 5am — "evening" (a plan built at 1am is a night out). See isDaytimeHour.
+  const isDayNow = isDaytimeHour(base.getHours());
   switch (choice) {
     case "day":
       // A daytime plan: use now if it's still daytime, else a representative 1pm.
@@ -135,7 +138,10 @@ function resolveTiming(
         0,
         0,
       );
-      return { daypart: when.getHours() < 17 ? "day" : "evening", when };
+      return {
+        daypart: isDaytimeHour(when.getHours()) ? "day" : "evening",
+        when,
+      };
     }
     default: // "now" — plan for this moment, shape follows the clock.
       return { daypart: isDayNow ? "day" : "evening", when: base };
@@ -444,22 +450,24 @@ export function PlanFlow({
     fn();
   };
 
-  // "Change this one" — cycle stop `i` through its alternatives, wrapping back
-  // to the original. relinkSteps (via toDisplay) keeps the walk + arrivals + map
-  // honest after the swap.
-  const onSwap = (i: number) => {
+  // "Change this one" — cycle stop `i` through its alternatives (dir +1 = next,
+  // −1 = previous), wrapping through the original. relinkSteps (via toDisplay)
+  // keeps the walk + arrivals + map honest after the swap.
+  const onSwap = (i: number, dir: 1 | -1 = 1) => {
     const alts = computed.alternatives[i] ?? [];
     if (alts.length === 0) return;
     setSwaps((prev) => {
+      // Positions 0..len-1: 0 = original venue, 1..len-1 = alternatives.
+      const len = alts.length + 1;
+      const pos = ((((prev[i] ?? -1) + 1 + dir) % len) + len) % len;
+      const idx = pos - 1; // −1 = back to the original
       const next = { ...prev };
-      const nextIdx = (prev[i] ?? -1) + 1;
-      if (nextIdx >= alts.length)
-        delete next[i]; // back to the original
-      else next[i] = nextIdx;
+      if (idx < 0) delete next[i];
+      else next[i] = idx;
       return next;
     });
     setSaveState("idle");
-    track("plan_swap", { stop: i });
+    track("plan_swap", { stop: i, dir });
   };
 
   // Anywhere / Near you are the two quick chips; the rest goes through the
@@ -1005,70 +1013,79 @@ export function PlanFlow({
                 </button>
               )}
             </div>
-            <Link
-              href={`/venue/${s.venue.slug}`}
-              className="block bg-card border border-border rounded-2xl overflow-hidden transition-transform duration-300 ease-out lg:hover:-translate-y-0.5"
+            <SwipeStop
+              enabled={
+                !openedSaved && (computed.alternatives[i]?.length ?? 0) > 0
+              }
+              onSwipe={(dir) => onSwap(i, dir)}
             >
-              <div
-                className="h-[120px]"
-                style={{ background: `url(${s.venue.imgUrl}) center/cover` }}
-              />
-              <div className="p-3.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[15px] font-extrabold text-heading">
-                    {s.venue.name}
+              <Link
+                href={`/venue/${s.venue.slug}`}
+                className="block bg-card border border-border rounded-2xl overflow-hidden transition-transform duration-300 ease-out lg:hover:-translate-y-0.5"
+              >
+                <div
+                  className="h-[120px]"
+                  style={{ background: `url(${s.venue.imgUrl}) center/cover` }}
+                />
+                <div className="p-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[15px] font-extrabold text-heading">
+                      {s.venue.name}
+                    </div>
+                    <span className="text-[11px] font-bold text-primary whitespace-nowrap">
+                      View →
+                    </span>
                   </div>
-                  <span className="text-[11px] font-bold text-primary whitespace-nowrap">
-                    View →
-                  </span>
-                </div>
-                <div className="text-[11px] text-muted-fg mt-1 flex items-center gap-1.5 flex-wrap">
-                  <span className="text-accent font-bold">{s.venue.type}</span>
-                  <span>·</span>
-                  <span>
-                    <Star
-                      className="w-3.5 h-3.5 inline-block align-[-3px]"
-                      strokeWidth={1.75}
-                      fill="currentColor"
-                      aria-hidden
-                    />{" "}
-                    {s.venue.rating}
-                  </span>
-                  <span>·</span>
-                  <span>{s.venue.price}</span>
-                  <span>·</span>
-                  <span>
-                    <Clock
-                      className="w-3.5 h-3.5 inline-block align-[-3px]"
-                      strokeWidth={1.75}
-                      aria-hidden
-                    />{" "}
-                    ~{s.dwellMins} min
-                  </span>
-                  {s.arriveAt && (
-                    <>
-                      <span>·</span>
-                      <span className="font-bold text-fg">
-                        arrive ~{fmtTime(s.arriveAt)}
-                      </span>
-                    </>
+                  <div className="text-[11px] text-muted-fg mt-1 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-accent font-bold">
+                      {s.venue.type}
+                    </span>
+                    <span>·</span>
+                    <span>
+                      <Star
+                        className="w-3.5 h-3.5 inline-block align-[-3px]"
+                        strokeWidth={1.75}
+                        fill="currentColor"
+                        aria-hidden
+                      />{" "}
+                      {s.venue.rating}
+                    </span>
+                    <span>·</span>
+                    <span>{s.venue.price}</span>
+                    <span>·</span>
+                    <span>
+                      <Clock
+                        className="w-3.5 h-3.5 inline-block align-[-3px]"
+                        strokeWidth={1.75}
+                        aria-hidden
+                      />{" "}
+                      ~{s.dwellMins} min
+                    </span>
+                    {s.arriveAt && (
+                      <>
+                        <span>·</span>
+                        <span className="font-bold text-fg">
+                          arrive ~{fmtTime(s.arriveAt)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-fg italic mt-1">
+                    &quot;{s.venue.vibe}&quot;
+                  </div>
+                  {s.venue.planNote && (
+                    <div className="text-[12px] text-fg mt-1.5 flex items-start gap-1 leading-snug">
+                      <Sparkles
+                        className="w-3.5 h-3.5 mt-px shrink-0 text-accent"
+                        strokeWidth={1.75}
+                        aria-hidden
+                      />
+                      <span>{s.venue.planNote}</span>
+                    </div>
                   )}
                 </div>
-                <div className="text-[11px] text-muted-fg italic mt-1">
-                  &quot;{s.venue.vibe}&quot;
-                </div>
-                {s.venue.planNote && (
-                  <div className="text-[12px] text-fg mt-1.5 flex items-start gap-1 leading-snug">
-                    <Sparkles
-                      className="w-3.5 h-3.5 mt-px shrink-0 text-accent"
-                      strokeWidth={1.75}
-                      aria-hidden
-                    />
-                    <span>{s.venue.planNote}</span>
-                  </div>
-                )}
-              </div>
-            </Link>
+              </Link>
+            </SwipeStop>
             {s.walkToNextMins != null && (
               <div className="ml-3 text-[11px] text-muted-fg py-1.5 pl-3 border-l-2 border-dashed border-border">
                 <Footprints
