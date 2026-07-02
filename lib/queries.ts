@@ -38,6 +38,7 @@ import type {
   CreatorCoverage,
   CriticalFlag,
   OpeningHours,
+  PlaceDetails,
   VenueReview,
 } from "./types";
 
@@ -102,6 +103,7 @@ type EventRow = {
   source: string | null;
   ends_at: string | null;
   description: string | null;
+  place_details: PlaceDetails | null;
 };
 
 // ── Mappers ─────────────────────────────────────────────────────────────
@@ -184,6 +186,7 @@ function mapEvent(r: EventRow): Event {
     isPopup: r.source === "popup",
     endsAt: r.ends_at,
     description: r.description,
+    placeDetails: r.place_details ?? null,
   };
 }
 
@@ -1004,6 +1007,7 @@ function mapEventPreview(r: EventCardRow): Event {
     isPopup: r.source === "popup",
     endsAt: r.ends_at,
     description: null,
+    placeDetails: null, // moat: anon never gets the rich Place data
   };
 }
 

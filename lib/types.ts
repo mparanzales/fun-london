@@ -137,6 +137,34 @@ export type OpeningHours = {
   weekdayDescriptions?: string[]; // optional, for display
 };
 
+// Google Places enrichment of an event's VENUE (resolved by name+area). All
+// deterministic facts from Places, never an LLM. Signed-in only (not in the
+// anon events grant). Shape mirrors scripts/places-detail.ts (EventPlace).
+export type PlaceReview = {
+  author: string | null;
+  rating: number | null;
+  text: string | null;
+  publishedAt: string | null; // ISO
+  uri: string | null;
+};
+
+export type PlaceDetails = {
+  placeId: string;
+  matchedName: string | null;
+  primaryType: string | null;
+  rating: number | null;
+  ratingCount: number | null;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  openingHours: OpeningHours | null;
+  website: string | null;
+  phone: string | null;
+  mapsUrl: string | null;
+  editorial: string | null; // Google's own factual one-liner
+  reviews: PlaceReview[];
+};
+
 export type Venue = {
   id: string;
   slug: string;
@@ -246,6 +274,10 @@ export type Event = {
   endsAt: string | null;
   // Short editorial blurb shown on the detail page. Null for legacy rows.
   description: string | null;
+  // Google Places detail of the event's venue (rating, hours, address, reviews,
+  // ...), giving the event page venue-level richness. Signed-in only — the anon
+  // preview mapper leaves this null. Null when the venue didn't resolve.
+  placeDetails: PlaceDetails | null;
 };
 
 export type Booking = {
