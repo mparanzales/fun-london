@@ -425,7 +425,8 @@ export function computePlan(
   // Explicit `daypart` wins; else infer from the clock (05:00–16:59 reads day,
   // and the small hours count as the night before — see isDaytimeHour).
   const daypart: PlanDaypart =
-    opts.daypart ?? (when && isDaytimeHour(when.getHours()) ? "day" : "evening");
+    opts.daypart ??
+    (when && isDaytimeHour(when.getHours()) ? "day" : "evening");
   const matchRole = (v: Venue, role: PlanRole) =>
     roleMatchesForDaypart(v, role, daypart);
   // Blended desirability: tonight's vibe/quality + the user's personal taste
