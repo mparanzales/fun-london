@@ -23,10 +23,16 @@ export function AuthWall({
   onBack,
   backHref,
   backLabel = "Keep browsing",
+  returnTo,
 }: {
   signedIn: boolean;
   title?: string;
   body?: string;
+  // Where to land after sign-in. Defaults to the current path (usePathname),
+  // which is right for in-place walls. Pass this when the return target needs
+  // a query string usePathname would drop — e.g. /plan/together?room=ABCD so
+  // an invitee rejoins the SAME room instead of creating a new one.
+  returnTo?: string;
   // When the page lives inside the tabbed (main) shell, inset the blur so the
   // page title (top) and the bottom nav stay sharp + usable — only the content
   // between them is blurred. Detail pages (venue/event) blur full-screen.
@@ -62,7 +68,9 @@ export function AuthWall({
 
   if (signedIn || !mounted) return null;
 
-  const href = `/sign-in?return=${encodeURIComponent(pathname || "/explore")}`;
+  const href = `/sign-in?return=${encodeURIComponent(
+    returnTo || pathname || "/explore",
+  )}`;
 
   // Portal to <body> so the fixed overlay is relative to the viewport, not a
   // transformed ancestor (the (main) PageTransition wrapper applies a CSS

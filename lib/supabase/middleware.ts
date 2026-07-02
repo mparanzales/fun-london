@@ -57,6 +57,11 @@ export async function updateSession(request: NextRequest) {
       pathname === "/explore" ||
       pathname === "/events" ||
       pathname === "/plan" ||
+      // Renders the soft wall (teaser + AuthWall) instead of a bare redirect, so
+      // a logged-out invitee sees what they're joining — and the page keeps the
+      // ?room code in its sign-in returnTo (the middleware redirect drops the
+      // query, which would strand an invitee into creating a NEW empty room).
+      pathname === "/plan/together" ||
       pathname === "/saved" ||
       pathname === "/profile" ||
       pathname.startsWith("/venue/") ||

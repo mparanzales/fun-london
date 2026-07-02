@@ -384,7 +384,7 @@ describe("computePlan · day vs evening + dwell-by-type (day/night spine)", () =
     expect(eveTypes).not.toContain("Market"); // markets aren't a night stop
   });
 
-  it("isDaytimeHour: 05:00–16:59 is day; the small hours read as night", () => {
+  it("isDaytimeHour: 05:00 to 16:59 is day; the small hours read as night", () => {
     expect(isDaytimeHour(5)).toBe(true); // 5am — day begins
     expect(isDaytimeHour(12)).toBe(true); // noon
     expect(isDaytimeHour(16)).toBe(true); // 4pm — last day hour
