@@ -10,6 +10,24 @@ export function vetoMajority(vetoes: number, groupSize: number): boolean {
   return groupSize > 0 && vetoes > groupSize / 2;
 }
 
+// Count a reaction value among ONLY the members still present. A reaction can
+// briefly linger for a member who just left (a broadcast that lands after the
+// presence prune), so the count is filtered by the live member set — a departed
+// member's vote can never tip the majority or inflate the tally, whatever the
+// arrival order. This is the race-proof source of truth; pruneReactions below
+// just keeps the stored map tidy.
+export function countReactions<T>(
+  byMember: Record<string, T> | undefined,
+  value: T,
+  presentIds: Set<string>,
+): number {
+  if (!byMember) return 0;
+  let n = 0;
+  for (const [id, v] of Object.entries(byMember))
+    if (v === value && presentIds.has(id)) n++;
+  return n;
+}
+
 // Drop reactions from members who have left the room. Reactions drive an
 // automatic majority swap measured against the LIVE group, so a departed
 // member's stale veto must not count (else a leave alone could cross the
