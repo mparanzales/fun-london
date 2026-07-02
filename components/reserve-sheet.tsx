@@ -25,8 +25,14 @@ export function ReserveSheet({
   onClose: () => void;
 }) {
   const router = useRouter();
-  const today = new Date();
-  const [date, setDate] = useState(() => today.toISOString().slice(0, 10));
+  // Default to *London's* today, not UTC's. toISOString() is UTC, so between
+  // 00:00 and 00:59 BST it returns yesterday's date and the picker opens on the
+  // wrong day. en-CA formats as YYYY-MM-DD, which the date input wants.
+  const [date, setDate] = useState(() =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(
+      new Date(),
+    ),
+  );
   const [time, setTime] = useState("20:00");
   const [party, setParty] = useState(2);
 

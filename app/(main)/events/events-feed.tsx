@@ -363,8 +363,8 @@ export function EventsFeed({
               aria-hidden
             />
             <p className="text-sm text-muted-fg leading-relaxed">
-              No events match that filter yet. Tier 3 ingests every 4 hours,
-              more sources coming soon.
+              Nothing on for that yet. We add new nights as they land, so
+              it&apos;s worth checking back.
             </p>
           </div>
         )}

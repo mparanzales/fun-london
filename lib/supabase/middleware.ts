@@ -45,7 +45,7 @@ export async function updateSession(request: NextRequest) {
   // Everything that DOES something (What's on, Plan, Saved, You, every
   // venue/event detail, booking, admin) redirects to /sign-in with a ?return,
   // so tapping a restaurant or any other tab forces an account.
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
   if (!user) {
     // Venue/event DETAIL pages render for anon too, but their content is shown
@@ -79,8 +79,10 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/sign-in";
       url.search = "";
+      // Preserve the original query string in the return path (e.g. a ?room
+      // invite code, or reserve ?d/&t/&p) so it survives the sign-in round-trip.
       // safeReturnPath() on the sign-in side rejects non-site-internal paths.
-      url.searchParams.set("return", pathname);
+      url.searchParams.set("return", `${pathname}${search}`);
       return NextResponse.redirect(url);
     }
   }
