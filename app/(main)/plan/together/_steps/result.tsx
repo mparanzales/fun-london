@@ -17,7 +17,18 @@ import {
   type Mood,
 } from "@/lib/plan-together-moods";
 import { DECKS } from "@/lib/plan-together-moods";
-import { Clock, Footprints, RotateCw, Sparkles, Users } from "lucide-react";
+import { googleMapsWalkingUrl } from "@/lib/plan-maps";
+import { track } from "@/lib/analytics";
+import { SwipeStop } from "../../swipe-stop";
+import { PlanRouteMapLive } from "../../plan-route-map-live";
+import {
+  Clock,
+  Footprints,
+  Map as MapIcon,
+  RotateCw,
+  Sparkles,
+  Users,
+} from "lucide-react";
 
 // Plan Together — Step 4: Result (real-time, v2).
 // Builds a walkable plan from the host's settings + the group's MOOD votes.
@@ -139,13 +150,26 @@ export function Result({
     return { ...s, walkToNextMins: next ? walkMins(s.venue, next) : null };
   });
 
-  const onSwap = (i: number) => {
+  // Bidirectional swap, matching solo: positions 0..len-1 where 0 = the base
+  // venue and 1..len-1 = alternatives; swipe left = next, right = previous.
+  // Broadcast the active index (-1 = base) so every device shows the same swap.
+  const onSwap = (i: number, dir: 1 | -1 = 1) => {
     const alts = plan.alternatives[i] ?? [];
     if (alts.length === 0) return;
-    const cur = room.swaps[i];
-    const nextIdx = cur == null ? 0 : cur + 1;
-    room.sendSwap(i, nextIdx >= alts.length ? -1 : nextIdx); // -1 = back to base
+    const len = alts.length + 1;
+    const pos = ((((room.swaps[i] ?? -1) + 1 + dir) % len) + len) % len;
+    room.sendSwap(i, pos - 1);
+    track("plan_swap", { stop: i, dir });
   };
+
+  // Real turn-by-turn for the whole night in Google Maps (null if no coords).
+  const mapsUrl = googleMapsWalkingUrl(
+    steps.map((s) => ({
+      lat: s.venue.lat,
+      lng: s.venue.lng,
+      name: s.venue.name,
+    })),
+  );
 
   return (
     <div className="px-4 pt-4 pb-6">
@@ -207,60 +231,70 @@ export function Result({
                 : `${voters.map((p) => p.name).join(" & ")} voted yes`;
           return (
             <div key={`${s.venue.id}-${i}`}>
-              <div className="bg-card border border-border rounded-2xl overflow-hidden">
-                <div
-                  className="h-[110px] relative"
-                  style={{ background: `url(${s.venue.imgUrl}) center/cover` }}
-                >
-                  <div className="absolute top-2 left-2 px-2 py-[3px] rounded-full bg-primary text-primary-fg text-[9px] font-extrabold uppercase tracking-[0.08em]">
-                    Step {i + 1} · {STEP_LABELS[s.role]}
-                  </div>
-                  <div className="absolute top-2 right-2 flex">
-                    {voters.map((vp, j) => (
-                      <div
-                        key={vp.id}
-                        className="w-[22px] h-[22px] rounded-full border-2 border-white grid place-items-center text-[10px] font-bold text-white"
-                        style={{ background: vp.color, marginLeft: j ? -6 : 0 }}
-                      >
-                        {vp.name.charAt(0).toUpperCase()}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-3">
-                  <div className="text-sm font-extrabold text-heading">
-                    {s.venue.name}
-                  </div>
-                  <div className="text-[10.5px] text-muted-fg mt-0.5 flex gap-1.5">
-                    <span className="text-accent font-bold">
-                      {s.venue.type}
-                    </span>
-                    <span>·</span>
-                    <span>{s.venue.neighbourhood}</span>
-                    <span>·</span>
-                    <span>{s.venue.price}</span>
-                  </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <div className="text-[10.5px] text-muted-fg italic">
-                      {attribution}
+              <SwipeStop
+                enabled={(plan.alternatives[i]?.length ?? 0) > 0}
+                onSwipe={(dir) => onSwap(i, dir)}
+              >
+                <div className="bg-card border border-border rounded-2xl overflow-hidden">
+                  <div
+                    className="h-[110px] relative"
+                    style={{
+                      background: `url(${s.venue.imgUrl}) center/cover`,
+                    }}
+                  >
+                    <div className="absolute top-2 left-2 px-2 py-[3px] rounded-full bg-primary text-primary-fg text-[9px] font-extrabold uppercase tracking-[0.08em]">
+                      Step {i + 1} · {STEP_LABELS[s.role]}
                     </div>
-                    {(plan.alternatives[i]?.length ?? 0) > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => onSwap(i)}
-                        className="text-[11px] font-extrabold text-accent flex-shrink-0 inline-flex items-center gap-1"
-                      >
-                        <RotateCw
-                          className="w-3.5 h-3.5"
-                          strokeWidth={1.75}
-                          aria-hidden
-                        />
-                        Swap
-                      </button>
-                    )}
+                    <div className="absolute top-2 right-2 flex">
+                      {voters.map((vp, j) => (
+                        <div
+                          key={vp.id}
+                          className="w-[22px] h-[22px] rounded-full border-2 border-white grid place-items-center text-[10px] font-bold text-white"
+                          style={{
+                            background: vp.color,
+                            marginLeft: j ? -6 : 0,
+                          }}
+                        >
+                          {vp.name.charAt(0).toUpperCase()}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="p-3">
+                    <div className="text-sm font-extrabold text-heading">
+                      {s.venue.name}
+                    </div>
+                    <div className="text-[10.5px] text-muted-fg mt-0.5 flex gap-1.5">
+                      <span className="text-accent font-bold">
+                        {s.venue.type}
+                      </span>
+                      <span>·</span>
+                      <span>{s.venue.neighbourhood}</span>
+                      <span>·</span>
+                      <span>{s.venue.price}</span>
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <div className="text-[10.5px] text-muted-fg italic">
+                        {attribution}
+                      </div>
+                      {(plan.alternatives[i]?.length ?? 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onSwap(i)}
+                          className="text-[11px] font-extrabold text-accent flex-shrink-0 inline-flex items-center gap-1"
+                        >
+                          <RotateCw
+                            className="w-3.5 h-3.5"
+                            strokeWidth={1.75}
+                            aria-hidden
+                          />
+                          Swap
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              </SwipeStop>
               {s.walkToNextMins != null && (
                 <div className="ml-3 text-[10px] text-muted-fg py-1.5 pl-3 border-l-2 border-dashed border-border">
                   <Footprints
@@ -275,6 +309,25 @@ export function Result({
           );
         })}
       </div>
+
+      {mapsUrl && (
+        <div className="mt-4">
+          <div className="text-[10px] font-extrabold tracking-[0.12em] text-muted-fg uppercase mb-2">
+            The walk
+          </div>
+          <PlanRouteMapLive steps={steps} />
+          <a
+            href={mapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => track("plan_open_maps", { stops: steps.length })}
+            className="mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-border bg-card text-[14px] font-extrabold text-fg"
+          >
+            <MapIcon className="w-4 h-4" strokeWidth={1.75} aria-hidden />
+            Open in Google Maps
+          </a>
+        </div>
+      )}
 
       {plan.event && (
         <div className="mt-3 rounded-2xl border border-accent/30 bg-accent/10 p-3">
