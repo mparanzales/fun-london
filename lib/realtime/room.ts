@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { PlanArea } from "@/lib/regions";
 import type { PlanBudget } from "@/lib/plan-engine";
 import type { TasteMap } from "@/lib/group-taste";
+import { pruneReactions } from "@/lib/group-veto";
 
 export type Member = {
   id: string;
@@ -176,7 +177,13 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
           }
         }
       }
-      if (list.length > 0) setMembers(list);
+      if (list.length > 0) {
+        setMembers(list);
+        // A member who left must not keep a vote: reactions drive a majority
+        // swap measured against the live group, so prune departed voters (no-op
+        // ref when nobody left → no needless re-render).
+        setReactions((prev) => pruneReactions(prev, seen));
+      }
     });
 
     // Late-join replay: when anyone joins, re-broadcast state so the newcomer

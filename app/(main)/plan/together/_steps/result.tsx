@@ -162,11 +162,15 @@ export function Result({
   const react = (i: number, value: StopReaction) =>
     room.sendReact(i, myReact(i) === value ? null : value);
 
-  // When more than half the group vetoes a stop that has another option, the
-  // HOST advances it to the next alternative for everyone. Only the host acts,
-  // so devices don't race; the swap broadcast clears that stop's reactions, so
-  // the majority resets against the fresh venue (self-broadcast prevents a
-  // double swap — no dep changes between sending and receiving it).
+  // When more than half the LIVE group vetoes a stop that has another option,
+  // the HOST advances it to the next alternative for everyone. Only the host
+  // acts, so devices don't race. A double swap is prevented by idempotency:
+  // sendSwap broadcasts WITHOUT optimistically updating room.swaps, so any
+  // re-run in the round-trip window recomputes the same target index; the
+  // self-broadcast then advances swaps[i] and clears reactions[i], ending the
+  // majority. If the host has left, no device has isHost, so a reached majority
+  // simply doesn't apply (a graceful no-op for an ephemeral room). Departed
+  // members' votes are pruned in room.ts, so a leave can't cross the threshold.
   useEffect(() => {
     if (!room.isHost || total === 0) return;
     plan.alternatives.forEach((alts, i) => {
