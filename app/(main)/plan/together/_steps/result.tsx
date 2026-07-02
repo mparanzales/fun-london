@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { Event, Venue } from "@/lib/types";
-import type { Member, Room } from "@/lib/realtime/room";
+import type { Member, Room, StopReaction } from "@/lib/realtime/room";
 import { averageTasteMaps } from "@/lib/group-taste";
+import { vetoMajority } from "@/lib/group-veto";
 import {
   computeWalkablePlan,
   walkMins,
@@ -27,6 +28,8 @@ import {
   Map as MapIcon,
   RotateCw,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Users,
 } from "lucide-react";
 
@@ -150,17 +153,33 @@ export function Result({
     return { ...s, walkToNextMins: next ? walkMins(s.venue, next) : null };
   });
 
-  // Bidirectional swap, matching solo: positions 0..len-1 where 0 = the base
-  // venue and 1..len-1 = alternatives; swipe left = next, right = previous.
-  // Broadcast the active index (-1 = base) so every device shows the same swap.
-  const onSwap = (i: number, dir: 1 | -1 = 1) => {
-    const alts = plan.alternatives[i] ?? [];
-    if (alts.length === 0) return;
-    const len = alts.length + 1;
-    const pos = ((((room.swaps[i] ?? -1) + 1 + dir) % len) + len) % len;
-    room.sendSwap(i, pos - 1);
-    track("plan_swap", { stop: i, dir });
-  };
+  // Group react/veto. Swiping a stop (right = keep, left = change) or tapping
+  // Keep / Change casts YOUR vote. My own reaction + per-value tallies:
+  const myReact = (i: number): StopReaction | undefined =>
+    room.reactions[i]?.[room.me.id];
+  const countReact = (i: number, value: StopReaction) =>
+    Object.values(room.reactions[i] ?? {}).filter((v) => v === value).length;
+  const react = (i: number, value: StopReaction) =>
+    room.sendReact(i, myReact(i) === value ? null : value);
+
+  // When more than half the group vetoes a stop that has another option, the
+  // HOST advances it to the next alternative for everyone. Only the host acts,
+  // so devices don't race; the swap broadcast clears that stop's reactions, so
+  // the majority resets against the fresh venue (self-broadcast prevents a
+  // double swap — no dep changes between sending and receiving it).
+  useEffect(() => {
+    if (!room.isHost || total === 0) return;
+    plan.alternatives.forEach((alts, i) => {
+      if ((alts?.length ?? 0) === 0) return;
+      if (vetoMajority(countReact(i, "veto"), total)) {
+        const len = alts.length + 1;
+        const pos = ((((room.swaps[i] ?? -1) + 2) % len) + len) % len;
+        room.sendSwap(i, pos - 1);
+        track("plan_swap", { stop: i, dir: 1 });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.reactions, room.swaps, room.isHost, total, plan]);
 
   // Real turn-by-turn for the whole night in Google Maps (null if no coords).
   const mapsUrl = googleMapsWalkingUrl(
@@ -212,6 +231,13 @@ export function Result({
         </div>
       </div>
 
+      {plan.alternatives.some((a) => (a?.length ?? 0) > 0) && (
+        <p className="mt-2.5 px-0.5 text-[11px] text-muted-fg leading-snug">
+          Not feeling a stop? Swipe it or tap Change. If most of the group
+          agrees, it swaps to another option.
+        </p>
+      )}
+
       <div className="mt-3.5 flex flex-col gap-3">
         {steps.map((s, i) => {
           const roleQs = qIdxByRole[s.role] ?? [];
@@ -233,7 +259,7 @@ export function Result({
             <div key={`${s.venue.id}-${i}`}>
               <SwipeStop
                 enabled={(plan.alternatives[i]?.length ?? 0) > 0}
-                onSwipe={(dir) => onSwap(i, dir)}
+                onSwipe={(dir) => react(i, dir === 1 ? "veto" : "keep")}
               >
                 <div className="bg-card border border-border rounded-2xl overflow-hidden">
                   <div
@@ -273,25 +299,60 @@ export function Result({
                       <span>·</span>
                       <span>{s.venue.price}</span>
                     </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="text-[10.5px] text-muted-fg italic">
-                        {attribution}
-                      </div>
-                      {(plan.alternatives[i]?.length ?? 0) > 0 && (
+                    <div className="text-[10.5px] text-muted-fg italic mt-1">
+                      {attribution}
+                    </div>
+                    {(plan.alternatives[i]?.length ?? 0) > 0 && (
+                      <div className="flex items-center gap-2 mt-2">
                         <button
                           type="button"
-                          onClick={() => onSwap(i)}
-                          className="text-[11px] font-extrabold text-accent flex-shrink-0 inline-flex items-center gap-1"
+                          onClick={() => react(i, "keep")}
+                          aria-pressed={myReact(i) === "keep"}
+                          className={
+                            "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold " +
+                            (myReact(i) === "keep"
+                              ? "border-accent bg-accent/10 text-accent"
+                              : "border-border text-muted-fg")
+                          }
                         >
-                          <RotateCw
+                          <ThumbsUp
                             className="w-3.5 h-3.5"
                             strokeWidth={1.75}
                             aria-hidden
                           />
-                          Swap
+                          Keep
+                          {countReact(i, "keep") > 0
+                            ? ` ${countReact(i, "keep")}`
+                            : ""}
                         </button>
-                      )}
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => react(i, "veto")}
+                          aria-pressed={myReact(i) === "veto"}
+                          className={
+                            "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold " +
+                            (myReact(i) === "veto"
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-fg")
+                          }
+                        >
+                          <ThumbsDown
+                            className="w-3.5 h-3.5"
+                            strokeWidth={1.75}
+                            aria-hidden
+                          />
+                          Change
+                          {countReact(i, "veto") > 0
+                            ? ` ${countReact(i, "veto")}`
+                            : ""}
+                        </button>
+                        {countReact(i, "veto") > 0 && (
+                          <span className="ml-auto text-[10px] text-muted-fg">
+                            {countReact(i, "veto")}/{total} want to change
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </SwipeStop>

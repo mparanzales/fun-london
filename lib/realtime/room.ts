@@ -25,6 +25,12 @@ export type Member = {
 export type Phase = "lobby" | "settings" | "swipe" | "result";
 export type Vote = { memberId: string; qIdx: number; value: boolean };
 
+// Per-stop group reaction on the final plan: keep it (👍) or veto it (👎, "let's
+// change this one"). When more than half the group vetoes a stop, the host
+// auto-swaps it to the next alternative (see _steps/result). Swiping a stop is
+// just a shortcut for casting this — right = keep, left = veto.
+export type StopReaction = "keep" | "veto";
+
 // Host-set logistics. `when.at` is the resolved meeting time in ms (computed
 // on the host's clock) so every device builds the same plan.
 export type PlanWhen =
@@ -56,6 +62,7 @@ export type Room = {
   swaps: Record<number, number>; // stepIdx → active alternative index
   variant: number; // which whole-plan alternative ("another mix")
   tasteByMember: Record<string, TasteMap>; // memberId → their broadcast taste
+  reactions: Record<number, Record<string, StopReaction>>; // stepIdx → memberId → 👍/👎
   sendPhase: (p: Phase) => void;
   sendSettings: (s: RoomSettings) => void;
   sendVote: (qIdx: number, value: boolean) => void;
@@ -63,6 +70,7 @@ export type Room = {
   sendSwap: (stepIdx: number, altIdx: number) => void;
   sendVariant: (n: number) => void;
   sendTaste: (taste: TasteMap) => void;
+  sendReact: (stepIdx: number, value: StopReaction | null) => void;
 };
 
 // ── Identity helpers ──────────────────────────────────────────────────────
@@ -133,6 +141,9 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
   const [tasteByMember, setTasteByMember] = useState<Record<string, TasteMap>>(
     {},
   );
+  const [reactions, setReactions] = useState<
+    Record<number, Record<string, StopReaction>>
+  >({});
   const channelRef = useRef<RealtimeChannel | null>(null);
   // Refs so the presence-join replay handler reads the latest host state.
   const settingsRef = useRef<RoomSettings | null>(null);
@@ -204,7 +215,12 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     });
 
     channel.on("broadcast", { event: "phase" }, ({ payload }) => {
-      setPhase((payload as { phase: Phase }).phase);
+      const p = (payload as { phase: Phase }).phase;
+      setPhase(p);
+      // Going back to Settings is a re-plan → clear stale per-stop reactions so
+      // they don't carry onto (or auto-swap) the new plan. Keyed on the phase
+      // move, NOT the settings broadcast, which also fires on late-join replay.
+      if (p === "settings") setReactions({});
     });
     channel.on("broadcast", { event: "settings" }, ({ payload }) => {
       setSettings(payload as RoomSettings);
@@ -228,6 +244,14 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
         altIdx: number;
       };
       setSwaps((prev) => ({ ...prev, [stepIdx]: altIdx }));
+      // A swapped stop is a fresh venue — its old keep/veto reactions no longer
+      // apply, so clear them (and the majority that triggered the swap resets).
+      setReactions((prev) => {
+        if (!prev[stepIdx]) return prev;
+        const next = { ...prev };
+        delete next[stepIdx];
+        return next;
+      });
     });
     channel.on("broadcast", { event: "swaps" }, ({ payload }) => {
       setSwaps(payload as Record<number, number>);
@@ -235,6 +259,21 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     channel.on("broadcast", { event: "variant" }, ({ payload }) => {
       setVariant((payload as { variant: number }).variant);
       setSwaps({}); // a fresh mix clears per-stop swaps
+      setReactions({}); // …and its reactions
+    });
+    channel.on("broadcast", { event: "react" }, ({ payload }) => {
+      const { memberId, stepIdx, value } = payload as {
+        memberId: string;
+        stepIdx: number;
+        value: StopReaction | null;
+      };
+      if (!memberId) return;
+      setReactions((prev) => {
+        const stop = { ...(prev[stepIdx] ?? {}) };
+        if (value) stop[memberId] = value;
+        else delete stop[memberId];
+        return { ...prev, [stepIdx]: stop };
+      });
     });
     channel.on("broadcast", { event: "taste" }, ({ payload }) => {
       const { memberId, taste } = payload as {
@@ -339,6 +378,24 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     [me.id],
   );
 
+  const sendReact = useCallback(
+    (stepIdx: number, value: StopReaction | null) => {
+      setReactions((prev) => {
+        // optimistic self
+        const stop = { ...(prev[stepIdx] ?? {}) };
+        if (value) stop[me.id] = value;
+        else delete stop[me.id];
+        return { ...prev, [stepIdx]: stop };
+      });
+      channelRef.current?.send({
+        type: "broadcast",
+        event: "react",
+        payload: { memberId: me.id, stepIdx, value },
+      });
+    },
+    [me.id],
+  );
+
   return {
     code,
     me,
@@ -351,6 +408,7 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     swaps,
     variant,
     tasteByMember,
+    reactions,
     sendPhase,
     sendSettings,
     sendVote,
@@ -358,5 +416,6 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     sendSwap,
     sendVariant,
     sendTaste,
+    sendReact,
   };
 }
