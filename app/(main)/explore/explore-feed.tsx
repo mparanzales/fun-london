@@ -558,8 +558,24 @@ export function ExploreFeed({
         }}
       />
 
-      {/* "Near you" sort + taste status line. */}
+      {/* Filters + "Near you" sort + taste status line. Filters leads (it's the
+          broader control); Near-you sits second. */}
       <div className="px-5 lg:px-6 pt-1.5 flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setFiltersOpen(true)}
+          aria-haspopup="dialog"
+          className={
+            "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[11px] font-bold transition " +
+            (refineCount > 0
+              ? "bg-primary text-primary-fg"
+              : "bg-muted text-muted-fg")
+          }
+        >
+          <SlidersHorizontal size={12} strokeWidth={2.4} />
+          Filters
+          {refineCount > 0 && ` · ${refineCount}`}
+        </button>
         <button
           type="button"
           onClick={signedIn ? toggleNearest : () => setWallFor("near")}
@@ -578,21 +594,6 @@ export function ExploreFeed({
             : nearestFirst
               ? "Nearest first"
               : "Near you"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setFiltersOpen(true)}
-          aria-haspopup="dialog"
-          className={
-            "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[11px] font-bold transition " +
-            (refineCount > 0
-              ? "bg-primary text-primary-fg"
-              : "bg-muted text-muted-fg")
-          }
-        >
-          <SlidersHorizontal size={12} strokeWidth={2.4} />
-          Filters
-          {refineCount > 0 && ` · ${refineCount}`}
         </button>
         {geoStatus === "denied" && (
           <span className="text-[11px] font-semibold text-muted-fg">
