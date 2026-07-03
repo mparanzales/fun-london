@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { sizedImageUrl } from "@/lib/img";
+import { displayEventPrice } from "@/lib/event-price";
 import type { Event } from "@/lib/types";
 
 type Props = {
@@ -97,8 +98,12 @@ export function EventCard({
               <span>{event.timeLabel}</span>
             </>
           )}
-          <span>·</span>
-          <span>{event.price}</span>
+          {displayEventPrice(event.price) && (
+            <>
+              <span>·</span>
+              <span>{displayEventPrice(event.price)}</span>
+            </>
+          )}
         </div>
       </div>
     </Link>
