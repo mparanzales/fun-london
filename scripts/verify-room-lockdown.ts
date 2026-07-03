@@ -19,11 +19,15 @@ const envVar = (k: string) =>
 const SUPABASE_URL = envVar("NEXT_PUBLIC_SUPABASE_URL")!;
 const ANON = envVar("NEXT_PUBLIC_SUPABASE_ANON_KEY")!;
 
-function anonJoinPrivate(
+// Attempt an anonymous join of a plan-* topic, either as a private channel
+// (RLS-gated) or a public one (the bypass the "Allow public access" toggle
+// closes). Both must be rejected once the room is locked down.
+function anonJoin(
   topic: string,
+  isPrivate: boolean,
 ): Promise<{ status: string; err?: string }> {
   const client = createClient(SUPABASE_URL, ANON); // no session → role `anon`
-  const ch = client.channel(topic, { config: { private: true } });
+  const ch = client.channel(topic, { config: { private: isPrivate } });
   return new Promise((resolve) => {
     let settled = false;
     const done = (r: { status: string; err?: string }) => {
@@ -43,16 +47,27 @@ function anonJoinPrivate(
 
 async function main() {
   console.log(`\nChannel lockdown check on ${new URL(SUPABASE_URL).host}\n`);
-  const r = await anonJoinPrivate("plan-VERIFYANON");
-  const ok = r.status !== "SUBSCRIBED";
+
+  const priv = await anonJoin("plan-VERIFYPRIV", true);
+  const pub = await anonJoin("plan-VERIFYPUB", false);
+  const okPriv = priv.status !== "SUBSCRIBED";
+  const okPub = pub.status !== "SUBSCRIBED";
+  const ok = okPriv && okPub;
+
   console.log(
-    `  ${ok ? "PASS" : "FAIL"}  anonymous is rejected from a private plan-* channel`,
+    `  ${okPriv ? "PASS" : "FAIL"}  anon rejected from a PRIVATE plan-* channel (RLS)`,
   );
-  console.log(`      anon join → ${r.status}${r.err ? ` (${r.err})` : ""}`);
+  console.log(`      → ${priv.status}${priv.err ? ` (${priv.err})` : ""}`);
+  console.log(
+    `  ${okPub ? "PASS" : "FAIL"}  anon rejected from a PUBLIC plan-* channel (public access off)`,
+  );
+  console.log(`      → ${pub.status}${pub.err ? ` (${pub.err})` : ""}`);
   console.log(
     ok
-      ? "\nAnon eavesdroppers are blocked at the Realtime RLS layer.\n"
-      : "\nAnon was NOT blocked — check the RLS policies / private channel config.\n",
+      ? "\nBoth paths blocked — anon eavesdroppers can no longer read the room.\n"
+      : okPriv
+        ? "\nPRIVATE is locked but PUBLIC still joins — 'Allow public access' is still ON.\n"
+        : "\nAnon was NOT blocked — check the RLS policies / private channel config.\n",
   );
   process.exit(ok ? 0 : 1);
 }
