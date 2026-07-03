@@ -31,6 +31,7 @@ import type { FeedFilter, FeedSort } from "@/lib/queries";
 import { FEED_PAGE_SIZE } from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
+import { useSaved } from "@/components/saved-context";
 import { CITY } from "@/lib/config";
 import { hasPrefs } from "@/lib/ranking";
 import { regionOf } from "@/lib/regions";
@@ -116,6 +117,9 @@ export function ExploreFeed({
   initialHasMore?: boolean;
 }) {
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
+  // Venues the user has already saved (slugs) — kept OUT of the taste-sorted
+  // "For You" feed so it stays discovery, not a re-run of their own list.
+  const { savedSet } = useSaved();
   const [searchOpen, setSearchOpen] = useState(false);
   const eyebrow = getEyebrow();
   // Anon: clicking a category chip, search, or "Near you" raises a soft blur
@@ -465,10 +469,13 @@ export function ExploreFeed({
     if (selectedFilter === "events") {
       return allEvents.map<FeedItem>((e) => ({ kind: "event", data: e }));
     }
-    const venueItems = loaded.map<FeedItem>((v) => ({
-      kind: "venue",
-      data: v,
-    }));
+    // In the taste-sorted "For You" view, drop venues you've already saved:
+    // the taste vector is built FROM them, so they'd otherwise top the feed.
+    // Other sorts (top-rated / nearest) are browse views and keep them.
+    const forYou = sort === "for-you";
+    const venueItems = loaded
+      .filter((v) => !forYou || !savedSet.has(v.slug))
+      .map<FeedItem>((v) => ({ kind: "venue", data: v }));
     if (selectedFilter === "music") {
       return [
         ...venueItems,
@@ -478,7 +485,7 @@ export function ExploreFeed({
       ];
     }
     return venueItems;
-  }, [signedIn, items, loaded, selectedFilter, allEvents]);
+  }, [signedIn, items, loaded, selectedFilter, allEvents, sort, savedSet]);
 
   // Smart category-tag visibility:
   //   For You / Music / Events → mixed sources or subtypes → show tags
