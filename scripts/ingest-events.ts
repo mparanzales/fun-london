@@ -473,7 +473,7 @@ function formatPrice(
     currency === "GBP" ? "£" : currency === "USD" ? "$" : (currency ?? "");
   if (min == null && max == null) return "Tickets via Ticketmaster";
   if (min != null && max != null && min !== max) {
-    return `${cur}${min.toFixed(0)}–${cur}${max.toFixed(0)}`;
+    return `${cur}${min.toFixed(0)} to ${cur}${max.toFixed(0)}`;
   }
   const val = min ?? max ?? 0;
   return `From ${cur}${val.toFixed(0)}`;

@@ -16,6 +16,7 @@ import {
 import { EventActions } from "@/components/event-actions";
 import { applyAffiliate } from "@/lib/affiliate";
 import { track } from "@/lib/analytics";
+import { displayEventPrice } from "@/lib/event-price";
 import type { Event, Venue } from "@/lib/types";
 
 // Event detail — mirrors the venue detail's visual language. The EVENT owns the
@@ -126,9 +127,11 @@ export function EventDetail({
               {event.timeLabel}
             </span>
           )}
-          <span className="border border-fg/15 rounded-full px-3 py-1.5 text-xs font-medium text-fg">
-            {event.price}
-          </span>
+          {displayEventPrice(event.price) && (
+            <span className="border border-fg/15 rounded-full px-3 py-1.5 text-xs font-medium text-fg">
+              {displayEventPrice(event.price)}
+            </span>
+          )}
         </div>
 
         {/* The event's OWN blurb — event-specific, in the brand voice. Omitted
