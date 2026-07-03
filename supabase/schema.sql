@@ -142,6 +142,10 @@ create table if not exists public.events (
   google_place_id text,                    -- resolved Places id for the venue
   place_details jsonb,                      -- {rating,address,lat,lng,openingHours,website,phone,mapsUrl,editorial,reviews[]}
   place_synced_at timestamptz,             -- last Places re-pull
+  -- Set when `description` has been curated in-voice (compiled from real sources
+  -- + adversarially fact-checked). The trigger below then protects it from the
+  -- ingest cron, which re-upserts the raw promoter copy every few hours.
+  curated_at timestamptz,
   constraint events_source_unique unique (source, source_id)
 );
 create index if not exists events_date_label_idx on public.events(date_label);
@@ -150,6 +154,24 @@ create index if not exists events_starts_at_idx  on public.events(starts_at);
 create index if not exists events_venue_starts_idx
   on public.events(venue_id, starts_at)
   where venue_id is not null;
+
+-- Protect a curated description from every automated writer (ingest cron,
+-- pop-up radar). A deliberate re-curation still lands because it bumps
+-- curated_at, so NEW differs from OLD and the guard lets it through.
+create or replace function public.preserve_curated_event_copy()
+returns trigger language plpgsql as $$
+begin
+  if OLD.curated_at is not null
+     and NEW.curated_at is not distinct from OLD.curated_at then
+    NEW.description := OLD.description;
+  end if;
+  return NEW;
+end;
+$$;
+drop trigger if exists trg_preserve_curated_event_copy on public.events;
+create trigger trg_preserve_curated_event_copy
+  before update on public.events
+  for each row execute function public.preserve_curated_event_copy();
 
 -- Saved venues (user ↔ venue) — backs the `SavedVenue` type
 -- Renamed from `saved_places` in v1.
