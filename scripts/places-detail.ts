@@ -55,6 +55,9 @@ export type EventPlace = {
   website: string | null;
   phone: string | null;
   mapsUrl: string | null;
+  // Our mirrored keyless static-map thumbnail (matches the venue page). The
+  // resolver leaves this null; the backfill fills it via mirrorMapToStorage.
+  mapUrl: string | null;
   editorial: string | null;
   reviews: EventPlaceReview[];
 };
@@ -137,6 +140,7 @@ export async function resolveEventPlace(
     website: d.websiteUri ?? null,
     phone: d.nationalPhoneNumber ?? null,
     mapsUrl: d.googleMapsUri ?? null,
+    mapUrl: null, // filled by the backfill (mirrorMapToStorage)
     editorial: d.editorialSummary?.text ?? null,
     reviews: normalizeReviews(d.reviews),
   };

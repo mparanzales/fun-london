@@ -18,12 +18,12 @@ import { applyAffiliate } from "@/lib/affiliate";
 import { track } from "@/lib/analytics";
 import type { Event, Venue } from "@/lib/types";
 
-// Event detail — mirrors the venue detail composition so a tap from /events
-// lands in the same visual language as a tap from /explore. The venue-level
-// richness (rating, hours, address, map, reviews) comes from event.placeDetails
-// (Google Places, resolved by venue name+area — facts only, never an LLM). Every
-// Places section is guarded, so an event whose venue didn't resolve still
-// renders with what we have. placeDetails is signed-in only (moat).
+// Event detail — mirrors the venue detail's visual language. The EVENT owns the
+// top (name, date/time, price, its own blurb); a clearly separated "The venue"
+// block carries venue-level context (rating, map, address, links, reviews) from
+// event.placeDetails (Google Places, resolved by venue name+area — facts only,
+// never an LLM). Every Places section is guarded, so an event whose venue didn't
+// resolve still renders with what we have. placeDetails is signed-in only (moat).
 
 export function EventDetail({
   event,
@@ -56,16 +56,25 @@ export function EventDetail({
       ? applyAffiliate("ticketmaster", event.sourceUrl)
       : event.sourceUrl;
 
-  // Prefer the event's own blurb; fall back to Google's factual one-liner.
-  const blurb = event.description ?? place?.editorial ?? null;
-
-  const mapsHref =
-    place?.mapsUrl ??
-    (place?.lat != null && place?.lng != null
+  // "Get directions" target — the venue's coords, else its address, else the
+  // Google Maps place link. Matches the venue page's directions behaviour.
+  const directionsHref =
+    place?.lat != null && place?.lng != null
       ? `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`
       : place?.address
         ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(place.address)}`
-        : null);
+        : (place?.mapsUrl ?? null);
+
+  const hasVenueBlock =
+    !!place &&
+    (place.rating != null ||
+      place.editorial ||
+      place.mapUrl ||
+      directionsHref ||
+      place.address ||
+      place.website ||
+      place.phone ||
+      (place.reviews && place.reviews.length > 0));
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
@@ -92,8 +101,8 @@ export function EventDetail({
         </button>
       </div>
 
-      {/* ── Info block ─────────────────────────────────────────────── */}
       <section className="px-5 pt-5">
+        {/* ── The event ──────────────────────────────────────────────── */}
         <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
           {eyebrow}
         </div>
@@ -104,24 +113,8 @@ export function EventDetail({
           {event.venueName}
         </div>
 
-        {/* Venue rating (grey star, like the venue page). From Places. */}
-        {place?.rating != null && (
-          <div className="flex items-center gap-1.5 mt-2 text-sm text-muted-fg">
-            <Star
-              className="w-4 h-4 text-muted-fg fill-current"
-              strokeWidth={0}
-            />
-            <span>{place.rating}</span>
-            {place.ratingCount != null && (
-              <>
-                <span aria-hidden>·</span>
-                <span>{place.ratingCount.toLocaleString()} reviews</span>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Quick facts — date + time + price */}
+        {/* Event facts — date, time, price. The EVENT's time, not the venue's
+            regular opening hours (which would read as misleading here). */}
         <div className="flex flex-wrap gap-2 mt-5">
           <span className="flex items-center gap-1.5 border border-fg/15 rounded-full px-3 py-1.5 text-xs font-medium text-fg">
             <Calendar size={13} strokeWidth={2} />
@@ -138,140 +131,183 @@ export function EventDetail({
           </span>
         </div>
 
-        {/* What is this — the event's blurb, or Google's factual one-liner. */}
-        {blurb && (
-          <p className="text-[15px] text-fg/90 leading-relaxed mt-5">{blurb}</p>
+        {/* The event's OWN blurb — event-specific, in the brand voice. Omitted
+            when we don't have one; never the venue's blurb dressed as the event
+            (that lives under "The venue" below). */}
+        {event.description && (
+          <p className="text-[15px] text-fg/90 leading-relaxed mt-5">
+            {event.description}
+          </p>
         )}
 
         {/* Add to calendar (.ics) + share */}
         <EventActions event={event} />
 
-        {/* No venue opening-hours here on purpose: for an event, the time that
-            matters is the EVENT's (shown in the date/time pills above), not the
-            venue's regular hours, which would read as misleading. */}
-
-        {/* ── Reviews (Google, verbatim + attribution) ───────────────── */}
-        {place?.reviews && place.reviews.length > 0 && (
-          <div className="mt-8">
-            <div className="flex items-baseline justify-between mb-3">
-              <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
-                Reviews
-              </div>
-              <span className="text-[10px] text-muted-fg">
-                Reviews from Google
-              </span>
-            </div>
-            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {place.reviews.map((r, i) => (
-                <div
-                  key={i}
-                  className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5"
-                >
-                  <div className="flex gap-0.5 mb-2">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star
-                        key={s}
-                        className={
-                          "w-3.5 h-3.5 fill-current " +
-                          (s <= Math.round(r.rating ?? 0)
-                            ? "text-muted-fg"
-                            : "text-fg/15")
-                        }
-                        strokeWidth={0}
-                      />
-                    ))}
-                  </div>
-                  {r.text && (
-                    <p className="text-[13px] text-fg leading-relaxed line-clamp-5">
-                      {r.text}
-                    </p>
-                  )}
-                  {r.author && (
-                    <p className="text-[11px] text-muted-fg mt-2">{r.author}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Plan your visit — venue address + map + links ──────────── */}
-        {place &&
-          (place.address || mapsHref || place.website || place.phone) && (
-            <div className="mt-8">
-              <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
-                Plan your visit
-              </div>
-              {mapsHref && (
-                <a
-                  href={mapsHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Open in Google Maps"
-                  className="relative flex mb-3 h-24 items-center justify-center gap-2 overflow-hidden rounded-2xl bg-muted text-muted-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  <MapPin className="w-5 h-5" strokeWidth={2} />
-                  <span className="text-sm font-medium">
-                    Open in Google Maps
-                  </span>
-                </a>
-              )}
-              {place.address && (
-                <p className="text-sm font-semibold text-fg">{place.address}</p>
-              )}
-              <p className="text-[13px] text-muted-fg mt-0.5">
-                {event.venueName}, {event.area}
-              </p>
-              <div className="flex flex-wrap gap-2 mt-4">
-                {place.website && (
-                  <a
-                    href={place.website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white"
-                  >
-                    <Globe className="w-4 h-4" strokeWidth={2} />
-                    Visit website
-                  </a>
-                )}
-                {place.phone && (
-                  <a
-                    href={`tel:${place.phone}`}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white"
-                  >
-                    <Phone className="w-4 h-4" strokeWidth={2} />
-                    Call venue
-                  </a>
-                )}
-              </div>
-            </div>
-          )}
-
-        {/* ── Optional venue card (rare: event's venue is in our catalogue) */}
-        {venue && (
-          <div className="mt-8">
-            <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-accent mb-1.5">
+        {/* ── The venue ── clearly separated venue context (rating, blurb, map,
+            address, links, reviews). All from Google Places, facts only. */}
+        {hasVenueBlock && place && (
+          <div className="mt-9">
+            <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
               The venue
             </div>
-            <Link
-              href={`/venue/${venue.slug}`}
-              className="block rounded-2xl border border-border bg-card p-4 hover:bg-muted/30 transition-colors"
-            >
-              <div className="text-[15px] font-extrabold text-heading leading-tight">
-                {venue.name}
+            <div className="text-[17px] font-extrabold text-heading leading-tight">
+              {event.venueName}
+            </div>
+
+            {/* Venue rating — grey star, like the venue page. It's the VENUE's
+                rating, so it sits here, not under the event name. */}
+            {place.rating != null && (
+              <div className="flex items-center gap-1.5 mt-1 text-sm text-muted-fg">
+                <Star
+                  className="w-4 h-4 text-muted-fg fill-current"
+                  strokeWidth={0}
+                />
+                <span>{place.rating}</span>
+                {place.ratingCount != null && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>{place.ratingCount.toLocaleString()} reviews</span>
+                  </>
+                )}
               </div>
-              <div className="text-[11px] text-muted-fg mt-0.5">
-                {venue.type} · {venue.neighbourhood} · {venue.price}
-              </div>
-              {venue.vibe && (
-                <div className="text-[13px] text-fg/80 italic mt-2 leading-relaxed">
-                  {venue.vibe}
-                </div>
+            )}
+
+            {/* Google's factual one-liner about the venue. */}
+            {place.editorial && (
+              <p className="text-[14px] text-fg/80 leading-relaxed mt-2">
+                {place.editorial}
+              </p>
+            )}
+
+            {/* Map thumbnail — mirrored keyless greyscale static map, same
+                treatment as the venue page. Tapping opens Google Maps. */}
+            {directionsHref && (
+              <a
+                href={directionsHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open in Google Maps"
+                className="relative block mt-4 h-28 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {place.mapUrl ? (
+                  <Image
+                    src={place.mapUrl}
+                    alt={`Map of ${event.venueName}`}
+                    fill
+                    sizes="(max-width: 640px) 100vw, 640px"
+                    className="object-cover"
+                  />
+                ) : (
+                  <span className="flex h-full items-center justify-center gap-2 bg-muted text-muted-fg">
+                    <MapPin className="w-5 h-5" strokeWidth={2} />
+                    <span className="text-sm font-medium">{event.area}</span>
+                  </span>
+                )}
+              </a>
+            )}
+
+            {place.address && (
+              <p className="text-sm font-semibold text-fg mt-3">
+                {place.address}
+              </p>
+            )}
+            <p className="text-[13px] text-muted-fg mt-0.5">
+              {event.area}, London
+              {directionsHref && (
+                <>
+                  {" · "}
+                  <a
+                    href={directionsHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-primary rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    Get directions
+                  </a>
+                </>
               )}
-              <div className="text-[10px] font-extrabold tracking-[0.14em] uppercase text-accent mt-3">
-                See venue details →
+            </p>
+
+            <div className="flex flex-wrap gap-2 mt-4">
+              {place.website && (
+                <a
+                  href={place.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Globe className="w-4 h-4" strokeWidth={2} />
+                  Visit website
+                </a>
+              )}
+              {place.phone && (
+                <a
+                  href={`tel:${place.phone}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Phone className="w-4 h-4" strokeWidth={2} />
+                  Call venue
+                </a>
+              )}
+            </div>
+
+            {/* Reviews — verbatim Google reviews of the venue, with the required
+                attribution. Never invented; only shown when we hold real ones. */}
+            {place.reviews && place.reviews.length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-baseline justify-between mb-3">
+                  <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
+                    Reviews
+                  </div>
+                  <span className="text-[10px] text-muted-fg">
+                    Reviews from Google
+                  </span>
+                </div>
+                <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {place.reviews.map((r, i) => (
+                    <div
+                      key={i}
+                      className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5"
+                    >
+                      <div className="flex gap-0.5 mb-2">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star
+                            key={s}
+                            className={
+                              "w-3.5 h-3.5 fill-current " +
+                              (s <= Math.round(r.rating ?? 0)
+                                ? "text-muted-fg"
+                                : "text-fg/15")
+                            }
+                            strokeWidth={0}
+                          />
+                        ))}
+                      </div>
+                      {r.text && (
+                        <p className="text-[13px] text-fg leading-relaxed line-clamp-5">
+                          {r.text}
+                        </p>
+                      )}
+                      {r.author && (
+                        <p className="text-[11px] text-muted-fg mt-2">
+                          {r.author}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </Link>
+            )}
+
+            {/* Rare: the event's venue is also in our curated catalogue. */}
+            {venue && (
+              <Link
+                href={`/venue/${venue.slug}`}
+                className="mt-5 inline-block text-[11px] font-extrabold tracking-[0.14em] uppercase text-accent"
+              >
+                See our full take on {venue.name} →
+              </Link>
+            )}
           </div>
         )}
       </section>

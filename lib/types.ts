@@ -160,7 +160,8 @@ export type PlaceDetails = {
   openingHours: OpeningHours | null;
   website: string | null;
   phone: string | null;
-  mapsUrl: string | null;
+  mapsUrl: string | null; // Google Maps deep link (for "Get directions")
+  mapUrl: string | null; // our mirrored keyless static-map thumbnail (like venues)
   editorial: string | null; // Google's own factual one-liner
   reviews: PlaceReview[];
 };

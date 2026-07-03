@@ -11,6 +11,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 import { createClient } from "@supabase/supabase-js";
 import { resolveEventPlace, type EventPlace } from "./places-detail";
+import { mirrorMapToStorage, photoStorageEnabled } from "./photo-storage";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const FORCE = process.argv.includes("--force");
@@ -72,12 +73,27 @@ async function main() {
   for (const e of todo) {
     const key = `${(e.venue_name ?? "").toLowerCase()}|${(e.area ?? "").toLowerCase()}`;
     if (!cache.has(key)) {
-      cache.set(
-        key,
-        e.venue_name
-          ? await resolveEventPlace(e.venue_name, e.area ?? "", PLACES_KEY)
-          : null,
-      );
+      const p = e.venue_name
+        ? await resolveEventPlace(e.venue_name, e.area ?? "", PLACES_KEY)
+        : null;
+      // Mirror a greyscale static map to keyless Storage (once per venue), the
+      // same treatment as the venue page's "Plan your visit" map. Skipped in a
+      // dry run so we don't write images before you've approved.
+      if (
+        p &&
+        p.lat != null &&
+        p.lng != null &&
+        !DRY_RUN &&
+        photoStorageEnabled()
+      ) {
+        p.mapUrl = await mirrorMapToStorage(
+          `evmap-${p.placeId}`,
+          p.lat,
+          p.lng,
+          db,
+        );
+      }
+      cache.set(key, p);
     }
     const place = cache.get(key) ?? null;
 
@@ -91,7 +107,7 @@ async function main() {
     resolved++;
     console.log(
       `  OK ${e.name}\n       @ ${place.matchedName} — ${place.rating ?? "?"}★ (${place.ratingCount ?? 0}) · ${place.address ?? "?"}` +
-        `\n       hours:${place.openingHours ? "y" : "n"} web:${place.website ? "y" : "n"} phone:${place.phone ? "y" : "n"} reviews:${place.reviews.length} blurb:${place.editorial ? "y" : "n"}`,
+        `\n       hours:${place.openingHours ? "y" : "n"} web:${place.website ? "y" : "n"} phone:${place.phone ? "y" : "n"} reviews:${place.reviews.length} blurb:${place.editorial ? "y" : "n"} map:${place.mapUrl ? "y" : "n"}`,
     );
 
     if (!DRY_RUN) {
