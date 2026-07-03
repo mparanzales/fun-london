@@ -160,8 +160,16 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
 
   useEffect(() => {
     const supabase = createClient();
+    // Private channel: Realtime enforces RLS on realtime.messages, so only
+    // signed-in members can join/read/broadcast (an anon who guesses the room
+    // code is rejected). Plan Together is already sign-in only, so real users
+    // are unaffected.
     const channel = supabase.channel(`plan-${code}`, {
-      config: { presence: { key: me.id }, broadcast: { self: true } },
+      config: {
+        presence: { key: me.id },
+        broadcast: { self: true },
+        private: true,
+      },
     });
 
     channel.on("presence", { event: "sync" }, () => {
@@ -302,15 +310,27 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
         });
     });
 
-    channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        void channel.track(me);
-        // Ask any members already here to re-send their taste (their earlier
-        // broadcasts predate this subscription and Broadcast has no replay).
-        channel.send({ type: "broadcast", event: "taste-sync", payload: {} });
-      }
-    });
     channelRef.current = channel;
+    // Hand Realtime the signed-in user's JWT so the private channel's RLS check
+    // passes, THEN join. (supabase-js also auto-manages this token, but we set
+    // it explicitly first so we never join with only the anon key.)
+    void (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token)
+          await supabase.realtime.setAuth(data.session.access_token);
+      } catch {
+        // fall through — subscribe will surface an auth failure via status
+      }
+      channel.subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          void channel.track(me);
+          // Ask any members already here to re-send their taste (their earlier
+          // broadcasts predate this subscription and Broadcast has no replay).
+          channel.send({ type: "broadcast", event: "taste-sync", payload: {} });
+        }
+      });
+    })();
 
     return () => {
       void supabase.removeChannel(channel);
