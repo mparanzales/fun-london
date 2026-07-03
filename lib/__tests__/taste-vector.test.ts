@@ -92,3 +92,83 @@ describe("taste-vector (Stage 2.1)", () => {
     expect(cosineSimilarity(normalise(acc), batch)).toBeCloseTo(1, 5);
   });
 });
+
+describe("taste-vector Stage 6: capped exposure penalty", () => {
+  const imp = (vector: number[], venueId: string): TasteSignal => ({
+    vector,
+    eventType: "impression",
+    venueId,
+  });
+  // n distinct venues of a kind, each impressed `times` (≥3 to clear the min).
+  const impressedKind = (
+    base: number[],
+    n: number,
+    times: number,
+    seed = 100,
+  ) =>
+    Array.from({ length: n }, (_, s) => near(base, seed + s)).flatMap((v, s) =>
+      Array.from({ length: times }, () => imp(v, `imp-${seed}-${s}`)),
+    );
+
+  it("impressions with no deliberate signal → all-zero (stays cold-start)", () => {
+    const taste = buildTasteVector(impressedKind(wineBar, 5, 8));
+    expect(taste.every((x) => x === 0)).toBe(true);
+  });
+
+  it("repeatedly shown-but-skipped venues pull taste away from that kind", () => {
+    const saved: TasteSignal = {
+      vector: steak,
+      eventType: "save",
+      venueId: "steak",
+    };
+    const withImp = buildTasteVector([saved, ...impressedKind(wineBar, 5, 3)]);
+    const noImp = buildTasteVector([saved]);
+    expect(cosineSimilarity(withImp, wineBar)).toBeLessThan(
+      cosineSimilarity(noImp, wineBar),
+    );
+  });
+
+  it("impressions can REFINE but never DOMINATE a deliberate signal", () => {
+    // One save toward steak, vs 40 shown-but-skipped steak-ish venues (huge raw
+    // penalty away from steak). The bound keeps the single save winning.
+    const saved: TasteSignal = {
+      vector: steak,
+      eventType: "save",
+      venueId: "steak",
+    };
+    const taste = buildTasteVector([
+      saved,
+      ...impressedKind(steak, 40, 3, 200),
+    ]);
+    expect(cosineSimilarity(taste, steak)).toBeGreaterThan(0);
+  });
+
+  it("a venue you engaged is exempt, so its own impressions don't count", () => {
+    const base = buildTasteVector([
+      { vector: wineBar, eventType: "save", venueId: "wb" },
+    ]);
+    const withImp = buildTasteVector([
+      { vector: wineBar, eventType: "save", venueId: "wb" },
+      imp(wineBar, "wb"),
+      imp(wineBar, "wb"),
+      imp(wineBar, "wb"),
+      imp(wineBar, "wb"),
+    ]);
+    expect(cosineSimilarity(base, withImp)).toBeCloseTo(1, 6);
+  });
+
+  it("fewer than the minimum impressions → no penalty", () => {
+    const saved: TasteSignal = {
+      vector: steak,
+      eventType: "save",
+      venueId: "steak",
+    };
+    const twice = buildTasteVector([
+      saved,
+      imp(wineBar, "wb"),
+      imp(wineBar, "wb"),
+    ]);
+    const none = buildTasteVector([saved]);
+    expect(cosineSimilarity(twice, none)).toBeCloseTo(1, 6);
+  });
+});

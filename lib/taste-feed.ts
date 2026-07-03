@@ -131,6 +131,7 @@ async function loadUserTaste(
       eventType: e.event_type as SignalType,
       context: e.context,
       ageDays: (now - Date.parse(e.created_at)) / 86_400_000,
+      venueId: e.venue_id ?? undefined,
     });
   }
   if (signals.length === 0) return null;
