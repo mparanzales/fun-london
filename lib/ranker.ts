@@ -57,6 +57,14 @@ export function coldStartRelevance(
   return quality + (curated ? 0.1 : 0);
 }
 
+// Small quality prior blended into PERSONALISED relevance. Pure cosine let a
+// 3.9-rated venue that matches taste outrank a 4.8 that matches marginally
+// less — and as the robot-discovered share of the catalogue grows, that's how
+// taste-adjacent mediocrity creeps up the feed. β · quality (quality ∈ [0,1.1]
+// from coldStartRelevance) can reorder near-ties (worth ~0.17 of relevance at
+// most) but never overrides a real taste gap. Stage-7 bandit tuning knob.
+export const QUALITY_PRIOR_WEIGHT = 0.15;
+
 // ── MMR diversity re-rank ────────────────────────────────────────────────────
 
 export interface RankItem {
@@ -149,7 +157,9 @@ export function rankForTaste(
     id: c.id,
     vec: c.vec,
     rel: personalised
-      ? cosineSimilarity(taste, c.vec)
+      ? cosineSimilarity(taste, c.vec) +
+        QUALITY_PRIOR_WEIGHT *
+          coldStartRelevance(c.rating, c.reviewCount, c.curated)
       : coldStartRelevance(c.rating, c.reviewCount, c.curated),
   }));
   const ordered =
