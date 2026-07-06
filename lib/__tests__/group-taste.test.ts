@@ -32,11 +32,14 @@ describe("averageTasteMaps · group taste from peer-shared maps", () => {
     expect(out).toEqual({ a: 0.5, b: 0.5 });
   });
 
-  it("averages a venue over only the members that scored it", () => {
-    // b appears in one of two maps → its mean is over that one member, not
-    // diluted by a phantom zero from the other.
+  it("treats a venue missing from a member's map as 0 (wire-compacted maps)", () => {
+    // Taste maps are compacted before broadcast (near-zero scores dropped, see
+    // lib/taste-feed.compactTasteScores) — so b absent from the second map
+    // means that member scored it ~0, not "didn't vote". The mean dilutes:
+    // 0.6 / 2 members, not 0.6 / 1. The old per-scorer denominator inflated a
+    // venue one member loves and everyone else is neutral on.
     const out = averageTasteMaps([{ a: 1, b: 0.6 }, { a: 0 }]);
-    expect(out).toEqual({ a: 0.5, b: 0.6 });
+    expect(out).toEqual({ a: 0.5, b: 0.3 });
   });
 
   it("three members: equal-weight mean", () => {

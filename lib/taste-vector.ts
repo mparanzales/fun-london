@@ -41,6 +41,17 @@ export const SIGNAL_WEIGHTS: Record<SignalType, number> = {
   dismiss: -1.0,
 };
 
+// Signal types that carry DELIBERATE taste weight — nonzero in SIGNAL_WEIGHTS,
+// excluding impressions (which are exposure, aggregated separately by Stage 6).
+// Derived from the weights so the two can never drift apart. The data layer
+// uses this to fetch only rows that can actually move the taste vector:
+// zero-weight navigation events (search/filter/plan_started/plan_abandoned)
+// are skipped by buildTasteVector anyway, so excluding them at the query is
+// behaviour-identical and keeps them from eating the fetch budget.
+export const DELIBERATE_SIGNAL_TYPES = (
+  Object.keys(SIGNAL_WEIGHTS) as SignalType[]
+).filter((t) => t !== "impression" && SIGNAL_WEIGHTS[t] !== 0);
+
 // outbound_click intent varies by where it goes (context.target).
 const OUTBOUND_TARGET_WEIGHT: Record<string, number> = {
   booking: 0.9,
