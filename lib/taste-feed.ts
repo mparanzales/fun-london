@@ -20,7 +20,9 @@ import {
 import {
   centroidOf,
   centerVector,
+  coldStartRelevance,
   mmrRerank,
+  QUALITY_PRIOR_WEIGHT,
   type RankItem,
 } from "@/lib/ranker";
 import { cosineSimilarity, type Tag } from "@/lib/tag-vocabulary";
@@ -172,14 +174,21 @@ async function loadUserTaste(
 }
 
 /**
- * Reorder feed rows by the user's taste (centred cosine + MMR over the head).
- * Returns null to fall back to the default order. Rows without a vector keep
- * their original relative order at the tail.
+ * Reorder feed rows by the user's taste: centred cosine plus a small quality
+ * prior (QUALITY_PRIOR_WEIGHT · coldStartRelevance — reorders near-ties so a
+ * well-loved venue beats a taste-adjacent mediocre one, never overrides a real
+ * taste gap), then MMR over the head. Returns null to fall back to the default
+ * order. Rows without a vector keep their original relative order at the tail.
  */
-export async function rankRowsByTaste<T extends { id: string; type: string }>(
-  userId: string,
-  rows: T[],
-): Promise<T[] | null> {
+export async function rankRowsByTaste<
+  T extends {
+    id: string;
+    type: string;
+    rating?: number | string | null;
+    review_count?: number | null;
+    curation_tier?: string | null;
+  },
+>(userId: string, rows: T[]): Promise<T[] | null> {
   const idx = await getTasteIndex();
   if (!idx) return null;
   const taste = await loadUserTaste(userId, idx);
@@ -193,7 +202,14 @@ export async function rankRowsByTaste<T extends { id: string; type: string }>(
       withVec.push({
         row,
         vec,
-        rel: cosineSimilarity(taste, vec),
+        rel:
+          cosineSimilarity(taste, vec) +
+          QUALITY_PRIOR_WEIGHT *
+            coldStartRelevance(
+              Number(row.rating ?? 0),
+              row.review_count ?? 0,
+              row.curation_tier === "curated",
+            ),
         cat: categoryOf(row.type),
       });
     else noVec.push(row);
