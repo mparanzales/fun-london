@@ -16,7 +16,7 @@ function event(name: string, score: number): SearchHit {
 const order = (hits: SearchHit[]) =>
   [...hits].sort(compareHits).map((h) => h.data.name);
 
-describe("compareHits — relevance interleaving across venues + events", () => {
+describe("compareHits: relevance interleaving across venues + events", () => {
   it("ranks by match tier first, regardless of type", () => {
     // A name match (tier 0) of EITHER type beats a description match (tier 2).
     const hits = [
