@@ -6,7 +6,8 @@ import {
   fetchAllEventCards,
   fetchAllVenueSearchRows,
 } from "@/lib/queries";
-import { normalize, scoreMatch } from "@/lib/search-match";
+import { normalize, scoreMatch, compareHits } from "@/lib/search-match";
+import type { SearchHit } from "@/lib/search-match";
 import { rateLimit } from "@/lib/rate-limit";
 import type { Venue, Event } from "@/lib/types";
 
@@ -73,33 +74,42 @@ async function searchAllowed(): Promise<boolean> {
   return rateLimit(`search:${ip}`, SEARCH_RATE_LIMIT, SEARCH_RATE_WINDOW_MS);
 }
 
-// Rank an indexed list against a normalised query: name-prefix beats
-// name-substring beats haystack-substring (see scoreMatch), best first, capped.
-function rankIndexed<T>(rows: Indexed<T>[], q: string, limit: number): T[] {
-  return rows
-    .map((r) => ({ r, s: scoreMatch(r.name, r.hay, q) }))
-    .filter((x) => x.s !== null)
-    .sort((a, b) => (a.s as number) - (b.s as number))
-    .slice(0, limit)
-    .map((x) => x.r.item);
+// Rank venues AND events against a normalised query into ONE relevance-ordered
+// list, so the two types interleave by how well they match rather than being
+// grouped by kind (see compareHits). Best first, capped to `limit` total.
+function rankMerged(
+  venues: Indexed<Venue>[],
+  events: Indexed<Event>[],
+  q: string,
+  limit: number,
+): SearchHit[] {
+  const hits: SearchHit[] = [];
+  for (const r of venues) {
+    const s = scoreMatch(r.name, r.hay, q);
+    if (s !== null) hits.push({ kind: "venue", data: r.item, score: s });
+  }
+  for (const r of events) {
+    const s = scoreMatch(r.name, r.hay, q);
+    if (s !== null) hits.push({ kind: "event", data: r.item, score: s });
+  }
+  hits.sort(compareHits);
+  return hits.slice(0, limit);
 }
 
-// Server-side catalogue search for SIGNED-OUT visitors. Returns ONLY card-level
-// matches, so the full catalogue never reaches the browser, while search works
-// across all ~2,000 venues. Matches over name + neighbourhood + type + vibe AND
-// the gated detail content — vibe/mood tags, description, address, reviews —
-// which is read server-side via the service-role index (the anon DB role can't
-// see those columns) and used for matching only; the text itself is never
-// returned. Rate-limited per IP, since rich matching makes this an oracle.
-export async function searchCatalog(
-  query: string,
-): Promise<{ venues: Venue[]; events: Event[] }> {
+// App-wide catalogue search, used by every search box (Explore + What's on).
+// Returns ONE relevance-ranked list of venues AND events interleaved, so a
+// single query searches everything and the best matches lead regardless of
+// type. Returns ONLY card-level rows, so the full catalogue never reaches the
+// browser, while search works across all ~2,000 venues + all events. Matches
+// over name + neighbourhood + type + vibe AND the gated detail content — vibe/
+// mood tags, description, address, reviews — read server-side via the
+// service-role index (the anon DB role can't see those columns) and used for
+// matching only; the text itself is never returned. Rate-limited per IP, since
+// rich matching makes this an oracle.
+export async function searchCatalog(query: string): Promise<SearchHit[]> {
   const q = normalize(query);
-  if (q.length < 2) return { venues: [], events: [] };
-  if (!(await searchAllowed())) return { venues: [], events: [] };
+  if (q.length < 2) return [];
+  if (!(await searchAllowed())) return [];
   const idx = await getIndex();
-  return {
-    venues: rankIndexed(idx.venues, q, 24),
-    events: rankIndexed(idx.events, q, 10),
-  };
+  return rankMerged(idx.venues, idx.events, q, 30);
 }
