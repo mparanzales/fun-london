@@ -103,17 +103,3 @@ export async function searchCatalog(
     events: rankIndexed(idx.events, q, 10),
   };
 }
-
-// Events-only variant for the signed-out What's-on tab, so an anon visitor can
-// search across ALL events — not just their metered preview slice. Venue
-// results are intentionally empty (the events tab is event-scoped). Same
-// server-side, card-level guarantees as searchCatalog.
-export async function searchEvents(
-  query: string,
-): Promise<{ venues: Venue[]; events: Event[] }> {
-  const q = normalize(query);
-  if (q.length < 2) return { venues: [], events: [] };
-  if (!(await searchAllowed())) return { venues: [], events: [] };
-  const idx = await getIndex();
-  return { venues: [], events: rankIndexed(idx.events, q, 24) };
-}

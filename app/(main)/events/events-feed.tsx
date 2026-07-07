@@ -22,7 +22,7 @@ import {
   eventFilterCount,
   type EventFilters,
 } from "@/components/event-filter-sheet";
-import { searchEvents } from "@/lib/search-action";
+import { searchCatalog } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { regionOf } from "@/lib/regions";
@@ -374,8 +374,14 @@ export function EventsFeed({
       {searchOpen && (
         <SearchOverlay
           venues={[]}
-          events={signedIn ? events : []}
-          searchAction={signedIn ? undefined : searchEvents}
+          events={[]}
+          // The search box invites "venues, events, areas" from every tab, so
+          // it runs the SAME unified catalogue search as Explore (venues +
+          // events) rather than an events-only lookup. Without this, a cuisine
+          // or venue query typed here (e.g. "Japanese") matched nothing, since
+          // that text lives in venue tags/descriptions the events index never
+          // sees. Server-side + card-level, so it's safe for anon and signed-in.
+          searchAction={searchCatalog}
           onClose={() => setSearchOpen(false)}
         />
       )}
