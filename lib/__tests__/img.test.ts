@@ -65,6 +65,48 @@ describe("sizedImageUrl", () => {
     });
   });
 
+  describe("Cloudflare R2 (img.funldn.com, pre-sized WebP variants)", () => {
+    const detail = "https://img.funldn.com/padella.webp";
+
+    it("swaps to the -sm card variant for card-width slots (<=512)", () => {
+      expect(sizedImageUrl(detail, 384)).toBe(
+        "https://img.funldn.com/padella-sm.webp",
+      );
+      expect(sizedImageUrl(detail, 512)).toBe(
+        "https://img.funldn.com/padella-sm.webp",
+      );
+    });
+
+    it("keeps the detail variant for larger slots (>512)", () => {
+      expect(sizedImageUrl(detail, 1080)).toBe(detail);
+    });
+
+    it("handles the -N gallery suffix", () => {
+      expect(sizedImageUrl("https://img.funldn.com/padella-1.webp", 384)).toBe(
+        "https://img.funldn.com/padella-1-sm.webp",
+      );
+    });
+
+    it("never swaps a single-variant map URL (would 404; maps have no -sm)", () => {
+      const map = "https://img.funldn.com/padella-map.webp";
+      expect(sizedImageUrl(map, 384)).toBe(map);
+      expect(sizedImageUrl(map, 1080)).toBe(map);
+    });
+
+    it("never double-suffixes an already-small URL", () => {
+      const small = "https://img.funldn.com/padella-sm.webp";
+      expect(sizedImageUrl(small, 384)).toBe(small);
+      // and applying to a detail url twice is stable
+      const once = sizedImageUrl(detail, 384);
+      expect(sizedImageUrl(once, 384)).toBe(once);
+    });
+
+    it("does not match an img.funldn.com substring smuggled in a path/query", () => {
+      const url = "https://s1.ticketm.net/x?ref=img.funldn.com/a.webp";
+      expect(sizedImageUrl(url, 320)).toBe(url);
+    });
+  });
+
   describe("passthrough (unknown / non-resizable hosts)", () => {
     it("returns Ticketmaster URLs unchanged", () => {
       const url = "https://s1.ticketm.net/dam/a/abc/poster.jpg";
