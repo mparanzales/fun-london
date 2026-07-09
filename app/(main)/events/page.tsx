@@ -1,6 +1,7 @@
 import { fetchEvents, fetchEventCategoryPreview } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
-import { EventsFeed, PREVIEW_COUNT } from "./events-feed";
+import { EventsFeed } from "./events-feed";
+import { PREVIEW_COUNT } from "@/lib/feed-constants";
 
 // Force dynamic so the header date stays fresh across midnight, and because the
 // signed-in vs anonymous payloads differ. fetchEvents() reads cookies (the

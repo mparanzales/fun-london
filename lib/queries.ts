@@ -432,6 +432,12 @@ export function mapVenuePreview(r: VenueCardRow): Venue {
 // Card-level preview of the catalogue's first `limit` venues (same default
 // order as fetchVenues: curated first, then by created_at). Sliced in the DB.
 export async function fetchVenuePreview(limit: number): Promise<Venue[]> {
+  // Fail-loud anon-preview guard — same rationale as fetchVenueCategoryPreview.
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw new Error(
+      `fetchVenuePreview: limit must be a positive number, got ${String(limit)}`,
+    );
+  }
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
@@ -712,7 +718,9 @@ export async function feedPage(args: {
   }
 
   // Clamp offset/limit so a bad value (e.g. an undefined limit) can never
-  // silently empty the feed via slice(0, NaN).
+  // silently empty the feed via slice(0, NaN). Signed-in surface: degrade to
+  // a normal page. The anon preview fetchers below deliberately THROW instead
+  // — an un-capped anon read ships the whole catalogue, so they fail loud.
   const offset =
     Number.isFinite(args.offset) && args.offset > 0
       ? Math.floor(args.offset)
@@ -737,6 +745,14 @@ export async function feedPage(args: {
 export async function fetchVenueCategoryPreview(
   perCategory: number,
 ): Promise<Venue[]> {
+  // Fail loudly, never open: a non-numeric cap here once shipped the ENTIRE
+  // catalogue to anonymous visitors (PREVIEW_COUNT imported across the
+  // "use client" boundary arrived as undefined and .limit() silently dropped).
+  if (!Number.isFinite(perCategory) || perCategory <= 0) {
+    throw new Error(
+      `fetchVenueCategoryPreview: perCategory must be a positive number, got ${String(perCategory)}`,
+    );
+  }
   const supabase = await createClient();
   const base = () =>
     supabase
@@ -784,6 +800,12 @@ export async function fetchVenuesByTag(
   tag: string,
   limit: number,
 ): Promise<Venue[]> {
+  // Catalogue pager: a broken limit must fail loud, not page the whole table.
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw new Error(
+      `fetchVenuesByTag: limit must be a positive number, got ${String(limit)}`,
+    );
+  }
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("venues")
@@ -1012,6 +1034,13 @@ function mapEventPreview(r: EventCardRow): Event {
 }
 
 export async function fetchEventPreview(limit: number): Promise<Event[]> {
+  // Fail-loud anon-preview guard — same rationale as fetchEventCategoryPreview.
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw new Error(
+      `fetchEventPreview: limit must be a positive number, got ${String(limit)}`,
+    );
+  }
+
   const supabase = await createClient();
   const startOfToday = startOfLondonDayUtc();
   const { data, error } = await supabase
@@ -1062,6 +1091,13 @@ export async function fetchAllEventCards(): Promise<Event[]> {
 export async function fetchEventCategoryPreview(
   perCategory: number,
 ): Promise<Event[]> {
+  // Same fail-loud guard as fetchVenueCategoryPreview: an undefined cap must
+  // throw, not silently return the whole events catalogue to anon visitors.
+  if (!Number.isFinite(perCategory) || perCategory <= 0) {
+    throw new Error(
+      `fetchEventCategoryPreview: perCategory must be a positive number, got ${String(perCategory)}`,
+    );
+  }
   const supabase = await createClient();
   const startOfToday = startOfLondonDayUtc();
   const base = () =>

@@ -28,7 +28,7 @@ import { searchCatalog } from "@/lib/search-action";
 import { loadFeedPage } from "@/lib/feed-action";
 import { recordSignal } from "@/lib/signals";
 import type { FeedFilter, FeedSort } from "@/lib/queries";
-import { FEED_PAGE_SIZE } from "@/lib/feed-constants";
+import { FEED_PAGE_SIZE, PREVIEW_COUNT } from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { useSaved } from "@/components/saved-context";
@@ -88,14 +88,11 @@ function getEyebrow(): "today in" | "tonight in" {
   return h >= 6 && h < 18 ? "today in" : "tonight in";
 }
 
-// How many general spots a signed-out visitor sees before the sign-up wall.
-// Kept short on purpose — a taste, not the catalogue. Exported so the Server
-// Component slices the anonymous preview to the SAME count in the DB.
-export const PREVIEW_COUNT = 4;
-
-// FEED_PAGE_SIZE lives in @/lib/feed-constants (a neutral module) so the server
-// page can import the same value — importing it FROM this "use client" module
-// into a Server Component resolved to undefined at runtime and emptied the feed.
+// PREVIEW_COUNT and FEED_PAGE_SIZE live in @/lib/feed-constants (a neutral
+// module) so the server page can import the same values — importing them FROM
+// this "use client" module into a Server Component resolves to undefined at
+// runtime (it emptied the signed-in feed once, and shipped the whole catalogue
+// to anonymous visitors while PREVIEW_COUNT was exported from here).
 
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
