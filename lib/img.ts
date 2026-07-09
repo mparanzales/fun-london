@@ -46,6 +46,22 @@ export function sizedImageUrl(url: string, width: number): string {
     return `${base}=w${w}`;
   }
 
+  // Cloudflare R2 via img.funldn.com — photos are pre-encoded at migration /
+  // ingest into TWO WebP sizes: `${base}.webp` (detail, ~1280px, the URL stored
+  // in the DB) and `${base}-sm.webp` (~512px card). R2 has no on-the-fly
+  // transform, so we swap to the pre-made small variant for card-width slots.
+  // Kept as pure string logic (no import from scripts/r2-storage) so aws-sdk /
+  // sharp never leak into the client bundle.
+  if (hostOf(url) === "img.funldn.com") {
+    // Static maps (`${slug}-map.webp`) are migrated as a SINGLE variant (no
+    // `-sm`), so never swap them or the card URL would 404. Also skip a URL
+    // that's already the small variant (idempotent).
+    if (w <= 512 && !/-(?:sm|map)\.webp$/i.test(url)) {
+      return url.replace(/\.webp$/i, "-sm.webp");
+    }
+    return url;
+  }
+
   // Supabase Storage public object → transform (render/image) endpoint.
   if (SUPABASE_TRANSFORM && url.includes("/storage/v1/object/public/")) {
     const rewritten = url.replace(
