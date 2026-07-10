@@ -16,6 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from "@/lib/supabase/server";
+import { haversineKm } from "@/lib/geo";
 import { rankRowsByTaste } from "@/lib/taste-feed";
 import { createServiceClient } from "@/lib/supabase/admin";
 import { scoreVenue, hasPrefs } from "./ranking";
@@ -191,43 +192,6 @@ function mapEvent(r: EventRow): Event {
 }
 
 // ── Queries ─────────────────────────────────────────────────────────────
-
-// Catalog read-side: only return venues that have been ingested from
-// Google Places (google_place_id IS NOT NULL). The original demo seed
-// rows remain in the DB so existing saved_venues / bookings rows stay
-// FK-valid, but they're hidden from the user-facing catalog feed. To
-// surface a former demo venue, ingest it via scripts/ingest-venues.ts.
-export async function fetchVenues(): Promise<Venue[]> {
-  const supabase = await createClient();
-  // Paginate past PostgREST's 1000-row cap. With >1000 live venues an
-  // unpaginated select silently dropped everything after row 1000 (the entire
-  // onezone import sorts last by created_at), so signed-in users were missing
-  // ~half the catalogue in BOTH the feed and the in-memory search.
-  const PAGE = 1000;
-  const rows: VenueRow[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("venues")
-      .select("*")
-      .not("google_place_id", "is", null)
-      .is("hidden_at", null)
-      // Never surface a venue on a stock (Unsplash) fallback or with no real
-      // photo. Show a real Google Places photo (mirrored to our storage), or
-      // nothing.
-      .not("img_url", "ilike", "%unsplash%")
-      .neq("img_url", "")
-      // Curated (hand-picked) venues first — "curated" sorts before "discovered"
-      // ascending — then stable by created_at.
-      .order("curation_tier", { ascending: true })
-      .order("created_at", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(`fetchVenues: ${error.message}`);
-    const page = (data as VenueRow[]) ?? [];
-    rows.push(...page);
-    if (page.length < PAGE) break;
-  }
-  return rows.map(mapVenue);
-}
 
 // ── Lean plan/saved catalogue ────────────────────────────────────────────
 //
@@ -615,21 +579,6 @@ function matchesFeedFilter(type: string, filter: FeedFilter): boolean {
     case "for-you":
       return true;
   }
-}
-
-function haversineKm(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const la1 = (a.lat * Math.PI) / 180;
-  const la2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 // One page of the signed-in feed: filter by category, rank by taste (or sort by
@@ -1176,8 +1125,27 @@ export async function fetchEventPreviewById(id: string): Promise<Event | null> {
  * mock-data accessor so future preference UI doesn't need a schema change.
  */
 export async function fetchNeighbourhoods(): Promise<string[]> {
-  const venues = await fetchVenues();
-  return Array.from(new Set(venues.map((v) => v.neighbourhood))).sort();
+  // One column, paginated past the 1000-row cap. This used to call the old
+  // fetchVenues() (a select("*") of the whole catalogue incl. every moat
+  // field) just to read one string per row; that was fetchVenues' last
+  // caller, so the select("*") catalogue read is now gone entirely.
+  const supabase = await createClient();
+  const PAGE = 1000;
+  const names = new Set<string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("venues")
+      .select("neighbourhood")
+      .not("google_place_id", "is", null)
+      .is("hidden_at", null)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`fetchNeighbourhoods: ${error.message}`);
+    const page = (data as { neighbourhood: string }[]) ?? [];
+    for (const r of page) if (r.neighbourhood) names.add(r.neighbourhood);
+    if (page.length < PAGE) break;
+  }
+  return Array.from(names).sort();
 }
 
 // ── Profile ─────────────────────────────────────────────────────────────

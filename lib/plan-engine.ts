@@ -9,6 +9,8 @@
 // same plan, so "Try another combination" just bumps `offset`.
 
 import type { Venue, VenueType, Event } from "./types";
+import { haversineKm as geoHaversineKm } from "@/lib/geo";
+import { VIBE_KEYWORDS } from "@/lib/ranking";
 import { venueInArea, regionOf, type PlanArea } from "./regions";
 
 export type PlanVibe = "Chill" | "Lively" | "Fancy" | "Unique";
@@ -192,62 +194,22 @@ function vibeScore(v: Venue, vibe: PlanVibe): number {
     case "Chill":
       if (["Cafe", "Wine Bar"].includes(v.type)) s += 2;
       if (v.timeOfDay !== "Night") s += 1;
-      s +=
-        2 *
-        tagHit(v, [
-          "cosy",
-          "cozy",
-          "relaxed",
-          "calm",
-          "quiet",
-          "intimate",
-          "laid-back",
-        ]);
+      s += 2 * tagHit(v, VIBE_KEYWORDS.chill);
       break;
     case "Lively":
       if (["Bar", "Pub", "Live Music"].includes(v.type)) s += 2;
       if (v.timeOfDay === "Night") s += 1;
-      s +=
-        2 *
-        tagHit(v, [
-          "buzzy",
-          "lively",
-          "loud",
-          "party",
-          "vibrant",
-          "packed",
-          "energetic",
-        ]);
+      s += 2 * tagHit(v, VIBE_KEYWORDS.lively);
       break;
     case "Fancy":
       if (["Restaurant", "Wine Bar"].includes(v.type)) s += 1;
       s += PRICE_RANK[v.price] ?? 2; // pricier reads fancier
-      s +=
-        2 *
-        tagHit(v, [
-          "elegant",
-          "refined",
-          "romantic",
-          "date",
-          "upscale",
-          "smart",
-          "special",
-        ]);
+      s += 2 * tagHit(v, VIBE_KEYWORDS.fancy);
       break;
     case "Unique":
       if (["Listening Bar", "Live Music", "Culture", "Market"].includes(v.type))
         s += 2;
-      s +=
-        2 *
-        tagHit(v, [
-          "unique",
-          "hidden",
-          "quirky",
-          "unusual",
-          "only",
-          "one-of",
-          "cult",
-        ]);
+      s += 2 * tagHit(v, VIBE_KEYWORDS.unique);
       break;
   }
   s += (v.rating - 4) * 1.5; // gentle quality nudge
@@ -256,20 +218,14 @@ function vibeScore(v: Venue, vibe: PlanVibe): number {
 
 // ── Distance / walk time ─────────────────────────────────────────────────
 
+// Null-preserving wrapper over the ONE canonical haversine (lib/geo.ts) —
+// this file used to carry its own copy of the formula (one of three in the
+// repo, per the 2026-07-09 audit).
 function haversineKm(a: Venue, b: Venue): number | null {
   if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
     return null;
   }
-  const R = 6371;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(x));
+  return geoHaversineKm({ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng });
 }
 
 // ~5 km/h walking → 12 min/km. Floor at 2 min so adjacent venues still read
