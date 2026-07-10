@@ -1,15 +1,16 @@
 // "For You" personalization (Epic C).
 //
-// The onboarding quiz already persists the user's moods + vibes (DB for
-// signed-in, localStorage for anonymous). This module turns those prefs
-// into a score so the For You feed leads with venues/events that match
-// the user's taste. No prefs → every score is 0 and the feed keeps its
-// original order (no regression).
+// UserPreferences (moods + vibes + budget + areas) are set on the PROFILE
+// EDIT screen and stored on the profile row. (The old onboarding quiz that
+// used to collect them was removed with the front-door pivot; no quiz
+// exists.) This module turns those prefs into a score so the For You feed
+// leads with venues/events that match the user's taste. No prefs → every
+// score is 0 and the feed keeps its original order (no regression).
 
 import type { Venue, Event, UserPreferences, Mood, Vibe } from "./types";
 
-// Onboarding moods map to event categories: "culture" is surfaced as
-// "Live Music" and "activity" as "Comedy" in the quiz copy.
+// Preference moods map to event categories ("culture" surfaces Music,
+// "activity" surfaces Comedy).
 const MOOD_TO_EVENT_CATEGORIES: Record<Mood, string[]> = {
   dinner: ["Food"],
   drinks: ["Club"],
@@ -17,7 +18,10 @@ const MOOD_TO_EVENT_CATEGORIES: Record<Mood, string[]> = {
   activity: ["Comedy"],
 };
 
-const VIBE_KEYWORDS: Record<Vibe, string[]> = {
+// THE single vibe→keywords vocabulary. plan-engine's vibeScore consumes it
+// too — the two files used to carry hand-maintained near-copies that had
+// already drifted (mellow/bustling/chic/offbeat existed only here).
+export const VIBE_KEYWORDS: Record<Vibe, string[]> = {
   chill: [
     "cosy",
     "cozy",
