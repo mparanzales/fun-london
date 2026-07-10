@@ -60,6 +60,11 @@ function analyticsAllowed(): boolean {
   }
 }
 
+// Identify can be requested before PostHog finishes initialising (the
+// SignInTracker mounts alongside the AnalyticsGate). Park the id and apply it
+// in init's `loaded` callback so the identity is never dropped to a race.
+let pendingIdentify: string | null = null;
+
 // Called by the consent-gated AnalyticsGate. Safe to call repeatedly: inits at
 // most once, and no-ops when there's no key configured yet (so the app runs
 // fine before the PostHog project key is added to the env).
@@ -77,9 +82,47 @@ export function initAnalytics(): void {
     disable_session_recording: true, // explicit: no screen recordings
     loaded: (ph) => {
       if (!analyticsAllowed()) ph.opt_out_capturing();
+      else if (pendingIdentify) {
+        try {
+          ph.identify(pendingIdentify);
+        } catch {
+          // Never let analytics throw into product code.
+        }
+      }
     },
   });
   posthogReady = true;
+}
+
+// Tie this browser's events to the signed-in user. With person_profiles:
+// "identified_only", PostHog creates NO person until identify() is called:
+// before this existed, 100% of events were anonymous distinct-ids that never
+// merged into a user, so retention and per-user funnels were unmeasurable.
+// The id is the Supabase UUID (opaque, no email/PII). Idempotent: PostHog
+// treats a repeat identify(sameId) as a no-op.
+export function identifyUser(userId: string): void {
+  if (!userId || typeof window === "undefined" || !analyticsAllowed()) return;
+  if (!posthogReady) {
+    pendingIdentify = userId; // applied by init's `loaded` callback
+    return;
+  }
+  try {
+    posthog.identify(userId);
+  } catch {
+    // Never let analytics throw into product code.
+  }
+}
+
+// Drop the person identity + device state on sign-out, so the next account on
+// this browser doesn't inherit the previous person profile.
+export function resetAnalyticsIdentity(): void {
+  pendingIdentify = null;
+  if (!posthogReady) return;
+  try {
+    posthog.reset();
+  } catch {
+    // ditto
+  }
 }
 
 // Reflects a consent change (from the banner) into PostHog without a reload.

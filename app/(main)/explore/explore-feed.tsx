@@ -459,6 +459,19 @@ export function ExploreFeed({
     [loadMore],
   );
 
+  // Venues dismissed via the card's "Not for me" control this session. The
+  // Kind C `dismiss` signal is the durable effect (weight −1.0 in the taste
+  // vector); this set just hides the card immediately so the tap visibly did
+  // something. Not persisted: on reload the ranker owns the ordering.
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const onCardDismissed = useCallback((venueId: string) => {
+    setDismissedIds((prev) => {
+      const next = new Set(prev);
+      next.add(venueId);
+      return next;
+    });
+  }, []);
+
   // The list actually rendered. Signed-in: the server-paginated `loaded` venues
   // (plus events for the music / events views). Anon: the metered preview.
   const displayItems: FeedItem[] = useMemo(() => {
@@ -472,6 +485,7 @@ export function ExploreFeed({
     const forYou = sort === "for-you";
     const venueItems = loaded
       .filter((v) => !forYou || !savedSet.has(v.slug))
+      .filter((v) => !dismissedIds.has(v.id))
       .map<FeedItem>((v) => ({ kind: "venue", data: v }));
     if (selectedFilter === "music") {
       return [
@@ -482,7 +496,16 @@ export function ExploreFeed({
       ];
     }
     return venueItems;
-  }, [signedIn, items, loaded, selectedFilter, allEvents, sort, savedSet]);
+  }, [
+    signedIn,
+    items,
+    loaded,
+    selectedFilter,
+    allEvents,
+    sort,
+    savedSet,
+    dismissedIds,
+  ]);
 
   // Smart category-tag visibility:
   //   For You / Music / Events → mixed sources or subtypes → show tags
@@ -680,6 +703,7 @@ export function ExploreFeed({
                   venue={item.data}
                   variant="wide"
                   surface="explore"
+                  onDismissed={signedIn ? onCardDismissed : undefined}
                   showCategoryTag={showCategoryTag}
                   priority={index === 0}
                   distanceLabel={

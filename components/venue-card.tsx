@@ -2,7 +2,7 @@
 import { useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Heart } from "lucide-react";
+import { Heart, X } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
 import { recordSignal, type SignalSurface } from "@/lib/signals";
 import { sizedImageUrl } from "@/lib/img";
@@ -32,6 +32,14 @@ type Props = {
    * `impression` / `save` signals so the engine knows where a tap happened.
    */
   surface?: SignalSurface;
+  /**
+   * Opt-in "Not for me" control. When provided, the card shows a small ✕ that
+   * records a Kind C `dismiss` (the taste vector's strongest negative signal,
+   * weight −1.0 — ingested since Stage 2 but never fired by any UI until now)
+   * and then calls back so the surface can drop the card. Wire it only on
+   * signed-in discovery surfaces (recordSignal no-ops for anon anyway).
+   */
+  onDismissed?: (venueId: string) => void;
 };
 
 export function VenueCard({
@@ -41,6 +49,7 @@ export function VenueCard({
   priority = false,
   distanceLabel,
   surface = "feed",
+  onDismissed,
 }: Props) {
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
@@ -74,6 +83,15 @@ export function VenueCard({
 
   // `open` (step 0.4): the user tapped into the venue detail from this surface.
   const onOpen = () => recordSignal("open", { surface, venueId: venue.id });
+
+  // "Not for me": the strongest negative taste signal, then let the surface
+  // remove the card (optimistic; the ranking effect lands via the signal).
+  const onDismiss = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    recordSignal("dismiss", { surface, venueId: venue.id });
+    onDismissed?.(venue.id);
+  };
 
   // Request a card-sized source from the CDN instead of the full-res photo.
   // The optimizer is off (unoptimized: true), so without this every card pulls
@@ -160,6 +178,24 @@ export function VenueCard({
       {/* Heart button is a sibling of the Link, absolutely positioned
           inside the same relative parent. preventDefault on its handler
           suppresses any bubbled navigation. */}
+      {/* "Not for me" sits directly under the heart, anchored to the card TOP
+          (stable, no arithmetic against the text block's height) with the same
+          44px hit target as its sibling. On-photo white matches the heart. */}
+      {onDismissed && (
+        <button
+          onClick={onDismiss}
+          aria-label={`Not for me: ${venue.name}`}
+          title="Not for me"
+          className="absolute top-12 right-1.5 w-11 h-11 flex items-center justify-center cursor-pointer z-10"
+        >
+          <X
+            size={18}
+            strokeWidth={2.5}
+            className="text-white/85 drop-shadow-md"
+          />
+        </button>
+      )}
+
       <button
         onClick={onHeart}
         aria-label={saved ? "Unsave" : "Save"}
