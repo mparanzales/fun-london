@@ -987,7 +987,9 @@ export function PlanFlow({
         </div>
       </div>
 
-      <div className="px-5 py-4 flex flex-col gap-2.5">
+      {/* fl-stagger: stops rise in sequence when a plan lands (the system's
+          existing per-item entrance; reduced-motion collapses it to instant). */}
+      <div className="px-5 py-4 flex flex-col gap-2.5 fl-stagger">
         {display.steps.map((s, i) => (
           <div key={`${s.venue.id}-${i}`}>
             <div className="flex items-center gap-3 mb-1.5">

@@ -204,9 +204,15 @@ export function VenueCard({
         <Heart
           size={22}
           strokeWidth={2}
+          // key remounts the icon when `saved` flips so fl-pop replays on
+          // each save; the class is only present when saved, so unsave
+          // doesn't celebrate.
+          key={saved ? "saved" : "unsaved"}
           className={
             "drop-shadow-md " +
-            (saved ? "fill-primary text-primary" : "fill-none text-white")
+            (saved
+              ? "fl-pop fill-primary text-primary"
+              : "fill-none text-white")
           }
         />
       </button>
