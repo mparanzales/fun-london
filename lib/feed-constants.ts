@@ -12,3 +12,8 @@ export const FEED_PAGE_SIZE = 24;
 // dropped, and the anonymous /explore RSC payload shipped the ENTIRE
 // catalogue (1,953 venues, 1.88 MB — the "app is super slow" bug).
 export const PREVIEW_COUNT = 4;
+
+// sessionStorage key for the explore feed's back-navigation snapshot (see
+// ExploreFeed). Lives here so the sign-out handler can clear it without
+// importing the feed component.
+export const FEED_SNAPSHOT_KEY = "fl.explore.feed.v1";

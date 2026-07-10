@@ -1,6 +1,7 @@
 "use client";
 
 import { resetAnalyticsIdentity } from "@/lib/analytics";
+import { FEED_SNAPSHOT_KEY } from "@/lib/feed-constants";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -192,6 +193,12 @@ function SignedInProfile({
       const supabase = createClient();
       await supabase.auth.signOut();
       resetAnalyticsIdentity(); // next account on this browser starts clean
+      try {
+        // Same as sign-out: the feed snapshot belongs to the deleted account.
+        window.sessionStorage.removeItem(FEED_SNAPSHOT_KEY);
+      } catch {
+        /* sessionStorage unavailable — nothing to clear */
+      }
       router.replace("/");
       return;
     }
@@ -231,6 +238,14 @@ function SignedInProfile({
     const supabase = createClient();
     await supabase.auth.signOut();
     resetAnalyticsIdentity(); // next account on this browser starts clean
+    try {
+      // The explore feed's back-nav snapshot holds the signed-in view
+      // (taste-ranked pages, gated filters) — it must not survive into the
+      // anonymous session (or the next account) on this browser.
+      window.sessionStorage.removeItem(FEED_SNAPSHOT_KEY);
+    } catch {
+      /* sessionStorage unavailable — nothing to clear */
+    }
     // Refresh the route so the Server Component re-fetches getAuthUser()
     // and renders the anonymous view.
     router.refresh();
