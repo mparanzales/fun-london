@@ -104,7 +104,7 @@ export default async function VenuePage(props: {
           Google/shared links on a laptop need a way into the rest of the app.
           Mobile keeps the immersive no-chrome layout. */}
       <DesktopNav />
-      <VenueDetail venue={venue} />
+      <VenueDetail venue={venue} signedIn={!!authUser} />
       <AuthWall
         signedIn={!!authUser}
         title={`Sign up to see ${venue.name}`}

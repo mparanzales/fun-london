@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Check,
   Globe,
   Heart,
+  Lock,
   MapPin,
   Phone,
   Plus,
@@ -104,7 +107,16 @@ function openSummary(state: OpenState): string {
 // same hierarchy. Whites used only over the hero image (Back/Heart
 // circles) — that surface is always a photo, not the page background.
 
-export function VenueDetail({ venue }: { venue: Venue }) {
+export function VenueDetail({
+  venue,
+  signedIn,
+}: {
+  venue: Venue;
+  // Anon visitors get card-level fields only (the moat). The right column
+  // needs to know it's the ANON state — not "signed in, data unsynced" —
+  // so it can render honest unlock prompts instead of eternal skeletons.
+  signedIn: boolean;
+}) {
   const router = useRouter();
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
@@ -193,6 +205,24 @@ export function VenueDetail({ venue }: { venue: Venue }) {
       ? venue.photoUrls
       : [venue.imgUrl];
 
+  // Desktop paddles: the snap scroller hides its scrollbars, so without
+  // these a mouse/keyboard user can never reach photo 2+.
+  const galleryRef = useRef<HTMLDivElement>(null);
+  const scrollGallery = (dir: -1 | 1) => {
+    const el = galleryRef.current;
+    if (!el) return;
+    el.scrollBy({
+      left: dir * el.clientWidth,
+      // The global reduced-motion CSS rule doesn't cover programmatic
+      // smooth scrolling, so honor the preference here.
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
+  };
+
+  const signInHref = `/sign-in?return=${encodeURIComponent(`/venue/${venue.slug}`)}`;
+
   return (
     // Mobile: the max-w-md phone shell, unchanged. Desktop (lg+): a
     // two-column editorial spread — sticky hero gallery left, content
@@ -201,14 +231,16 @@ export function VenueDetail({ venue }: { venue: Venue }) {
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32 lg:max-w-6xl lg:px-8 lg:pt-10 lg:pb-24 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:items-start">
       {/* ── Hero ───────────────────────────────────────────────────── */}
       <div
-        // lg:top-[104px] = DesktopNav h-16 (64px) + the root's lg:pt-10 (40px),
-        // so the stuck hero stays level with the right column's start.
-        className="relative w-full lg:sticky lg:top-[104px] lg:rounded-2xl lg:overflow-hidden"
+        // Sticky offset = DesktopNav h-16 + the root's lg:pt-10, derived via
+        // theme() so the hero stays level with the right column's start even
+        // if the nav height ever changes.
+        className="relative w-full lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-2xl lg:overflow-hidden"
         style={{ aspectRatio: "4/3" }}
       >
         {/* Swipeable photo gallery — keyless Storage URLs, hero first.
             Scroll-snaps horizontally; the dots track the active slide. */}
         <div
+          ref={galleryRef}
           className="absolute inset-0 flex overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           onScroll={(e) => {
             const el = e.currentTarget;
@@ -291,6 +323,36 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           </p>
         )}
 
+        {/* Desktop prev/next paddles — same white-over-photo icon language
+            as Back/Share. Mouse and keyboard users have no other way to
+            advance the hidden-scrollbar snap gallery. */}
+        {photos.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => scrollGallery(-1)}
+              aria-label="Previous photo"
+              className="hidden lg:flex absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+            >
+              <ChevronLeft
+                className="w-6 h-6 text-white drop-shadow-md"
+                strokeWidth={2}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollGallery(1)}
+              aria-label="Next photo"
+              className="hidden lg:flex absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+            >
+              <ChevronRight
+                className="w-6 h-6 text-white drop-shadow-md"
+                strokeWidth={2}
+              />
+            </button>
+          </>
+        )}
+
         {/* Photo dots — only when there's a real gallery. Top-center, clear of
             the back/share controls and the bottom tagline. */}
         {photos.length > 1 && (
@@ -313,7 +375,8 @@ export function VenueDetail({ venue }: { venue: Venue }) {
 
       {/* ── Info block ────────────────────────────────────────────── */}
       <section className="px-5 lg:px-0">
-        <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5">
+        {/* lg:pt-0 keeps the column top level with the hero's top edge. */}
+        <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5 lg:pt-0">
           {venue.neighbourhood.toUpperCase()} · {venue.price} · {venue.type}
         </div>
 
@@ -333,6 +396,23 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           <span>{venue.reviewCount.toLocaleString()} reviews</span>
         </div>
 
+        {/* Desktop action row — the booking-module-in-the-masthead
+            convention (OpenTable/Resy). On mobile these actions live in the
+            fixed bottom bar; here they'd otherwise sit two scrolls below
+            the fold. Same component + state as the bar, one visible at a
+            time. */}
+        <VenueActions
+          venue={venue}
+          saved={saved}
+          signedIn={signedIn}
+          signInHref={signInHref}
+          isReservable={isReservable}
+          reserveTarget={reserveTarget}
+          onToggleSaved={() => toggleSaved(venue.slug)}
+          onReserve={() => setShowReserve(true)}
+          className="hidden lg:flex gap-3 mt-6"
+        />
+
         {/* Vibe tags as filter chips — tapping routes to that tag's results on
             Explore. Placed before the description so the at-a-glance signal
             leads. Press state mirrors the Reserve CTA (violet fill, white). */}
@@ -342,7 +422,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               <Link
                 key={label}
                 href={`/explore?tag=${encodeURIComponent(label)}`}
-                className="shrink-0 whitespace-nowrap rounded-full border border-fg/20 px-3 py-1.5 text-xs font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="shrink-0 whitespace-nowrap rounded-full border border-fg/20 px-3 py-1.5 text-xs font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {label}
               </Link>
@@ -493,13 +573,14 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             )}
           </div>
           {venue.reviews && venue.reviews.length > 0 ? (
-            // Desktop wraps the cards instead — a hidden-scrollbar row with
-            // no swipe makes review 3+ undiscoverable with a mouse.
-            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-visible">
+            // Desktop becomes a fluid 2-col grid — a hidden-scrollbar row
+            // with no swipe makes review 3+ undiscoverable with a mouse,
+            // and fixed 240px cards stack single-file below ~1096px.
+            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-2 lg:mx-0 lg:px-0 lg:overflow-visible">
               {venue.reviews.map((r, i) => (
                 <div
                   key={i}
-                  className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5"
+                  className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5 lg:min-w-0 lg:max-w-none"
                 >
                   <div className="flex gap-0.5 mb-2">
                     {[1, 2, 3, 4, 5].map((s) => (
@@ -526,28 +607,56 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               ))}
             </div>
           ) : (
-            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-visible">
-              {[0, 1].map((i) => (
-                <div
-                  key={i}
-                  aria-hidden
-                  className="min-w-[200px] rounded-2xl border border-dashed border-fg/20 px-4 py-4"
-                >
-                  <div className="flex gap-1 mb-3">
-                    {[0, 1, 2, 3, 4].map((s) => (
-                      <Star
-                        key={s}
-                        className="w-3 h-3 text-fg/15 fill-current"
-                        strokeWidth={0}
-                      />
-                    ))}
+            <>
+              {/* Skeletons mean "not synced yet" — true only when signed in.
+                  For anon at lg they'd read as a permanently broken fetch,
+                  so the desktop anon state gets an honest unlock card
+                  instead (mobile keeps today's exact rendering). */}
+              <div
+                className={
+                  "flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 lg:grid lg:grid-cols-2 lg:mx-0 lg:px-0 lg:overflow-visible" +
+                  (signedIn ? "" : " lg:hidden")
+                }
+              >
+                {[0, 1].map((i) => (
+                  <div
+                    key={i}
+                    aria-hidden
+                    className="min-w-[200px] rounded-2xl border border-dashed border-fg/20 px-4 py-4 lg:min-w-0"
+                  >
+                    <div className="flex gap-1 mb-3">
+                      {[0, 1, 2, 3, 4].map((s) => (
+                        <Star
+                          key={s}
+                          className="w-3 h-3 text-fg/15 fill-current"
+                          strokeWidth={0}
+                        />
+                      ))}
+                    </div>
+                    <div className="h-2.5 rounded bg-fg/10 mb-2" />
+                    <div className="h-2.5 rounded bg-fg/10 mb-2 w-5/6" />
+                    <div className="h-2.5 rounded bg-fg/10 w-2/3" />
                   </div>
-                  <div className="h-2.5 rounded bg-fg/10 mb-2" />
-                  <div className="h-2.5 rounded bg-fg/10 mb-2 w-5/6" />
-                  <div className="h-2.5 rounded bg-fg/10 w-2/3" />
+                ))}
+              </div>
+              {!signedIn && (
+                <div className="hidden lg:flex items-center gap-3 border border-fg/15 rounded-2xl px-4 py-4">
+                  <Lock
+                    className="w-4 h-4 shrink-0 text-muted-fg"
+                    strokeWidth={2}
+                  />
+                  <p className="text-[13px] text-muted-fg leading-snug">
+                    Reviews, hours and booking unlock with a free account.
+                  </p>
+                  <Link
+                    href={signInHref}
+                    className="ml-auto shrink-0 text-sm font-bold text-primary rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    Sign up free
+                  </Link>
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
 
@@ -569,7 +678,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Open in Google Maps"
-                className="relative block mb-3 h-28 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="relative block mb-3 h-28 lg:h-52 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {venue.mapUrl ? (
                   <Image
@@ -582,7 +691,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                 ) : (
                   <span className="flex h-full items-center justify-center gap-2 bg-muted text-muted-fg">
                     <MapPin className="w-5 h-5" strokeWidth={2} />
-                    <span className="text-sm font-medium">
+                    <span className="text-sm lg:text-base font-medium">
                       {venue.neighbourhood}
                     </span>
                   </span>
@@ -634,7 +743,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
                       context: { target: venue.menuUrl ? "menu" : "website" },
                     })
                   }
-                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Globe className="w-4 h-4" strokeWidth={2} />
                   {/* "See the menu" only when we have a real menu link; else the
@@ -645,7 +754,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               {venue.phone && (
                 <a
                   href={`tel:${venue.phone}`}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Phone className="w-4 h-4" strokeWidth={2} />
                   Call venue
@@ -768,74 +877,23 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         )}
       </section>
 
-      {/* ── Sticky CTA bar ────────────────────────────────────────────
-          Mobile: fixed to the viewport bottom, phone-sheet style. Desktop:
-          a static action row at the end of the right-hand content column
-          (a floating phone bar mid-screen is the tell of an unadapted
-          mobile site). */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-bg border-t border-fg/10 px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 lg:static lg:left-auto lg:translate-x-0 lg:col-start-2 lg:max-w-none lg:border-t-0 lg:px-0 lg:pt-8 lg:pb-0">
-        <button
-          type="button"
-          onClick={() => toggleSaved(venue.slug)}
-          aria-label={saved ? "Unsave" : "Save"}
-          className="flex-shrink-0 w-12 h-12 inline-flex items-center justify-center border border-fg/15 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <Heart
-            className={
-              "w-5 h-5 " +
-              (saved ? "fill-primary text-primary" : "fill-none text-fg")
-            }
-            strokeWidth={2}
-          />
-        </button>
-        {/* Add this venue to a night plan. Scaffold → links to the plan
-            builder for now; wires to add-to-plan in a later phase. */}
-        <Link
-          href="/plan"
-          aria-label="Add to a plan"
-          className="flex-shrink-0 inline-flex items-center gap-1.5 px-5 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <Plus className="w-4 h-4" strokeWidth={2.5} />
-          Plan
-        </Link>
-        {isReservable && reserveTarget ? (
-          // Agent flow: open the picker (date/time/party), pre-fill the
-          // venue's booking platform, then land on the "Did you book?" page.
-          <button
-            type="button"
-            onClick={() => setShowReserve(true)}
-            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm"
-          >
-            Reserve → {platformLabel(reserveTarget.platform)}
-          </button>
-        ) : isReservable && venue.phone ? (
-          // No online booking — the honest action is to call the venue.
-          <a
-            href={`tel:${venue.phone}`}
-            className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm text-center no-underline"
-          >
-            Call to book
-          </a>
-        ) : isReservable ? (
-          // Reservable type but we hold no booking channel for it. Show
-          // an honest status instead of a fake confirmation flow.
-          <div
-            role="status"
-            className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium"
-          >
-            Booking via the venue
-          </div>
-        ) : (
-          // Static info element — non-interactive, occupies the same
-          // space as the Reserve button but signals walk-in.
-          <div
-            role="status"
-            className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium"
-          >
-            No booking needed. Just walk in.
-          </div>
-        )}
-      </div>
+      {/* ── Mobile CTA bar ────────────────────────────────────────────
+          Fixed to the viewport bottom, phone-sheet style — mobile classes
+          unchanged. Hidden at lg, where the SAME component renders in the
+          masthead instead (shared saved/reserve state keeps them in sync;
+          display:none removes this one from the a11y tree, so exactly one
+          action row exists at any viewport). */}
+      <VenueActions
+        venue={venue}
+        saved={saved}
+        signedIn={signedIn}
+        signInHref={signInHref}
+        isReservable={isReservable}
+        reserveTarget={reserveTarget}
+        onToggleSaved={() => toggleSaved(venue.slug)}
+        onReserve={() => setShowReserve(true)}
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-bg border-t border-fg/10 px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 lg:hidden"
+      />
 
       {showReserve && reserveTarget && (
         <ReserveSheet
@@ -843,6 +901,117 @@ export function VenueDetail({ venue }: { venue: Venue }) {
           target={reserveTarget}
           onClose={() => setShowReserve(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// The Save / Plan / Reserve action row. Rendered twice by VenueDetail —
+// fixed bottom bar on mobile, masthead row on desktop — with mutually
+// exclusive visibility (lg:hidden vs hidden lg:flex), so state stays in
+// one place and screen readers only ever see one instance.
+function VenueActions({
+  venue,
+  saved,
+  signedIn,
+  signInHref,
+  isReservable,
+  reserveTarget,
+  onToggleSaved,
+  onReserve,
+  className,
+}: {
+  venue: Venue;
+  saved: boolean;
+  signedIn: boolean;
+  signInHref: string;
+  isReservable: boolean;
+  reserveTarget: ReserveTarget | null;
+  onToggleSaved: () => void;
+  onReserve: () => void;
+  className: string;
+}) {
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        onClick={onToggleSaved}
+        aria-label={saved ? "Unsave" : "Save"}
+        className="flex-shrink-0 w-12 h-12 inline-flex items-center justify-center border border-fg/15 rounded-full transition-colors lg:hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <Heart
+          className={
+            "w-5 h-5 " +
+            (saved ? "fill-primary text-primary" : "fill-none text-fg")
+          }
+          strokeWidth={2}
+        />
+      </button>
+      {/* Add this venue to a night plan. Scaffold → links to the plan
+          builder for now; wires to add-to-plan in a later phase. */}
+      <Link
+        href="/plan"
+        aria-label="Add to a plan"
+        className="flex-shrink-0 inline-flex items-center gap-1.5 px-5 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <Plus className="w-4 h-4" strokeWidth={2.5} />
+        Plan
+      </Link>
+      {isReservable && reserveTarget ? (
+        // Agent flow: open the picker (date/time/party), pre-fill the
+        // venue's booking platform, then land on the "Did you book?" page.
+        <button
+          type="button"
+          onClick={onReserve}
+          className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm transition-colors lg:hover:bg-primary/90"
+        >
+          Reserve → {platformLabel(reserveTarget.platform)}
+        </button>
+      ) : isReservable && venue.phone ? (
+        // No online booking — the honest action is to call the venue.
+        <a
+          href={`tel:${venue.phone}`}
+          className="flex-1 bg-primary text-white rounded-full px-5 py-3 font-semibold text-sm text-center no-underline transition-colors lg:hover:bg-primary/90"
+        >
+          Call to book
+        </a>
+      ) : isReservable && !signedIn ? (
+        // Anon can't hold a booking channel (booking links are moat
+        // fields). On mobile the grey status pill stays; on desktop —
+        // where the wall isn't the only conversion surface — offer the
+        // honest action instead of a dead pill.
+        <>
+          <div
+            role="status"
+            className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium lg:hidden"
+          >
+            Booking via the venue
+          </div>
+          <Link
+            href={signInHref}
+            className="flex-1 hidden lg:inline-flex items-center justify-center px-5 py-3 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            Sign in to book
+          </Link>
+        </>
+      ) : isReservable ? (
+        // Signed in, reservable type, but we hold no booking channel.
+        // Show an honest status instead of a fake confirmation flow.
+        <div
+          role="status"
+          className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium"
+        >
+          Booking via the venue
+        </div>
+      ) : (
+        // Static info element — non-interactive, occupies the same
+        // space as the Reserve button but signals walk-in.
+        <div
+          role="status"
+          className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium"
+        >
+          No booking needed. Just walk in.
+        </div>
       )}
     </div>
   );
