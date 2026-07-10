@@ -37,13 +37,30 @@ function memoryRateLimit(
 }
 
 // ── Upstash (shared across instances) ────────────────────────────────────
+// HARDENED after a real incident: the prod UPSTASH_REDIS_REST_URL carried a
+// trailing newline, `Redis.fromEnv()` threw a UrlError OUTSIDE any try/catch,
+// and every anonymous search 500'd from ~28 Jun (the limiter never engaged).
+// Three defences, in order: TRIM the env values (so that exact value now
+// works), guard client/limiter CONSTRUCTION (any env misconfig degrades to the
+// in-memory limiter instead of crashing the request), and keep the existing
+// runtime catch around `.limit()`.
 let redis: Redis | null | undefined; // undefined = not yet resolved
 function getRedis(): Redis | null {
   if (redis === undefined) {
-    redis =
-      process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-        ? Redis.fromEnv()
-        : null;
+    const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+    if (!url || !token) {
+      redis = null;
+    } else {
+      try {
+        redis = new Redis({ url, token });
+      } catch (e) {
+        console.warn(
+          `[rate-limit] Upstash client init failed (${(e as Error).message}), using in-memory fallback`,
+        );
+        redis = null;
+      }
+    }
   }
   return redis;
 }
@@ -56,15 +73,22 @@ function getLimiter(limit: number, windowMs: number): Ratelimit | null {
   const k = `${limit}:${windowMs}`;
   let l = limiters.get(k);
   if (!l) {
-    l = new Ratelimit({
-      redis: r,
-      limiter: Ratelimit.slidingWindow(
-        limit,
-        `${Math.round(windowMs / 1000)} s`,
-      ),
-      prefix: `fl-rl:${k}`,
-      analytics: false,
-    });
+    try {
+      l = new Ratelimit({
+        redis: r,
+        limiter: Ratelimit.slidingWindow(
+          limit,
+          `${Math.round(windowMs / 1000)} s`,
+        ),
+        prefix: `fl-rl:${k}`,
+        analytics: false,
+      });
+    } catch (e) {
+      console.warn(
+        `[rate-limit] limiter init failed (${(e as Error).message}), using in-memory fallback`,
+      );
+      return null;
+    }
     limiters.set(k, l);
   }
   return l;
@@ -75,16 +99,15 @@ export async function rateLimit(
   limit: number,
   windowMs: number,
 ): Promise<boolean> {
-  const limiter = getLimiter(limit, windowMs);
-  if (limiter) {
-    try {
+  try {
+    const limiter = getLimiter(limit, windowMs);
+    if (limiter) {
       const { success } = await limiter.limit(key);
       return success;
-    } catch {
-      // Redis unreachable → degrade to the in-memory limiter rather than
-      // failing the request. (Fails open to in-process, never hard-errors.)
-      return memoryRateLimit(key, limit, windowMs);
     }
+  } catch {
+    // Redis unreachable / misconfigured → degrade to the in-memory limiter
+    // rather than failing the request. (Never hard-errors a user request.)
   }
   return memoryRateLimit(key, limit, windowMs);
 }
