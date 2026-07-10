@@ -9,7 +9,7 @@
 // locked so the blurred page can't be scrolled or tapped. `returnTo` is derived
 // from the current path so the user lands back here after authenticating.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -47,6 +47,7 @@ export function AuthWall({
 }) {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -55,16 +56,47 @@ export function AuthWall({
   useEffect(() => {
     if (signedIn) return;
     const prev = document.body.style.overflow;
+    const prevPad = document.body.style.paddingRight;
+    // Compensate for the scrollbar the lock removes — without this the page
+    // jumps sideways each time the wall (re)mounts on non-overlay scrollbars.
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = "hidden";
+    if (scrollbar > 0) document.body.style.paddingRight = `${scrollbar}px`;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onBack?.();
+      // Full-screen walls are modal: cycle Tab within the card so keyboard
+      // users can't operate the blurred page underneath. (mainShell walls
+      // deliberately keep the surrounding nav usable — no trap there.)
+      if (e.key === "Tab" && !mainShell && cardRef.current) {
+        const els = cardRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], [tabindex]:not([tabindex="-1"])',
+        );
+        if (els.length === 0) return;
+        const first = els[0];
+        const last = els[els.length - 1];
+        const inside = cardRef.current.contains(document.activeElement);
+        if (!inside) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
-    if (onBack) window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey);
+    if (!mainShell) cardRef.current?.focus();
     return () => {
       document.body.style.overflow = prev;
+      document.body.style.paddingRight = prevPad;
       window.removeEventListener("keydown", onKey);
     };
-  }, [signedIn, onBack]);
+    // `mounted` is a dep so this re-runs once the portal (and cardRef)
+    // actually exists — otherwise the initial focus call hits null.
+  }, [signedIn, onBack, mainShell, mounted]);
 
   if (signedIn || !mounted) return null;
 
@@ -83,6 +115,11 @@ export function AuthWall({
 
   return createPortal(
     <div
+      // Full-screen walls are true modals; mainShell walls leave the page
+      // chrome usable on purpose, so they don't claim aria-modal.
+      {...(!mainShell
+        ? { role: "dialog", "aria-modal": true, "aria-label": title }
+        : {})}
       className={`fixed inset-x-0 z-[70] flex items-center justify-center px-6 ${
         // Leave the page title (top) and the bottom nav uncovered on tabbed
         // pages; full-screen on detail pages.
@@ -106,7 +143,11 @@ export function AuthWall({
             : {}),
         }}
       />
-      <div className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-7 text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+      <div
+        ref={cardRef}
+        tabIndex={-1}
+        className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-7 text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)] focus:outline-none"
+      >
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
           <Users className="h-7 w-7 text-primary" />
         </div>

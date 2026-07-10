@@ -1,7 +1,8 @@
 "use client";
 
-// Desktop-dismissable wrapper around AuthWall for the detail pages
-// (/venue/[slug], /event/[id]).
+// Desktop-dismissable wrapper around AuthWall for detail pages. Wired on
+// /venue/[slug]; /event/[id] still renders the hard AuthWall and gets
+// this (plus the whole desktop layer) in the follow-up pass.
 //
 // Below lg this renders EXACTLY the hard wall the pages had before
 // (backHref escape only) — mobile behavior is unchanged. At lg+ the wall

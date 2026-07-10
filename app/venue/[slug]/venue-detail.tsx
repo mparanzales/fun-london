@@ -237,7 +237,10 @@ export function VenueDetail({
         // Desktop hero is a 4:5 portrait plate (fills the viewport under
         // the sticky offset; venue-feature convention) — radius scales up
         // with it to 3xl, per the panel's paired call. Mobile stays 4:3.
-        className="relative w-full aspect-[4/3] lg:aspect-[4/5] lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-3xl lg:overflow-hidden"
+        // The max-h clamp keeps the STICKY plate's bottom edge (and the
+        // vibe tagline on it) inside short viewports (1366×768 laptops):
+        // 100vh − 104px offset − 40px breath; object-cover absorbs the crop.
+        className="relative w-full aspect-[4/3] lg:aspect-[4/5] lg:max-h-[calc(100vh-9rem)] lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-3xl lg:overflow-hidden"
       >
         {/* Swipeable photo gallery — keyless Storage URLs, hero first.
             Scroll-snaps horizontally; the dots track the active slide. */}
@@ -459,7 +462,9 @@ export function VenueDetail({
             expanded: the full week, dash-free ("6pm until 1am"), today bold.
             Hidden for signed-out users (openingHours is a moat field). */}
         {venue.openingHours && (
-          <div className="mt-6 border-y border-fg/10 lg:mt-12">
+          // lg:border-b-0 — at lg the NEXT section's deck rule owns that
+          // boundary; keeping both drew two hairlines around an empty band.
+          <div className="mt-6 border-y border-fg/10 lg:mt-12 lg:border-b-0">
             <button
               type="button"
               onClick={() => setHoursOpen((v) => !v)}
@@ -527,7 +532,7 @@ export function VenueDetail({
             list with hairline dividers. Body is upright text-fg (not italic
             muted) for readability and AA contrast. */}
         {hasRealTalk && (
-          <div className="mt-8 lg:mt-12">
+          <div className="mt-8 lg:mt-12 lg:border-t lg:border-fg/10 lg:pt-8">
             <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-accent mb-1.5">
               Real Talk
             </div>
@@ -777,7 +782,7 @@ export function VenueDetail({
             expandable. Transparency promise — users can fact-check the
             catalog independent of our own editorial. */}
         {hasWhy && (
-          <div className="mt-7 lg:mt-12">
+          <div className="mt-7 lg:mt-12 lg:border-t lg:border-fg/10 lg:pt-8">
             <button
               type="button"
               onClick={() => setWhyOpen((v) => !v)}
