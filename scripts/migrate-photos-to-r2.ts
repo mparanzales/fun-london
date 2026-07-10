@@ -29,6 +29,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   r2Configured,
   uploadPhotoToR2,
+  r2PublicUrl,
   R2_PUBLIC_BASE,
   stemOf,
 } from "./r2-storage";
@@ -99,13 +100,11 @@ async function listAllObjects(): Promise<string[]> {
   const names: string[] = [];
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await supabase.storage
-      .from(BUCKET)
-      .list("", {
-        limit: PAGE,
-        offset,
-        sortBy: { column: "name", order: "asc" },
-      });
+    const { data, error } = await supabase.storage.from(BUCKET).list("", {
+      limit: PAGE,
+      offset,
+      sortBy: { column: "name", order: "asc" },
+    });
     if (error) throw new Error(`storage.list: ${error.message}`);
     const raw = data ?? [];
     // Skip folder-placeholder rows (no id); break on the RAW page size so a
@@ -140,25 +139,56 @@ async function uploadPhase(): Promise<Set<string>> {
     bytesIn = 0,
     bytesOut = 0;
   const wave = todo.slice(0, WAVE_LIMIT);
-  for (const name of wave) {
-    try {
-      const { data, error } = await supabase.storage.from(BUCKET).download(name);
-      if (error || !data) throw new Error(error?.message ?? "no data");
-      const input = Buffer.from(await data.arrayBuffer());
-      const { detailBytes, cardBytes } = await uploadPhotoToR2(name, input);
-      bytesIn += input.length;
-      bytesOut += detailBytes + (cardBytes ?? 0);
-      done.add(name);
-      ok += 1;
-      if (ok % 100 === 0) {
-        saveProgress(done);
-        console.log(`  … ${ok}/${wave.length} uploaded`);
+  // Process the wave with a concurrency pool — download + 2× sharp encode +
+  // 2× R2 upload per object is latency-bound, so overlapping ~8 at once cuts
+  // wall-clock ~6-8× vs the sequential loop. Tunable via FL_MIGRATE_CONCURRENCY.
+  const CONCURRENCY = Math.max(
+    1,
+    Number(process.env.FL_MIGRATE_CONCURRENCY || 8),
+  );
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < wave.length) {
+      const name = wave[next++];
+      try {
+        // Retry the download — home-network blips surface as transient
+        // "fetch failed"; without a retry a whole batch can fail at once.
+        let input: Buffer | null = null;
+        let lastErr: unknown;
+        for (let attempt = 1; attempt <= 4 && input === null; attempt++) {
+          try {
+            const { data, error } = await supabase.storage
+              .from(BUCKET)
+              .download(name);
+            if (error || !data) throw new Error(error?.message ?? "no data");
+            input = Buffer.from(await data.arrayBuffer());
+          } catch (e) {
+            lastErr = e;
+            if (attempt < 4)
+              await new Promise((r) => setTimeout(r, 500 * attempt));
+          }
+        }
+        if (input === null) throw lastErr ?? new Error("download failed");
+        const { detailBytes, cardBytes } = await uploadPhotoToR2(name, input);
+        bytesIn += input.length;
+        bytesOut += detailBytes + (cardBytes ?? 0);
+        done.add(name);
+        ok += 1;
+        if (ok % 100 === 0) {
+          saveProgress(done);
+          console.log(
+            `  … ${ok}/${wave.length} uploaded (${(bytesIn / 1e6).toFixed(0)} MB in)`,
+          );
+        }
+      } catch (e) {
+        failed += 1;
+        console.error(`  ✗ ${name}: ${(e as Error).message}`);
       }
-    } catch (e) {
-      failed += 1;
-      console.error(`  ✗ ${name}: ${(e as Error).message}`);
     }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, wave.length) }, () => worker()),
+  );
   saveProgress(done);
   console.log(
     `\nuploaded ${ok}, failed ${failed} of ${wave.length}; ` +
@@ -311,7 +341,66 @@ async function verifyPhase(): Promise<void> {
   );
 }
 
+// Delete from Supabase every object that is (a) in the upload checkpoint AND
+// (b) confirmed live in R2 (HEAD 200). Frees Supabase storage progressively.
+// NEVER deletes an object whose R2 copy isn't confirmed — so a rollback always
+// exists for anything not safely migrated + served. Run AFTER upload + DB
+// rewrite + verify for a batch, so no live DB row still points at what we drop.
+async function removeChunk(names: string[]): Promise<number> {
+  if (!names.length) return 0;
+  if (DRY_RUN) {
+    console.log(`  [dry] would delete ${names.length}`);
+    return 0;
+  }
+  const { error } = await supabase.storage.from(BUCKET).remove(names);
+  if (error) {
+    console.error(`  ✗ remove: ${error.message}`);
+    return 0;
+  }
+  return names.length;
+}
+
+async function deletePhase(): Promise<void> {
+  console.log("\n── DELETE migrated objects from Supabase ──");
+  const done = loadProgress();
+  const present = new Set(await listAllObjects());
+  const candidates = [...done].filter((n) => present.has(n));
+  console.log(
+    `${candidates.length} checkpointed objects still present in Supabase`,
+  );
+  let deleted = 0,
+    kept = 0;
+  let chunk: string[] = [];
+  for (const name of candidates) {
+    // Only delete once the R2 copy is confirmed served (belt AND braces on top
+    // of the checkpoint — never drop a rollback for something not live in R2).
+    try {
+      const res = await fetch(r2PublicUrl(name), { method: "HEAD" });
+      if (res.ok) chunk.push(name);
+      else {
+        kept += 1;
+        console.error(`  keep ${name}: R2 HEAD ${res.status}`);
+      }
+    } catch (e) {
+      kept += 1;
+      console.error(`  keep ${name}: ${(e as Error).message}`);
+    }
+    if (chunk.length >= 100) {
+      deleted += await removeChunk(chunk);
+      chunk = [];
+    }
+  }
+  deleted += await removeChunk(chunk);
+  console.log(
+    `deleted ${deleted} from Supabase, kept ${kept} (R2 not confirmed)`,
+  );
+}
+
 async function main(): Promise<void> {
+  if (process.argv.includes("--delete-uploaded")) {
+    await deletePhase();
+    return;
+  }
   if (process.argv.includes("--verify")) {
     await verifyPhase();
     return;
