@@ -1,5 +1,7 @@
 "use client";
 
+import { resetAnalyticsIdentity } from "@/lib/analytics";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -189,6 +191,7 @@ function SignedInProfile({
       // Account is gone — clear the local session and send them home.
       const supabase = createClient();
       await supabase.auth.signOut();
+      resetAnalyticsIdentity(); // next account on this browser starts clean
       router.replace("/");
       return;
     }
@@ -227,6 +230,7 @@ function SignedInProfile({
     setSigningOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
+    resetAnalyticsIdentity(); // next account on this browser starts clean
     // Refresh the route so the Server Component re-fetches getAuthUser()
     // and renders the anonymous view.
     router.refresh();

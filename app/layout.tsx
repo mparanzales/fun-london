@@ -107,7 +107,7 @@ export default async function RootLayout({
           </BookingsProvider>
         </SavedProvider>
         <ConsentBanner />
-        <SignInTracker />
+        <SignInTracker authUserId={authUserId} />
         <AnalyticsGate />
       </body>
     </html>
