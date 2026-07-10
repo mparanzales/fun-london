@@ -809,6 +809,9 @@ async function main() {
   );
 
   const tally = { fetched: 0, upserted: 0, deactivated: 0 };
+  // Green-but-empty guard input: provider passes that THREW (outage/429/bad
+  // key). Swallowing these kept the job green while ingesting nothing.
+  let passFailures = 0;
 
   // ── Pass 1: curated per-venue subscriptions ──────────────────────────
   // Collect every source_id we pulled here so the London-wide pass can
@@ -834,6 +837,7 @@ async function main() {
         tally.upserted += r.upserted;
         tally.deactivated += r.cancelled;
       } catch (err) {
+        passFailures += 1;
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`  ✗ FAILED ${sub.source}/${sub.venueSlug}: ${msg}`);
       }
@@ -848,6 +852,7 @@ async function main() {
       tally.upserted += r.upserted;
       tally.deactivated += r.removed;
     } catch (err) {
+      passFailures += 1;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ✗ FAILED ticketmaster/London-discovery: ${msg}`);
     }
@@ -859,6 +864,17 @@ async function main() {
   console.log(`Upserted:                ${tally.upserted}`);
   console.log(`Cancelled/removed:       ${tally.deactivated}`);
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Ingestion complete."}`);
+
+  // Green-but-empty guard: at least one provider pass threw AND the whole run
+  // ingested nothing -> fail loud so the alert fires. (A healthy run with some
+  // provider keys simply absent still passes: its working providers fetch.)
+  if (!DRY_RUN && tally.fetched === 0 && passFailures > 0) {
+    console.error(
+      `GREEN-BUT-EMPTY GUARD: ${passFailures} provider pass(es) failed and ` +
+        `0 events were fetched. Exiting 1 so the alert fires.`,
+    );
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

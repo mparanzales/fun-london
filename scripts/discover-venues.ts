@@ -590,6 +590,10 @@ async function main() {
   const start = Math.floor(Date.now() / (4 * 60 * 60 * 1000)) % grid.length;
 
   const published: string[] = [];
+  // Green-but-empty guard input: systemic source-validation failure (e.g. the
+  // shared Gemini free-tier quota is drained -> every validate throws) used to
+  // produce a silent empty GREEN run. Count the throws so we can fail loud.
+  let validateFailures = 0;
   const seen = new Set<string>();
   let scanned = 0;
 
@@ -651,6 +655,7 @@ async function main() {
       try {
         sources = await validateSources(name, area);
       } catch (e) {
+        validateFailures += 1;
         console.error(`  ✗ validate ${name}: ${(e as Error).message}`);
         continue;
       }
@@ -778,6 +783,24 @@ async function main() {
   );
   published.forEach((s) => console.log(`  • ${s}`));
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Discovery complete."}`);
+
+  // Green-but-empty guard: scanned candidates, published nothing, and source
+  // validation failed repeatedly -> almost certainly systemic (Gemini quota or
+  // outage), not a genuinely empty grid slice. Exit nonzero so the workflow's
+  // failure alert fires instead of reporting a useless run as success.
+  if (
+    !DRY_RUN &&
+    published.length === 0 &&
+    scanned > 0 &&
+    validateFailures >= 5
+  ) {
+    console.error(
+      `GREEN-BUT-EMPTY GUARD: scanned ${scanned}, published 0, ` +
+        `${validateFailures} validation failures. Likely systemic ` +
+        `(Gemini quota/outage). Exiting 1 so the alert fires.`,
+    );
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {
