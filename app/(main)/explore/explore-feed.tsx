@@ -28,7 +28,11 @@ import { searchCatalog } from "@/lib/search-action";
 import { loadFeedPage } from "@/lib/feed-action";
 import { recordSignal } from "@/lib/signals";
 import type { FeedFilter, FeedSort } from "@/lib/queries";
-import { FEED_PAGE_SIZE, PREVIEW_COUNT } from "@/lib/feed-constants";
+import {
+  FEED_PAGE_SIZE,
+  FEED_SNAPSHOT_KEY,
+  PREVIEW_COUNT,
+} from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { useSaved } from "@/components/saved-context";
@@ -96,6 +100,65 @@ function getEyebrow(): "today in" | "tonight in" {
 
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
+
+// ── Back-navigation restore ──────────────────────────────────────────────────
+// Tapping into a venue unmounts this component, so the chip, refine filters,
+// paginated pages, and scroll offset all die with it — coming back "restarted"
+// the feed (a real new-user complaint). We snapshot the view into
+// sessionStorage on unmount and restore it on the next mount, so back lands
+// you exactly where you left off. Card-level data only (the same fields the
+// client already held), per-tab, and expired after 10 minutes so a genuinely
+// fresh visit still gets a fresh feed.
+const FEED_SNAPSHOT_TTL_MS = 10 * 60 * 1000;
+
+type FeedSnapshot = {
+  // Snapshots never cross an auth boundary: a 4-card anon teaser must not
+  // become a fresh signup's page 0, and signed-in-only filters (open-now /
+  // nearest) or a taste-ranked list must not restore into an anon mount.
+  signedIn: boolean;
+  selectedFilter: FilterKey;
+  filters: ExploreFilters;
+  loaded: Venue[];
+  feedHasMore: boolean;
+  dismissed: string[];
+  scrollY: number;
+  savedAt: number;
+};
+
+function readFeedSnapshot(): FeedSnapshot | null {
+  try {
+    const raw = window.sessionStorage.getItem(FEED_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const snap = JSON.parse(raw) as FeedSnapshot;
+    if (!snap || typeof snap.savedAt !== "number") return null;
+    if (Date.now() - snap.savedAt > FEED_SNAPSHOT_TTL_MS) return null;
+    if (!Array.isArray(snap.loaded) || !Array.isArray(snap.dismissed))
+      return null;
+    if (!snap.filters || typeof snap.signedIn !== "boolean") return null;
+    return snap;
+  } catch {
+    return null;
+  }
+}
+
+// The reset effect's identity key for a view. Extracted so the restore effect
+// can pin lastKeyRef to the EXACT string the effect will compute for the
+// restored view — any drift between the two would wipe the restored pages
+// with a page-0 refetch.
+function viewKey(
+  selectedFilter: FilterKey,
+  serverSort: FeedSort,
+  geo: LatLng | null,
+  priceKey: string,
+  regionKey: string,
+  openNow: boolean,
+): string {
+  const geoKey =
+    serverSort === "nearest" && geo
+      ? `${geo.lat.toFixed(3)},${geo.lng.toFixed(3)}`
+      : "";
+  return `${selectedFilter}|${serverSort}|${geoKey}|${priceKey}|${regionKey}|${openNow ? "o" : ""}`;
+}
 
 export function ExploreFeed({
   venues: allVenues,
@@ -342,12 +405,14 @@ export function ExploreFeed({
     if (!signedIn) return;
     const filter =
       selectedFilter === "events" ? null : (selectedFilter as FeedFilter);
-    const geoKey = userGeo
-      ? `${userGeo.lat.toFixed(3)},${userGeo.lng.toFixed(3)}`
-      : "";
-    const key = `${selectedFilter}|${serverSort}|${
-      serverSort === "nearest" ? geoKey : ""
-    }|${priceKey}|${regionKey}|${openNow ? "o" : ""}`;
+    const key = viewKey(
+      selectedFilter,
+      serverSort,
+      userGeo,
+      priceKey,
+      regionKey,
+      openNow,
+    );
     // Page 0 of the default view is already server-rendered; don't re-fetch it.
     if (firstRun.current) {
       firstRun.current = false;
@@ -397,6 +462,145 @@ export function ExploreFeed({
     regionKey,
     openNow,
   ]);
+
+  // Venues dismissed via the card's "Not for me" control this session. The
+  // Kind C `dismiss` signal is the durable effect (weight −1.0 in the taste
+  // vector); this set just hides the card immediately so the tap visibly did
+  // something. Survives back-navigation via the snapshot below; on a real
+  // reload the ranker owns the ordering again.
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const onCardDismissed = useCallback((venueId: string) => {
+    setDismissedIds((prev) => {
+      const next = new Set(prev);
+      next.add(venueId);
+      return next;
+    });
+  }, []);
+
+  // Restore a snapshot left by a previous mount (the user tapped into a venue
+  // and came back). Defined AFTER the reset effect so its mount run comes
+  // second: overwriting lastKeyRef here stops that effect from clearing the
+  // restored pages and refetching page 0 on the re-render this triggers.
+  // The snapshot is consumed from storage ONCE into a ref, but the effect
+  // re-applies it on every run so StrictMode's dev double-invocation (which
+  // re-runs the reset effect with default state and un-pins lastKeyRef)
+  // converges back to the restored view instead of wiping its pages.
+  const consumedSnapRef = useRef<FeedSnapshot | null | undefined>(undefined);
+  useEffect(() => {
+    if (consumedSnapRef.current === undefined) {
+      consumedSnapRef.current = readFeedSnapshot();
+      try {
+        window.sessionStorage.removeItem(FEED_SNAPSHOT_KEY); // one-shot
+      } catch {
+        /* ignore */
+      }
+    }
+    const snap = consumedSnapRef.current;
+    // Auth boundary: a snapshot from the other auth state never restores —
+    // an anon teaser must not become a fresh signup's feed, and signed-in
+    // gated filters must not leak into an anon mount (see FeedSnapshot).
+    if (!snap || snap.signedIn !== signedIn) return;
+
+    // Invalidate anything the pre-restore render already started: the scroll
+    // sentinel's loadMore can be in flight with the DEFAULT view's offset,
+    // and appending that page to the restored list would corrupt it.
+    reqIdRef.current++;
+    loadingRef.current = false;
+
+    setSelectedFilter(snap.selectedFilter);
+    setFilters(snap.filters);
+    setDismissedIds(new Set(snap.dismissed));
+    if (signedIn) {
+      setLoaded(snap.loaded);
+      setFeedHasMore(snap.feedHasMore);
+    }
+
+    // Pin the reset key for the restored view. Geo is read synchronously so a
+    // restored "nearest" view computes the same geoKey the effect will.
+    const g = readFreshUserGeo();
+    if (g) setUserGeo(g);
+    const snapSort: FeedSort =
+      snap.filters.sort === "nearest"
+        ? "nearest"
+        : snap.filters.sort === "top-rated"
+          ? "rating"
+          : "taste";
+    lastKeyRef.current = viewKey(
+      snap.selectedFilter,
+      snapSort,
+      g,
+      [...snap.filters.price].sort().join(","),
+      [...snap.filters.regions].sort().join(","),
+      snap.filters.openNow,
+    );
+
+    // Scroll once the restored list has painted — the cards' fixed aspect
+    // ratios give the page its full height immediately, no image wait needed.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.scrollTo(0, snap.scrollY));
+    });
+    // Mount-only: restores once, before any user interaction can race it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the latest view in a ref so the unmount cleanup below can snapshot it
+  // without re-subscribing on every state change.
+  const snapshotRef = useRef<Omit<FeedSnapshot, "scrollY" | "savedAt"> | null>(
+    null,
+  );
+  useEffect(() => {
+    snapshotRef.current = {
+      signedIn,
+      selectedFilter,
+      filters,
+      loaded,
+      feedHasMore,
+      dismissed: [...dismissedIds],
+    };
+  });
+  // The server-rendered page 0 — `loaded` still holding this exact reference
+  // means the user never paginated, restored, or refetched.
+  const initialVenuesRef = useRef(allVenues);
+  useEffect(() => {
+    const mountedAt = performance.now();
+    let scrollY = window.scrollY;
+    const onScroll = () => {
+      scrollY = window.scrollY;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      const s = snapshotRef.current;
+      if (!s) return;
+      // StrictMode's simulated unmount (dev) fires this cleanup instantly
+      // with first-render defaults — writing that phantom snapshot would
+      // clobber the real one. No human leaves the feed in under 100ms.
+      if (performance.now() - mountedAt < 100) return;
+      // Top of the default view with nothing changed → nothing worth
+      // restoring; keep the storage clean and the next mount fresh.
+      const meaningful =
+        scrollY > 0 ||
+        s.selectedFilter !== "for-you" ||
+        s.filters !== EMPTY_FILTERS ||
+        s.loaded !== initialVenuesRef.current ||
+        s.dismissed.length > 0;
+      if (!meaningful) return;
+      // Unmount = navigating away (venue detail, another tab). Persist the
+      // view for the restore effect above. Quota/private-mode errors → skip.
+      try {
+        window.sessionStorage.setItem(
+          FEED_SNAPSHOT_KEY,
+          JSON.stringify({
+            ...s,
+            scrollY,
+            savedAt: Date.now(),
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
 
   const loadMore = useCallback(() => {
     if (
@@ -458,19 +662,6 @@ export function ExploreFeed({
     },
     [loadMore],
   );
-
-  // Venues dismissed via the card's "Not for me" control this session. The
-  // Kind C `dismiss` signal is the durable effect (weight −1.0 in the taste
-  // vector); this set just hides the card immediately so the tap visibly did
-  // something. Not persisted: on reload the ranker owns the ordering.
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const onCardDismissed = useCallback((venueId: string) => {
-    setDismissedIds((prev) => {
-      const next = new Set(prev);
-      next.add(venueId);
-      return next;
-    });
-  }, []);
 
   // The list actually rendered. Signed-in: the server-paginated `loaded` venues
   // (plus events for the music / events views). Anon: the metered preview.
