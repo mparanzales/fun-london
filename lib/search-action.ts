@@ -71,7 +71,22 @@ async function searchAllowed(): Promise<boolean> {
     h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     h.get("x-real-ip") ||
     "local";
-  return rateLimit(`search:${ip}`, SEARCH_RATE_LIMIT, SEARCH_RATE_WINDOW_MS);
+  const allowed = await rateLimit(
+    `search:${ip}`,
+    SEARCH_RATE_LIMIT,
+    SEARCH_RATE_WINDOW_MS,
+  );
+  if (!allowed) {
+    // Make the defense OBSERVABLE: a throttled scraper walking the search
+    // oracle used to look identical to nobody searching (empty results, no
+    // log, no metric). One warn per trip is greppable in the Vercel function
+    // logs. The IP is hashed: we want "same actor, many trips" correlation,
+    // never a raw address in logs.
+    const { createHash } = await import("node:crypto");
+    const ipHash = createHash("sha256").update(ip).digest("hex").slice(0, 12);
+    console.warn(`[rate-limit] search trip ipHash=${ipHash}`);
+  }
+  return allowed;
 }
 
 // Rank venues AND events against a normalised query into ONE relevance-ordered
