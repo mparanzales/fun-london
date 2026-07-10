@@ -234,8 +234,10 @@ export function VenueDetail({
         // Sticky offset = DesktopNav h-16 (64px) + the root's lg:pt-10
         // (40px). The theme() calc documents the derivation but does NOT
         // track desktop-nav.tsx — if the nav height changes, update this.
-        className="relative w-full lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-2xl lg:overflow-hidden"
-        style={{ aspectRatio: "4/3" }}
+        // Desktop hero is a 4:5 portrait plate (fills the viewport under
+        // the sticky offset; venue-feature convention) — radius scales up
+        // with it to 3xl, per the panel's paired call. Mobile stays 4:3.
+        className="relative w-full aspect-[4/3] lg:aspect-[4/5] lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-3xl lg:overflow-hidden"
       >
         {/* Swipeable photo gallery — keyless Storage URLs, hero first.
             Scroll-snaps horizontally; the dots track the active slide. */}
@@ -318,7 +320,7 @@ export function VenueDetail({
         {/* Vibe tagline — the venue's short editorial voice line, over the
             photo. Hidden if we hold none. */}
         {venue.vibe && (
-          <p className="absolute inset-x-0 bottom-0 px-5 pb-4 text-[15px] italic leading-snug text-white/90 drop-shadow-md">
+          <p className="absolute inset-x-0 bottom-0 px-5 pb-4 text-[15px] italic leading-snug text-white/90 drop-shadow-md lg:text-lg lg:leading-snug lg:px-6 lg:pb-5 lg:max-w-[85%]">
             {venue.vibe}
           </p>
         )}
@@ -376,11 +378,11 @@ export function VenueDetail({
       {/* ── Info block ────────────────────────────────────────────── */}
       <section className="px-5 lg:px-0">
         {/* lg:pt-0 keeps the column top level with the hero's top edge. */}
-        <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5 lg:pt-0">
+        <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5 lg:pt-0 lg:text-xs lg:tracking-[0.16em]">
           {venue.neighbourhood.toUpperCase()} · {venue.price} · {venue.type}
         </div>
 
-        <h1 className="text-3xl lg:text-4xl font-extrabold text-fg leading-tight mt-1">
+        <h1 className="text-3xl lg:text-5xl lg:tracking-tight font-extrabold text-fg leading-tight mt-1">
           {venue.name}
         </h1>
 
@@ -457,7 +459,7 @@ export function VenueDetail({
             expanded: the full week, dash-free ("6pm until 1am"), today bold.
             Hidden for signed-out users (openingHours is a moat field). */}
         {venue.openingHours && (
-          <div className="mt-6 border-y border-fg/10">
+          <div className="mt-6 border-y border-fg/10 lg:mt-12">
             <button
               type="button"
               onClick={() => setHoursOpen((v) => !v)}
@@ -525,7 +527,7 @@ export function VenueDetail({
             list with hairline dividers. Body is upright text-fg (not italic
             muted) for readability and AA contrast. */}
         {hasRealTalk && (
-          <div className="mt-8">
+          <div className="mt-8 lg:mt-12">
             <div className="text-[11px] font-extrabold tracking-[0.18em] uppercase text-accent mb-1.5">
               Real Talk
             </div>
@@ -561,7 +563,10 @@ export function VenueDetail({
             small "Reviews from Google" attribution — both required by Google's
             display policy). Skeleton cards as the empty state until then;
             never placeholder or invented quotes. */}
-        <div className="mt-8">
+        {/* Desktop gets magazine deck rules (hairline + breath) on the
+            labelled sections so the column reads as editorial units
+            rather than one compressed slab. */}
+        <div className="mt-8 lg:mt-12 lg:border-t lg:border-fg/10 lg:pt-8">
           <div className="flex items-baseline justify-between mb-3">
             <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
               Reviews
@@ -671,7 +676,7 @@ export function VenueDetail({
           (venue.lat && venue.lng) ||
           venue.phone ||
           venue.websiteUrl) && (
-          <div className="mt-8">
+          <div className="mt-8 lg:mt-12 lg:border-t lg:border-fg/10 lg:pt-8">
             <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
               Plan your visit
             </div>
@@ -772,7 +777,7 @@ export function VenueDetail({
             expandable. Transparency promise — users can fact-check the
             catalog independent of our own editorial. */}
         {hasWhy && (
-          <div className="mt-7">
+          <div className="mt-7 lg:mt-12">
             <button
               type="button"
               onClick={() => setWhyOpen((v) => !v)}

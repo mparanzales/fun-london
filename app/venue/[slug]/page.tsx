@@ -4,7 +4,7 @@ import { fetchVenueBySlug, fetchVenuePreviewBySlug } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { VenueDetail } from "./venue-detail";
-import { AuthWall } from "@/components/auth-wall";
+import { DetailAuthWall } from "@/components/detail-auth-wall";
 import { DesktopNav } from "@/components/desktop-nav";
 
 // Top-level route OUTSIDE the (main) route group on purpose — that means
@@ -105,7 +105,10 @@ export default async function VenuePage(props: {
           Mobile keeps the immersive no-chrome layout. */}
       <DesktopNav />
       <VenueDetail venue={venue} signedIn={!!authUser} />
-      <AuthWall
+      {/* Mobile: the hard wall, unchanged. Desktop: dismissable ("Just
+          looking") and re-surfaces every few minutes — Maria's funnel
+          call, 2026-07-10. */}
+      <DetailAuthWall
         signedIn={!!authUser}
         title={`Sign up to see ${venue.name}`}
         backHref="/explore"
