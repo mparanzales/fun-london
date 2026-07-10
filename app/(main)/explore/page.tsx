@@ -9,9 +9,9 @@ import {
 } from "@/lib/queries";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { ExploreFeed, PREVIEW_COUNT } from "./explore-feed";
+import { ExploreFeed } from "./explore-feed";
 import { VenueCard } from "@/components/venue-card";
-import { FEED_PAGE_SIZE } from "@/lib/feed-constants";
+import { FEED_PAGE_SIZE, PREVIEW_COUNT } from "@/lib/feed-constants";
 
 // Server Component. Two distinct paths so the wall is enforced HERE, not in
 // the client:

@@ -17,9 +17,12 @@ const nextConfig = {
       // for Next.js Image optimization to work.
       { protocol: "https", hostname: "places.googleapis.com" },
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
-      // Supabase Storage — venue photos are mirrored here (keyless public
-      // URLs) by scripts/photo-storage.ts + scripts/backfill-photos.ts, so the
-      // Google Places API key no longer appears in any public image URL.
+      // Cloudflare R2 (via the img.funldn.com custom domain) — venue photos
+      // migrated off Supabase Storage to R2 (£0, zero-egress, London edge),
+      // pre-encoded to WebP. This is the primary photo host going forward.
+      { protocol: "https", hostname: "img.funldn.com" },
+      // Supabase Storage — legacy keyless photo URLs, still served until the R2
+      // migration + DB rewrite completes and the bucket is emptied.
       { protocol: "https", hostname: "*.supabase.co" },
       // Ticketmaster CDN — event posters come back as
       // s1.ticketm.net/dam/a/... when Phase 5 Tier 3 ingests via the

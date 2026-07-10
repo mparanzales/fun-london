@@ -23,6 +23,7 @@
 //      restriction + daily quota cap.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { r2Configured, uploadPhotoToR2 } from "./r2-storage";
 
 // Read the bucket LAZILY (not at module load). Scripts call dotenv.config()
 // AFTER their imports, and ES modules evaluate imported modules first — so a
@@ -33,6 +34,36 @@ function photoBucket(): string {
   return process.env.FL_PHOTO_BUCKET ?? "";
 }
 
+// Storage backend switch. Photos now live on Cloudflare R2 (img.funldn.com);
+// when the R2 secrets are present, uploads go there (re-encoded to WebP) and
+// the DB gets the keyless img.funldn.com URL. When they are NOT present (e.g. a
+// local dev box without R2 keys) we fall back to the legacy Supabase bucket, so
+// nothing that worked before breaks. `path` is the legacy key ("${slug}.jpg");
+// R2 derives the .webp variants + returns the detail URL.
+async function putPhoto(
+  path: string,
+  buffer: Buffer,
+  contentType: string,
+  supabase: SupabaseClient,
+): Promise<string | null> {
+  if (r2Configured()) {
+    const { url } = await uploadPhotoToR2(path, buffer);
+    return url;
+  }
+  const { error } = await supabase.storage
+    .from(photoBucket())
+    .upload(path, buffer, { contentType, upsert: true });
+  if (error) throw new Error(`upload: ${error.message}`);
+  const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
+  return data?.publicUrl ?? null;
+}
+
+// Storage is available when EITHER R2 is configured or the Supabase bucket is
+// set. (Kept in sync with photoStorageEnabled below.)
+function storageBackendReady(): boolean {
+  return r2Configured() || photoBucket().length > 0;
+}
+
 // Sentinel for "no real photo" — EMPTY, never a stock image. A venue without
 // its OWN photo is then hidden by the read-side `img_url <> ''` filter rather
 // than shown on a generic picture. (Was an Unsplash URL; purged so we never
@@ -40,7 +71,7 @@ function photoBucket(): string {
 export const FALLBACK_IMG_URL = "";
 
 export function photoStorageEnabled(): boolean {
-  return photoBucket().length > 0;
+  return storageBackendReady();
 }
 
 // True if a URL points at Google's Places media endpoint, which embeds the API
@@ -111,14 +142,9 @@ export async function mirrorPhotoToStorage(
       // photos get a `-1`, `-2`, … suffix.
       const path = index > 0 ? `${slug}-${index}.${ext}` : `${slug}.${ext}`;
 
-      const { error } = await supabase.storage
-        .from(photoBucket())
-        .upload(path, buffer, { contentType, upsert: true });
-      if (error) throw new Error(`upload: ${error.message}`);
-
-      const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
-      if (!data?.publicUrl) throw new Error("no public URL returned");
-      return data.publicUrl;
+      const url = await putPhoto(path, buffer, contentType, supabase);
+      if (!url) throw new Error("no public URL returned");
+      return url;
     },
   );
 }
@@ -199,13 +225,9 @@ export async function mirrorMapToStorage(
     if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
     const buffer = Buffer.from(await res.arrayBuffer());
     const path = `${slug}-map.png`;
-    const { error } = await supabase.storage
-      .from(photoBucket())
-      .upload(path, buffer, { contentType: "image/png", upsert: true });
-    if (error) throw new Error(`upload: ${error.message}`);
-    const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
-    if (!data?.publicUrl) throw new Error("no public URL returned");
-    return data.publicUrl;
+    const publicUrl = await putPhoto(path, buffer, "image/png", supabase);
+    if (!publicUrl) throw new Error("no public URL returned");
+    return publicUrl;
   });
 }
 
@@ -251,15 +273,7 @@ export async function mirrorImageUrlToStorage(
       : `image/${ext === "jpg" ? "jpeg" : ext}`;
     const buffer = b;
     const path = `${key}.${ext}`;
-    const { error } = await supabase.storage
-      .from(photoBucket())
-      .upload(path, buffer, { contentType, upsert: true });
-    if (error) {
-      console.error(`  [photo] upload ${key}: ${error.message}`);
-      return null;
-    }
-    const { data } = supabase.storage.from(photoBucket()).getPublicUrl(path);
-    return data?.publicUrl ?? null;
+    return await putPhoto(path, buffer, contentType, supabase);
   } catch (e) {
     console.error(`  [photo] mirror ${key}: ${(e as Error).message}`);
     return null;

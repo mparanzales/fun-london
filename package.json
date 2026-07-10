@@ -36,6 +36,8 @@
     "send-weekly-digest": "tsx scripts/send-weekly-digest.ts",
     "backfill-photos:dry": "tsx scripts/backfill-photos.ts --dry-run",
     "backfill-photos": "tsx scripts/backfill-photos.ts",
+    "migrate-photos:dry": "tsx scripts/migrate-photos-to-r2.ts --dry-run",
+    "migrate-photos": "tsx scripts/migrate-photos-to-r2.ts",
     "backfill-gallery:dry": "tsx scripts/backfill-gallery.ts --dry-run",
     "backfill-gallery": "tsx scripts/backfill-gallery.ts",
     "backfill-maps:dry": "tsx scripts/backfill-maps.ts --dry-run",
@@ -80,6 +82,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.705.0",
     "@huggingface/transformers": "^3.8.1",
     "@types/leaflet": "^1.9.21",
     "@types/node": "^20.16.10",
@@ -91,6 +94,7 @@
     "eslint-config-next": "14.2.35",
     "postcss": "^8.4.47",
     "prettier": "^3.8.3",
+    "sharp": "^0.33.5",
     "tailwindcss": "^3.4.13",
     "tsx": "^4.22.3",
     "typescript": "^5.6.2",

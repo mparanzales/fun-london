@@ -41,6 +41,17 @@ export const SIGNAL_WEIGHTS: Record<SignalType, number> = {
   dismiss: -1.0,
 };
 
+// Signal types that carry DELIBERATE taste weight — nonzero in SIGNAL_WEIGHTS,
+// excluding impressions (which are exposure, aggregated separately by Stage 6).
+// Derived from the weights so the two can never drift apart. The data layer
+// uses this to fetch only rows that can actually move the taste vector:
+// zero-weight navigation events (search/filter/plan_started/plan_abandoned)
+// are skipped by buildTasteVector anyway, so excluding them at the query is
+// behaviour-identical and keeps them from eating the fetch budget.
+export const DELIBERATE_SIGNAL_TYPES = (
+  Object.keys(SIGNAL_WEIGHTS) as SignalType[]
+).filter((t) => t !== "impression" && SIGNAL_WEIGHTS[t] !== 0);
+
 // outbound_click intent varies by where it goes (context.target).
 const OUTBOUND_TARGET_WEIGHT: Record<string, number> = {
   booking: 0.9,
@@ -89,6 +100,14 @@ export const IMPRESSION_WEIGHT = -0.15; // one venue's "shown, never engaged" pu
 export const IMPRESSION_MIN = 3; // seen at least this often before it's a verdict
 export const IMPRESSION_MAX_FRACTION = 0.35; // total penalty ≤ this × the deliberate magnitude
 
+// Per-venue clamp on the summed DELIBERATE weight, so repeat taps can't
+// compound without bound: 20 opens of one venue used to weigh as much as SIX
+// saves, letting a single obsessively-revisited venue bend the whole taste
+// vector. A save plus a booking click (1.0 + 0.9) still counts nearly double a
+// lone save, but past ±VENUE_NET_CAP a venue's pull stops growing — in both
+// directions (a pile of dismiss + veto + unsave clamps the same way).
+export const VENUE_NET_CAP = 2.0;
+
 function magnitude(v: number[]): number {
   let s = 0;
   for (const x of v) s += x * x;
@@ -113,6 +132,12 @@ export function buildTasteVector(signals: TasteSignal[]): number[] {
     { vector: number[]; count: number; freshestAge: number }
   >();
 
+  // Deliberate signals are grouped PER VENUE and the group's net weight is
+  // clamped to ±VENUE_NET_CAP before its vector joins the sum (see the
+  // constant above). Signals without a venue id can't aggregate — each is its
+  // own singleton group, which for any single signal (|w| ≤ 1) is a no-op.
+  const perVenue = new Map<string, { vector: number[]; net: number }>();
+  let anonKey = 0;
   for (const s of signals) {
     if (s.vector.length !== HYBRID_DIM) continue;
     if (s.eventType === "impression") {
@@ -131,7 +156,14 @@ export function buildTasteVector(signals: TasteSignal[]): number[] {
     if (s.venueId && raw !== 0) judged.add(s.venueId);
     const w = raw * recencyWeight(s.ageDays ?? 0);
     if (w === 0) continue;
-    for (let i = 0; i < HYBRID_DIM; i++) positive[i] += w * s.vector[i];
+    const key = s.venueId ?? `anon:${anonKey++}`;
+    const e = perVenue.get(key) ?? { vector: s.vector, net: 0 };
+    e.net += w;
+    perVenue.set(key, e);
+  }
+  for (const { vector, net } of perVenue.values()) {
+    const w = Math.max(-VENUE_NET_CAP, Math.min(VENUE_NET_CAP, net));
+    for (let i = 0; i < HYBRID_DIM; i++) positive[i] += w * vector[i];
   }
 
   // Stage 6: capped per-venue "shown but skipped" penalty. Flat per venue (a
@@ -162,11 +194,13 @@ export function buildTasteVector(signals: TasteSignal[]): number[] {
 }
 
 /**
- * Online single-signal update (the production path — avoids recomputing from
- * full history on every tap). `taste` is the running UNNORMALISED accumulator;
- * decay it by the time since the last update, then add the new weighted vector.
- * Call `normalise()` only when READING for ranking. Mathematically equivalent
- * to buildTasteVector over the whole history.
+ * Online single-signal update (avoids recomputing from full history on every
+ * tap). `taste` is the running UNNORMALISED accumulator; decay it by the time
+ * since the last update, then add the new weighted vector. Call `normalise()`
+ * only when READING for ranking. NOTE: equivalent to buildTasteVector's raw
+ * decayed sum only — it applies neither the Stage 6 exposure penalty nor the
+ * per-venue VENUE_NET_CAP clamp, both of which need the grouped history.
+ * (Currently unused in the live path, which recomputes from user_events.)
  */
 export function accumulateSignal(
   taste: number[],

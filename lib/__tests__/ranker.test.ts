@@ -131,3 +131,62 @@ describe("ranker (Stage 3)", () => {
     expect(ranked[0].personalised).toBe(false);
   });
 });
+
+describe("quality prior in personalised relevance (QUALITY_PRIOR_WEIGHT)", () => {
+  const axis = (i: number): number[] => {
+    const v = new Array<number>(400).fill(0);
+    v[i] = 1;
+    return v;
+  };
+
+  it("reorders an equal-taste tie toward the better-loved venue", () => {
+    const taste = axis(0);
+    const ranked = rankForTaste(
+      taste,
+      [
+        {
+          id: "meh",
+          vec: axis(0),
+          rating: 3.9,
+          reviewCount: 5000,
+          curated: false,
+        },
+        {
+          id: "loved",
+          vec: axis(0),
+          rating: 4.9,
+          reviewCount: 5000,
+          curated: false,
+        },
+      ],
+      { limit: 2, diversify: false },
+    );
+    expect(ranked[0].id).toBe("loved");
+    expect(ranked[0].personalised).toBe(true);
+  });
+
+  it("never overrides a real taste gap (prior is a tiebreaker, not a ranker)", () => {
+    const taste = axis(0);
+    const ranked = rankForTaste(
+      taste,
+      [
+        {
+          id: "match-modest",
+          vec: axis(0), // cosine 1 to taste
+          rating: 3.9,
+          reviewCount: 5000,
+          curated: false,
+        },
+        {
+          id: "mismatch-perfect",
+          vec: axis(1), // cosine 0 to taste
+          rating: 5.0,
+          reviewCount: 5000,
+          curated: true,
+        },
+      ],
+      { limit: 2, diversify: false },
+    );
+    expect(ranked[0].id).toBe("match-modest");
+  });
+});

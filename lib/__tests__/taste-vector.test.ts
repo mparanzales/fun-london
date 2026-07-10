@@ -172,3 +172,61 @@ describe("taste-vector Stage 6: capped exposure penalty", () => {
     expect(cosineSimilarity(twice, none)).toBeCloseTo(1, 6);
   });
 });
+
+describe("per-venue net cap (VENUE_NET_CAP)", () => {
+  // Exactly-orthogonal unit vectors so coefficients are assertable precisely.
+  const axis = (i: number): number[] => {
+    const v = new Array<number>(HYBRID_DIM).fill(0);
+    v[i] = 1;
+    return v;
+  };
+  const a = axis(0);
+  const b = axis(1);
+
+  it("20 opens of one venue can't drown a single save of another", () => {
+    const taste = buildTasteVector([
+      { vector: b, eventType: "save", venueId: "b" },
+      ...Array.from({ length: 20 }, () => ({
+        vector: a,
+        eventType: "open" as const,
+        venueId: "a",
+      })),
+    ]);
+    // Uncapped, venue a would weigh 20 x 0.3 = 6.0 (cos_b ~ 0.16); clamped to
+    // +-2.0 the taste is (2a + 1b)/sqrt(5) - the save still reads clearly.
+    expect(cosineSimilarity(taste, b)).toBeCloseTo(1 / Math.sqrt(5), 2);
+    expect(cosineSimilarity(taste, a)).toBeCloseTo(2 / Math.sqrt(5), 2);
+  });
+
+  it("save + booking click still outweighs a lone save (cap binds only past it)", () => {
+    const taste = buildTasteVector([
+      { vector: a, eventType: "save", venueId: "a" },
+      {
+        vector: a,
+        eventType: "outbound_click",
+        context: { target: "booking" },
+        venueId: "a",
+      },
+      { vector: b, eventType: "save", venueId: "b" },
+    ]);
+    // Venue a nets 1.9 (under the 2.0 cap) vs b's 1.0.
+    expect(cosineSimilarity(taste, a)).toBeGreaterThan(
+      cosineSimilarity(taste, b),
+    );
+  });
+
+  it("a pile of dismisses clamps too (bounded negative pull)", () => {
+    const taste = buildTasteVector([
+      { vector: b, eventType: "save", venueId: "b" },
+      ...Array.from({ length: 5 }, () => ({
+        vector: a,
+        eventType: "dismiss" as const,
+        venueId: "a",
+      })),
+    ]);
+    // Net -5.0 clamps to -2.0: away from a, but not to the exclusion of b.
+    expect(cosineSimilarity(taste, a)).toBeLessThan(0);
+    expect(cosineSimilarity(taste, a)).toBeGreaterThanOrEqual(-0.9);
+    expect(cosineSimilarity(taste, b)).toBeCloseTo(1 / Math.sqrt(5), 2);
+  });
+});

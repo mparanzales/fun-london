@@ -26,12 +26,12 @@ import { searchCatalog } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { regionOf } from "@/lib/regions";
+import { PREVIEW_COUNT } from "@/lib/feed-constants";
 import type { Event, EventCategory } from "@/lib/types";
 
-// How many events a signed-out visitor sees before the sign-up wall (mirrors
-// the Explore feed's metered preview). Exported so the Server Component slices
-// the anonymous preview to the SAME count in the DB.
-export const PREVIEW_COUNT = 4;
+// PREVIEW_COUNT lives in @/lib/feed-constants (a neutral module) — exporting
+// it from this "use client" module gave the Server Component `undefined` and
+// silently un-capped the anonymous events preview (same bug as /explore).
 
 // ── Filter shapes ───────────────────────────────────────────────────────
 
