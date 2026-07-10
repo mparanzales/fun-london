@@ -5,6 +5,7 @@ import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { VenueDetail } from "./venue-detail";
 import { AuthWall } from "@/components/auth-wall";
+import { DesktopNav } from "@/components/desktop-nav";
 
 // Top-level route OUTSIDE the (main) route group on purpose — that means
 // no bottom nav, no max-w-md shell wrapper. The detail screen handles
@@ -99,6 +100,10 @@ export default async function VenuePage(props: {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+      {/* Desktop-only top nav (hidden lg:block) — visitors landing here from
+          Google/shared links on a laptop need a way into the rest of the app.
+          Mobile keeps the immersive no-chrome layout. */}
+      <DesktopNav />
       <VenueDetail venue={venue} />
       <AuthWall
         signedIn={!!authUser}

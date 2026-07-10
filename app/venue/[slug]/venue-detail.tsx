@@ -194,13 +194,18 @@ export function VenueDetail({ venue }: { venue: Venue }) {
       : [venue.imgUrl];
 
   return (
-    // Mobile-shell constraint matches the (main) route group (max-w-md).
-    // Keeps the visual width consistent when navigating from /explore →
-    // /venue/[slug] → /booking/.../confirmed instead of jumping to full
-    // viewport on desktop.
-    <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
+    // Mobile: the max-w-md phone shell, unchanged. Desktop (lg+): a
+    // two-column editorial spread — sticky hero gallery left, content
+    // right — so the page uses a laptop screen instead of rendering a
+    // phone strip in the middle of it.
+    <div className="max-w-md mx-auto min-h-screen bg-bg pb-32 lg:max-w-6xl lg:px-8 lg:pt-10 lg:pb-24 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:items-start">
       {/* ── Hero ───────────────────────────────────────────────────── */}
-      <div className="relative w-full" style={{ aspectRatio: "4/3" }}>
+      <div
+        // lg:top-[104px] = DesktopNav h-16 (64px) + the root's lg:pt-10 (40px),
+        // so the stuck hero stays level with the right column's start.
+        className="relative w-full lg:sticky lg:top-[104px] lg:rounded-2xl lg:overflow-hidden"
+        style={{ aspectRatio: "4/3" }}
+      >
         {/* Swipeable photo gallery — keyless Storage URLs, hero first.
             Scroll-snaps horizontally; the dots track the active slide. */}
         <div
@@ -242,12 +247,14 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             read on any photo in both day and night themes. 44px hit targets
             with a visible focus ring for keyboard / switch-control users. */}
 
-        {/* Back button — overlays photo, top-left */}
+        {/* Back button — overlays photo, top-left. Hidden on desktop: the
+            top nav carries navigation there, and a floating phone-style
+            back arrow reads as a mobile leftover. */}
         <button
           type="button"
           onClick={() => router.back()}
           aria-label="Back"
-          className="absolute top-3 left-3 w-11 h-11 flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+          className="absolute top-3 left-3 w-11 h-11 flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 lg:hidden"
         >
           <ArrowLeft
             className="w-6 h-6 text-white drop-shadow-md"
@@ -305,12 +312,12 @@ export function VenueDetail({ venue }: { venue: Venue }) {
       </div>
 
       {/* ── Info block ────────────────────────────────────────────── */}
-      <section className="px-5">
+      <section className="px-5 lg:px-0">
         <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5">
           {venue.neighbourhood.toUpperCase()} · {venue.price} · {venue.type}
         </div>
 
-        <h1 className="text-3xl font-extrabold text-fg leading-tight mt-1">
+        <h1 className="text-3xl lg:text-4xl font-extrabold text-fg leading-tight mt-1">
           {venue.name}
         </h1>
 
@@ -330,7 +337,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             Explore. Placed before the description so the at-a-glance signal
             leads. Press state mirrors the Reserve CTA (violet fill, white). */}
         {pills.length > 0 && (
-          <div className="flex flex-nowrap gap-2 mt-4 overflow-x-auto -mx-5 px-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex flex-nowrap gap-2 mt-4 overflow-x-auto -mx-5 px-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-visible">
             {pills.map((label) => (
               <Link
                 key={label}
@@ -486,7 +493,9 @@ export function VenueDetail({ venue }: { venue: Venue }) {
             )}
           </div>
           {venue.reviews && venue.reviews.length > 0 ? (
-            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            // Desktop wraps the cards instead — a hidden-scrollbar row with
+            // no swipe makes review 3+ undiscoverable with a mouse.
+            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-visible">
               {venue.reviews.map((r, i) => (
                 <div
                   key={i}
@@ -517,7 +526,7 @@ export function VenueDetail({ venue }: { venue: Venue }) {
               ))}
             </div>
           ) : (
-            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1">
+            <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-visible">
               {[0, 1].map((i) => (
                 <div
                   key={i}
@@ -759,15 +768,12 @@ export function VenueDetail({ venue }: { venue: Venue }) {
         )}
       </section>
 
-      {/* ── Sticky CTA bar ────────────────────────────────────────── */}
-      <div
-        // Centered at viewport center, constrained to max-w-md so it
-        // matches the page's mobile shell on desktop.
-        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-bg border-t border-fg/10 px-5 py-4 flex gap-3"
-        style={{
-          paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
-        }}
-      >
+      {/* ── Sticky CTA bar ────────────────────────────────────────────
+          Mobile: fixed to the viewport bottom, phone-sheet style. Desktop:
+          a static action row at the end of the right-hand content column
+          (a floating phone bar mid-screen is the tell of an unadapted
+          mobile site). */}
+      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-bg border-t border-fg/10 px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-3 lg:static lg:left-auto lg:translate-x-0 lg:col-start-2 lg:max-w-none lg:border-t-0 lg:px-0 lg:pt-8 lg:pb-0">
         <button
           type="button"
           onClick={() => toggleSaved(venue.slug)}
