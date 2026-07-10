@@ -20,12 +20,11 @@ import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
-import { normalize, scoreMatch } from "@/lib/search-match";
+import { normalize, scoreMatch, compareHits } from "@/lib/search-match";
+import type { SearchHit } from "@/lib/search-match";
 import type { Venue, Event } from "@/lib/types";
 
-type Result =
-  | { kind: "venue"; data: Venue; score: number }
-  | { kind: "event"; data: Event; score: number };
+type Result = SearchHit;
 
 export function SearchOverlay({
   venues,
@@ -35,9 +34,10 @@ export function SearchOverlay({
 }: {
   venues: Venue[];
   events: Event[];
-  // When provided (signed-out), search runs server-side and returns card-level
-  // results. When omitted (signed-in), search filters `venues`/`events` locally.
-  searchAction?: (q: string) => Promise<{ venues: Venue[]; events: Event[] }>;
+  // When provided (signed-out), search runs server-side and returns a single
+  // relevance-ranked list of card-level results. When omitted (signed-in),
+  // search filters `venues`/`events` locally.
+  searchAction?: (q: string) => Promise<SearchHit[]>;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -78,17 +78,14 @@ export function SearchOverlay({
     [events],
   );
 
-  // SERVER MODE: debounce the query, call the action, hold its card-level rows.
-  const [serverResults, setServerResults] = useState<{
-    venues: Venue[];
-    events: Event[];
-  }>({ venues: [], events: [] });
+  // SERVER MODE: debounce the query, call the action, hold its ranked rows.
+  const [serverResults, setServerResults] = useState<Result[]>([]);
   const [pending, setPending] = useState(false);
   useEffect(() => {
     if (!searchAction) return;
     const q = query.trim();
     if (q.length < 2) {
-      setServerResults({ venues: [], events: [] });
+      setServerResults([]);
       setPending(false);
       return;
     }
@@ -99,7 +96,7 @@ export function SearchOverlay({
         const r = await searchAction(q);
         if (!cancelled) setServerResults(r);
       } catch {
-        if (!cancelled) setServerResults({ venues: [], events: [] });
+        if (!cancelled) setServerResults([]);
       } finally {
         if (!cancelled) setPending(false);
       }
@@ -114,17 +111,8 @@ export function SearchOverlay({
     const q = normalize(query);
     if (!q) return [];
 
-    if (searchAction) {
-      // Server already ranked; show venues first, then events.
-      return [
-        ...serverResults.venues.map(
-          (v): Result => ({ kind: "venue", data: v, score: 0 }),
-        ),
-        ...serverResults.events.map(
-          (e): Result => ({ kind: "event", data: e, score: 1 }),
-        ),
-      ];
-    }
+    // Server already merged venues + events into one relevance-ranked list.
+    if (searchAction) return serverResults;
 
     const out: Result[] = [];
     for (const { v, name, hay } of venueIndex) {
@@ -135,7 +123,8 @@ export function SearchOverlay({
       const score = scoreMatch(name, hay, q);
       if (score !== null) out.push({ kind: "event", data: e, score });
     }
-    return out.sort((a, b) => a.score - b.score);
+    // Same relevance interleave the server uses, so both modes rank alike.
+    return out.sort(compareHits);
   }, [query, searchAction, serverResults, venueIndex, eventIndex]);
 
   // Track searches, debounced, so we log the intent once the user pauses typing
