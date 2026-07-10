@@ -43,8 +43,17 @@ export function ReserveSheet({
   const panelRef = useRef<HTMLDivElement>(null);
   const dateRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const prevOverflow = document.body.style.overflow;
+    const prevPadRight = document.body.style.paddingRight;
+    // Compensate for the scrollbar the lock removes, or the page shifts
+    // sideways on desktops with a non-overlay scrollbar.
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = "hidden";
+    if (scrollbar > 0) document.body.style.paddingRight = `${scrollbar}px`;
     dateRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -53,7 +62,7 @@ export function ReserveSheet({
       }
       if (e.key !== "Tab" || !panelRef.current) return;
       const focusables = panelRef.current.querySelectorAll<HTMLElement>(
-        "button, input, [href]",
+        'button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])',
       );
       if (focusables.length === 0) return;
       const first = focusables[0];
@@ -69,7 +78,10 @@ export function ReserveSheet({
     document.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPadRight;
       document.removeEventListener("keydown", onKey);
+      // Hand focus back to whatever opened the dialog (the Reserve CTA).
+      opener?.focus();
     };
   }, [onClose]);
 

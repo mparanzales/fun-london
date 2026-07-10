@@ -231,9 +231,9 @@ export function VenueDetail({
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32 lg:max-w-6xl lg:px-8 lg:pt-10 lg:pb-24 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:items-start">
       {/* ── Hero ───────────────────────────────────────────────────── */}
       <div
-        // Sticky offset = DesktopNav h-16 + the root's lg:pt-10, derived via
-        // theme() so the hero stays level with the right column's start even
-        // if the nav height ever changes.
+        // Sticky offset = DesktopNav h-16 (64px) + the root's lg:pt-10
+        // (40px). The theme() calc documents the derivation but does NOT
+        // track desktop-nav.tsx — if the nav height changes, update this.
         className="relative w-full lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-2xl lg:overflow-hidden"
         style={{ aspectRatio: "4/3" }}
       >
@@ -645,8 +645,11 @@ export function VenueDetail({
                     className="w-4 h-4 shrink-0 text-muted-fg"
                     strokeWidth={2}
                   />
+                  {/* Reviews, hours and the full description ARE moat-gated
+                      for every venue, so this claim is always true. "Booking"
+                      is not promised — walk-ins have none. */}
                   <p className="text-[13px] text-muted-fg leading-snug">
-                    Reviews, hours and booking unlock with a free account.
+                    Reviews, hours and details unlock with a free account.
                   </p>
                   <Link
                     href={signInHref}
@@ -991,7 +994,10 @@ function VenueActions({
             href={signInHref}
             className="flex-1 hidden lg:inline-flex items-center justify-center px-5 py-3 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
-            Sign in to book
+            {/* "options", not "book": anon can't know a booking channel
+                exists — signed-in may honestly land on "Booking via the
+                venue". Never promise an action we can't deliver. */}
+            Sign in to see booking options
           </Link>
         </>
       ) : isReservable ? (
