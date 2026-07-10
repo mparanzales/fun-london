@@ -12,12 +12,13 @@ name: discover-venues
 #     / Square Meal / Hot Dinners / Harden's / Michelin / Good Food Guide /
 #     Condé Nast / Evening Standard / Guardian / Foodism / World's 50 Best),
 #     checked by Gemini 2.5 Flash with built-in Google Search
-# then Gemini writes the brand-voice editorial + Real Talk, and the venue is
-# AUTO-PUBLISHED to public.venues with its real editorial_sources (the maintainer's
-# call — no human gate; the strict 2-source gate is the guard).
+# then the venue is AUTO-PUBLISHED to public.venues with honest TEMPLATED
+# copy and editorial_sources: [] — Gemini acts ONLY as the 2-source publish
+# gate; it writes no editorial and no sources are persisted (provenance
+# honesty, after the fabricated-claims incident).
 #
 # All-Google + free: Google Places + Gemini (one personal-account key does
-# both validation-by-search and editorial). No Custom Search / no 3rd party.
+# the validation-by-search). No Custom Search / no 3rd party.
 #
 # Distinct from:
 #   • maintenance.yml (Tier 1) — keeps EXISTING venues fresh (daily).
@@ -36,7 +37,7 @@ jobs:
   discover-venues:
     name: discover + auto-publish venues
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write # for the failure-alert step to open/comment an issue
@@ -88,7 +89,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Alert on failure
-        if: failure()
+        # cancelled() covers timeout-minutes kills, which are NOT failure()
+        if: failure() || cancelled()
         uses: actions/github-script@v7
         with:
           script: |
