@@ -1,17 +1,15 @@
 "use client";
 
 // First-visit welcome: a one-time bottom sheet that invites a new (anonymous)
-// visitor to sign up and turn on location + notifications. Shown once per
+// visitor to sign up and turn on location. Shown once per
 // device (gated by fl.welcome.v1), never for signed-in users, and always
 // dismissible ("just browse") — the app stays usable without an account.
 //
 // Location capture stores coords in fl.geo.v1 for "near you" suggestions.
-// Notifications requests the browser permission now; delivery (web push) is a
-// later piece — signed-in users already get the weekly email digest.
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Bell, X, type LucideIcon } from "lucide-react";
+import { MapPin, X, type LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 const SEEN_KEY = "fl.welcome.v1";
@@ -24,7 +22,6 @@ export function WelcomeSheet({ signedIn }: { signedIn: boolean }) {
   const [open, setOpen] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [loc, setLoc] = useState<PermState>("idle");
-  const [notif, setNotif] = useState<PermState>("idle");
 
   useEffect(() => {
     setMounted(true);
@@ -96,19 +93,6 @@ export function WelcomeSheet({ signedIn }: { signedIn: boolean }) {
     );
   }
 
-  async function enableNotifications() {
-    if (!("Notification" in window)) {
-      setNotif("off");
-      return;
-    }
-    try {
-      const result = await Notification.requestPermission();
-      setNotif(result === "granted" ? "on" : "off");
-    } catch {
-      setNotif("off");
-    }
-  }
-
   if (!mounted || !open) return null;
 
   return createPortal(
@@ -150,13 +134,11 @@ export function WelcomeSheet({ signedIn }: { signedIn: boolean }) {
             state={loc}
             onEnable={enableLocation}
           />
-          <PermissionRow
-            icon={Bell}
-            title="Enable notifications"
-            body="What's on this week and new spots."
-            state={notif}
-            onEnable={enableNotifications}
-          />
+          {/* The notifications row was REMOVED (2026-07-10): it requested the
+              OS permission but no delivery stack exists (no service worker,
+              no web-push) — a hollow ask that burns the one chance browsers
+              give to prompt. Re-add it together with real Web Push delivery
+              (MASTER v2, P3). */}
         </div>
 
         <button
