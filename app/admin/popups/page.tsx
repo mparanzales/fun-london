@@ -1,10 +1,11 @@
-// /admin/popups — review surface for the autonomous pop-up radar.
+// /admin/popups — review surface for live pop-ups.
 //
-// The radar (scripts/discover-popups.ts) auto-publishes pop-ups to
-// public.events (source='popup'). This page is the maintainer's heads-up + control:
-// it lists every LIVE pop-up so she can see what the robot added, and a
-// one-tap "Hide" pulls any from the app (sets cancelled_at via a Server
-// Action, which is sticky against re-discovery).
+// Pop-ups arrive via the events pipeline's Eventbrite organizer
+// subscriptions (scripts/ingest-events.ts; the old Gemini radar is gone).
+// This page is the maintainer's heads-up + control: it lists every LIVE
+// pop-up so she can see what arrived, and a one-tap "Hide" pulls any from
+// the app (sets cancelled_at via a Server Action, which is sticky against
+// re-ingestion).
 //
 // Gated to admin emails (FL_ADMIN_EMAILS). The per-run additions are also
 // printed in the GitHub Actions run summary for each cron tick.
@@ -125,8 +126,10 @@ function EmptyState() {
         No live pop-ups yet
       </h2>
       <p className="text-xs text-muted-fg leading-relaxed">
-        The radar runs every 4 hours. Run <code>pnpm discover-popups:dry</code>{" "}
-        locally to preview what it would add.
+        Pop-ups arrive with the events ingest (every 4 hours) from the
+        Eventbrite organizers in <code>scripts/events-seed.ts</code>. Run{" "}
+        <code>pnpm ingest-events:dry</code> locally to preview what it would
+        add.
       </p>
     </div>
   );
