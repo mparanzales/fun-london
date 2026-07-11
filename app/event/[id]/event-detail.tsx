@@ -9,11 +9,11 @@ import {
   Calendar,
   Clock,
   Star,
-  MapPin,
   Globe,
   Phone,
 } from "lucide-react";
 import { EventActions } from "@/components/event-actions";
+import { MapTilePlaceholder } from "@/components/map-tile-placeholder";
 import { applyAffiliate } from "@/lib/affiliate";
 import { track } from "@/lib/analytics";
 import { displayEventPrice } from "@/lib/event-price";
@@ -29,9 +29,14 @@ import type { Event, Venue } from "@/lib/types";
 export function EventDetail({
   event,
   venue,
+  signedIn,
 }: {
   event: Event;
   venue: Venue | null;
+  // Anon gets card-level fields only (no sourceUrl/placeDetails). The
+  // desktop masthead CTA needs to know it's the ANON state so it can say
+  // "sign in" instead of the misleading "No ticket link yet".
+  signedIn: boolean;
 }) {
   const router = useRouter();
   const place = event.placeDetails;
@@ -77,10 +82,44 @@ export function EventDetail({
       place.phone ||
       (place.reviews && place.reviews.length > 0));
 
+  const signInHref = `/sign-in?return=${encodeURIComponent(`/event/${event.id}`)}`;
+
+  // The ticket CTA, rendered twice like the venue page's action row:
+  // inside the mobile fixed bar (lg:hidden) and as a static masthead
+  // element at lg. One definition, so the two stay identical.
+  const ticketCta = event.sourceUrl ? (
+    <a
+      href={ctaHref ?? event.sourceUrl}
+      target={isExternal ? "_blank" : undefined}
+      rel={isExternal ? "noopener noreferrer" : undefined}
+      onClick={() =>
+        track("event_ticket_click", {
+          id: event.id,
+          provider: isPopup ? "popup" : (ticketProvider ?? "unknown"),
+        })
+      }
+      className="block w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)] flex items-center justify-center gap-2"
+      style={{
+        background:
+          "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
+      }}
+    >
+      {ctaLabel}
+      {isExternal && <ExternalLink size={16} strokeWidth={2.25} aria-hidden />}
+    </a>
+  ) : (
+    <div className="w-full h-[52px] rounded-2xl bg-muted text-muted-fg text-[15px] font-bold flex items-center justify-center">
+      No ticket link yet
+    </div>
+  );
+
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-bg pb-32">
+    // Mobile: the max-w-md phone shell, unchanged. Desktop (lg+): the same
+    // two-column editorial spread as /venue — sticky clamped hero left,
+    // content right.
+    <div className="max-w-md mx-auto min-h-screen bg-bg pb-32 lg:max-w-6xl lg:px-8 lg:pt-10 lg:pb-24 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:items-start">
       {/* ── Hero ───────────────────────────────────────────────────── */}
-      <div className="relative w-full" style={{ aspectRatio: "4/3" }}>
+      <div className="relative w-full aspect-[4/3] lg:aspect-[4/5] lg:max-h-[calc(100vh-9rem)] lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-3xl lg:overflow-hidden">
         <Image
           src={event.imgUrl}
           alt={event.name}
@@ -92,7 +131,7 @@ export function EventDetail({
         <button
           onClick={() => router.back()}
           aria-label="Back"
-          className="absolute top-4 left-4 w-10 h-10 flex items-center justify-center"
+          className="absolute top-4 left-4 w-10 h-10 flex items-center justify-center lg:hidden"
         >
           <ArrowLeft
             size={24}
@@ -102,12 +141,12 @@ export function EventDetail({
         </button>
       </div>
 
-      <section className="px-5 pt-5">
+      <section className="px-5 pt-5 lg:px-0 lg:pt-0">
         {/* ── The event ──────────────────────────────────────────────── */}
-        <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg">
+        <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg lg:text-xs lg:tracking-[0.16em]">
           {eyebrow}
         </div>
-        <h1 className="text-[28px] font-extrabold tracking-tight text-heading leading-tight mt-1.5">
+        <h1 className="text-[28px] font-extrabold tracking-tight text-heading leading-tight mt-1.5 lg:text-5xl">
           {event.name}
         </h1>
         <div className="text-base font-semibold text-fg mt-2">
@@ -134,6 +173,23 @@ export function EventDetail({
           )}
         </div>
 
+        {/* Desktop masthead CTA — on mobile the same CTA lives in the fixed
+            bottom bar; at lg it would otherwise sit below the fold. Anon
+            holds no sourceUrl (moat), so instead of the misleading "No
+            ticket link yet" the honest desktop action is sign-in. */}
+        <div className="hidden lg:block mt-6">
+          {signedIn ? (
+            ticketCta
+          ) : (
+            <Link
+              href={signInHref}
+              className="flex w-full h-[52px] items-center justify-center rounded-2xl border border-fg/15 text-fg text-[15px] font-bold transition-colors lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Sign in to see ticket options
+            </Link>
+          )}
+        </div>
+
         {/* The event's OWN blurb — event-specific, in the brand voice. Omitted
             when we don't have one; never the venue's blurb dressed as the event
             (that lives under "The venue" below). */}
@@ -149,7 +205,7 @@ export function EventDetail({
         {/* ── The venue ── clearly separated venue context (rating, blurb, map,
             address, links, reviews). All from Google Places, facts only. */}
         {hasVenueBlock && place && (
-          <div className="mt-9">
+          <div className="mt-9 lg:mt-12 lg:border-t lg:border-fg/10 lg:pt-8">
             <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
               The venue
             </div>
@@ -190,7 +246,7 @@ export function EventDetail({
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Open in Google Maps"
-                className="relative block mt-4 h-28 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="relative block mt-4 h-28 lg:h-52 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {place.mapUrl ? (
                   <Image
@@ -201,10 +257,11 @@ export function EventDetail({
                     className="object-cover"
                   />
                 ) : (
-                  <span className="flex h-full items-center justify-center gap-2 bg-muted text-muted-fg">
-                    <MapPin className="w-5 h-5" strokeWidth={2} />
-                    <span className="text-sm font-medium">{event.area}</span>
-                  </span>
+                  <MapTilePlaceholder
+                    lat={place.lat}
+                    lng={place.lng}
+                    label={event.area}
+                  />
                 )}
               </a>
             )}
@@ -237,7 +294,7 @@ export function EventDetail({
                   href={place.website}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Globe className="w-4 h-4" strokeWidth={2} />
                   Visit website
@@ -246,7 +303,7 @@ export function EventDetail({
               {place.phone && (
                 <a
                   href={`tel:${place.phone}`}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Phone className="w-4 h-4" strokeWidth={2} />
                   Call venue
@@ -266,11 +323,11 @@ export function EventDetail({
                     Reviews from Google
                   </span>
                 </div>
-                <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-2 lg:mx-0 lg:px-0 lg:overflow-visible">
                   {place.reviews.map((r, i) => (
                     <div
                       key={i}
-                      className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5"
+                      className="min-w-[240px] max-w-[240px] rounded-2xl bg-muted px-4 py-3.5 lg:min-w-0 lg:max-w-none"
                     >
                       <div className="flex gap-0.5 mb-2">
                         {[1, 2, 3, 4, 5].map((s) => (
@@ -315,43 +372,15 @@ export function EventDetail({
         )}
       </section>
 
-      {/* ── Sticky bottom CTA ──────────────────────────────────────── */}
+      {/* ── Sticky bottom CTA — mobile only; at lg the masthead carries it. */}
       <div
-        className="fixed bottom-16 left-0 right-0 z-30 px-5 pb-3 pt-3 pointer-events-none"
+        className="fixed bottom-16 left-0 right-0 z-30 px-5 pb-3 pt-3 pointer-events-none lg:hidden"
         style={{
           background:
             "linear-gradient(to top, var(--fl-bg) 65%, transparent 100%)",
         }}
       >
-        <div className="max-w-md mx-auto pointer-events-auto">
-          {event.sourceUrl ? (
-            <a
-              href={ctaHref ?? event.sourceUrl}
-              target={isExternal ? "_blank" : undefined}
-              rel={isExternal ? "noopener noreferrer" : undefined}
-              onClick={() =>
-                track("event_ticket_click", {
-                  id: event.id,
-                  provider: isPopup ? "popup" : (ticketProvider ?? "unknown"),
-                })
-              }
-              className="block w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)] flex items-center justify-center gap-2"
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
-              }}
-            >
-              {ctaLabel}
-              {isExternal && (
-                <ExternalLink size={16} strokeWidth={2.25} aria-hidden />
-              )}
-            </a>
-          ) : (
-            <div className="w-full h-[52px] rounded-2xl bg-muted text-muted-fg text-[15px] font-bold flex items-center justify-center">
-              No ticket link yet
-            </div>
-          )}
-        </div>
+        <div className="max-w-md mx-auto pointer-events-auto">{ticketCta}</div>
       </div>
     </div>
   );

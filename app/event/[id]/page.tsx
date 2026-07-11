@@ -9,7 +9,8 @@ import {
 import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { EventDetail } from "./event-detail";
-import { AuthWall } from "@/components/auth-wall";
+import { DetailAuthWall } from "@/components/detail-auth-wall";
+import { DesktopNav } from "@/components/desktop-nav";
 
 // Force dynamic so changes from the events ingest cron show up
 // immediately on the detail page (no static cache).
@@ -96,8 +97,13 @@ export default async function EventDetailPage(props: {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <EventDetail event={event} venue={venue} />
-      <AuthWall
+      {/* Desktop-only top nav (hidden lg:block) — same treatment as the
+          venue route: laptop landers need a way into the app. */}
+      <DesktopNav />
+      <EventDetail event={event} venue={venue} signedIn={!!authUser} />
+      {/* Mobile: hard wall unchanged. Desktop: dismissable ("Just looking")
+          and re-surfaces every few minutes — same DetailAuthWall as /venue. */}
+      <DetailAuthWall
         signedIn={!!authUser}
         title={`Sign up to see ${event.name}`}
         backHref="/explore"

@@ -13,13 +13,13 @@ import {
   Globe,
   Heart,
   Lock,
-  MapPin,
   Phone,
   Plus,
   Share2,
   Star,
 } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
+import { MapTilePlaceholder } from "@/components/map-tile-placeholder";
 import { ReserveSheet } from "@/components/reserve-sheet";
 import { platformLabel, type ReserveTarget } from "@/lib/booking-link";
 import { shareOrCopy } from "@/lib/share";
@@ -702,12 +702,11 @@ export function VenueDetail({
                     className="object-cover"
                   />
                 ) : (
-                  <span className="flex h-full items-center justify-center gap-2 bg-muted text-muted-fg">
-                    <MapPin className="w-5 h-5" strokeWidth={2} />
-                    <span className="text-sm lg:text-base font-medium">
-                      {venue.neighbourhood}
-                    </span>
-                  </span>
+                  <MapTilePlaceholder
+                    lat={venue.lat}
+                    lng={venue.lng}
+                    label={venue.neighbourhood}
+                  />
                 )}
               </a>
             )}
