@@ -42,19 +42,24 @@ export function MapTilePlaceholder({
               toward the page surface. */}
           <span
             aria-hidden
-            className="absolute inset-0 hidden scale-110 bg-cover bg-center blur-[3px] [[data-theme=day]_&]:block"
+            className="absolute inset-0 hidden scale-110 bg-cover bg-center blur-[1.5px] [[data-theme=day]_&]:block"
             style={{
               backgroundImage: `url(https://a.basemaps.cartocdn.com/light_all/${ZOOM}/${tile.x}/${tile.y}@2x.png)`,
             }}
           />
           <span
             aria-hidden
-            className="absolute inset-0 hidden scale-110 bg-cover bg-center blur-[3px] [[data-theme=night]_&]:block"
+            className="absolute inset-0 hidden scale-110 bg-cover bg-center blur-[1.5px] [[data-theme=night]_&]:block"
             style={{
               backgroundImage: `url(https://a.basemaps.cartocdn.com/dark_all/${ZOOM}/${tile.x}/${tile.y}@2x.png)`,
             }}
           />
-          <span aria-hidden className="absolute inset-0 bg-bg/30" />
+          {/* 1.5px + /20: the street grid must ghost through (real map,
+              clearly a preview) — at 3px + /30 it read as failed-to-load,
+              which is the exact perception this component exists to kill.
+              "Preview, not working map" is carried structurally (static
+              frame, pin + label, credit line, no pan/zoom), not by blur. */}
+          <span aria-hidden className="absolute inset-0 bg-bg/20" />
         </>
       )}
       <span className="relative flex items-center gap-2 drop-shadow-sm">

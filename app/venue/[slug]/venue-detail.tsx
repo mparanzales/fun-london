@@ -110,12 +110,19 @@ function openSummary(state: OpenState): string {
 export function VenueDetail({
   venue,
   signedIn,
+  anonTeaser = null,
+  anonTags = [],
 }: {
   venue: Venue;
   // Anon visitors get card-level fields only (the moat). The right column
   // needs to know it's the ANON state — not "signed in, data unsynced" —
   // so it can render honest unlock prompts instead of eternal skeletons.
   signedIn: boolean;
+  // Server-derived, capped anon surface (lib/anon-teaser): a first-sentence
+  // teaser + max 3 tags. Shipped as separate props so mapVenuePreview stays
+  // the single choke point that blanks the full moat fields.
+  anonTeaser?: string | null;
+  anonTags?: string[];
 }) {
   const router = useRouter();
   const { isSaved, toggleSaved } = useSaved();
@@ -432,6 +439,32 @@ export function VenueDetail({
                 {label}
               </Link>
             ))}
+          </div>
+        )}
+
+        {/* Anon desktop: top-3 tags as a plain metadata line — deliberately
+            NOT the pill chips signed-in users get (those are Links with
+            hover states; an identical-looking chip that ignores clicks
+            reads as a broken site). Same info register as the eyebrow. */}
+        {!signedIn && anonTags.length > 0 && (
+          <p className="hidden lg:block mt-4 text-sm text-muted-fg select-none">
+            {anonTags.join(" · ")}
+          </p>
+        )}
+
+        {/* Anon desktop: the server-capped teaser, typeset exactly like the
+            signed-in description, with the sign-up pull in the "Read more"
+            slot where curiosity peaks. Never a fade/clamp — the full text
+            never reaches the client. */}
+        {!signedIn && anonTeaser && (
+          <div className="hidden lg:block mt-5">
+            <p className="text-base leading-relaxed text-fg">{anonTeaser}</p>
+            <Link
+              href={signInHref}
+              className="mt-1.5 inline-block rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Continue reading · free
+            </Link>
           </div>
         )}
 
