@@ -7,11 +7,15 @@ import "server-only";
 // Exposure is therefore per-page HTML only (scrape-metered), with no bulk
 // PostgREST path — see lib/anon-teaser.ts for the panel ruling.
 
-import { cache } from "react";
+import { requestMemo as cache } from "@/lib/request-memo";
 import { createServiceClient } from "@/lib/supabase/admin";
-import { deriveAnonTeaser, deriveAnonTags } from "@/lib/anon-teaser";
+import {
+  deriveAnonTeaser,
+  deriveAnonTags,
+  type AnonTeaser,
+} from "@/lib/anon-teaser";
 
-export type AnonVenueTeaser = { teaser: string | null; tags: string[] };
+export type AnonVenueTeaser = { teaser: AnonTeaser | null; tags: string[] };
 
 const EMPTY: AnonVenueTeaser = { teaser: null, tags: [] };
 
@@ -27,6 +31,10 @@ export const fetchAnonVenueTeaser = cache(
       .select("long_description, vibe_tags")
       .eq("slug", slug)
       .is("hidden_at", null)
+      // Gate parity with every anon preview fetcher: a teaser must never
+      // derive from a non-catalogue row (demo seeds have no place id),
+      // independent of caller ordering.
+      .not("google_place_id", "is", null)
       .maybeSingle();
     if (error || !data) return EMPTY;
     return {

@@ -118,14 +118,18 @@ export function EventDetail({
     // two-column editorial spread as /venue — sticky clamped hero left,
     // content right.
     <div className="max-w-md mx-auto min-h-screen bg-bg pb-32 lg:max-w-6xl lg:px-8 lg:pt-10 lg:pb-24 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:items-start">
-      {/* ── Hero ───────────────────────────────────────────────────── */}
+      {/* ── Hero ─────────────────────────────────────────────────────
+          Sticky offset = DesktopNav h-16 (64px) + the root's lg:pt-10
+          (40px). The theme() calc documents the derivation but does NOT
+          track desktop-nav.tsx — if the nav height ever changes, update
+          this AND the matching offset in venue-detail.tsx. */}
       <div className="relative w-full aspect-[4/3] lg:aspect-[4/5] lg:max-h-[calc(100vh-9rem)] lg:sticky lg:top-[calc(theme(spacing.16)+theme(spacing.10))] lg:rounded-3xl lg:overflow-hidden">
         <Image
           src={event.imgUrl}
           alt={event.name}
           fill
           priority
-          sizes="(max-width: 640px) 100vw, 640px"
+          sizes="(max-width: 1023px) 100vw, 520px"
           className="object-cover"
         />
         <button
@@ -253,7 +257,7 @@ export function EventDetail({
                     src={place.mapUrl}
                     alt={`Map of ${event.venueName}`}
                     fill
-                    sizes="(max-width: 640px) 100vw, 640px"
+                    sizes="(max-width: 1023px) 100vw, 520px"
                     className="object-cover"
                   />
                 ) : (

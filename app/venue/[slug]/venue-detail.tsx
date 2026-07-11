@@ -111,6 +111,7 @@ export function VenueDetail({
   venue,
   signedIn,
   anonTeaser = null,
+  anonTeaserTruncated = false,
   anonTags = [],
 }: {
   venue: Venue;
@@ -121,7 +122,11 @@ export function VenueDetail({
   // Server-derived, capped anon surface (lib/anon-teaser): a first-sentence
   // teaser + max 3 tags. Shipped as separate props so mapVenuePreview stays
   // the single choke point that blanks the full moat fields.
+  // `anonTeaserTruncated` gates the "Continue reading" pull: when a short
+  // description fit whole, nothing was cut, and claiming more exists would
+  // be false (honest-copy rule).
   anonTeaser?: string | null;
+  anonTeaserTruncated?: boolean;
   anonTags?: string[];
 }) {
   const router = useRouter();
@@ -270,7 +275,7 @@ export function VenueDetail({
                 }
                 fill
                 priority={i === 0}
-                sizes="(max-width: 640px) 100vw, 640px"
+                sizes="(max-width: 1023px) 100vw, 520px"
                 // Keyless Storage URLs optimize fine; only a legacy keyed
                 // Google URL (pre-mirror) needs the optimizer bypass.
                 unoptimized={src.includes("googleapis.com")}
@@ -459,12 +464,16 @@ export function VenueDetail({
         {!signedIn && anonTeaser && (
           <div className="hidden lg:block mt-5">
             <p className="text-base leading-relaxed text-fg">{anonTeaser}</p>
-            <Link
-              href={signInHref}
-              className="mt-1.5 inline-block rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              Continue reading · free
-            </Link>
+            {/* Only when text was actually cut — a whole-fit description is
+                complete, and "Continue reading" under it would be a lie. */}
+            {anonTeaserTruncated && (
+              <Link
+                href={signInHref}
+                className="mt-1.5 inline-block rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Continue reading · free
+              </Link>
+            )}
           </div>
         )}
 
@@ -731,7 +740,7 @@ export function VenueDetail({
                     src={venue.mapUrl}
                     alt={`Map of ${venue.name}`}
                     fill
-                    sizes="(max-width: 640px) 100vw, 640px"
+                    sizes="(max-width: 1023px) 100vw, 520px"
                     className="object-cover"
                   />
                 ) : (

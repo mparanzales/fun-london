@@ -36,7 +36,7 @@ export async function generateMetadata(props: {
   // content being taken away.)
   const { teaser } = await fetchAnonVenueTeaser(params.slug);
   const description =
-    teaser ||
+    teaser?.text ||
     `${venue.name} in ${venue.neighbourhood}, London. Plan your night and book a table on Fun London.`;
   const url = `${SITE_URL}/venue/${venue.slug}`;
 
@@ -118,7 +118,8 @@ export default async function VenuePage(props: {
       <VenueDetail
         venue={venue}
         signedIn={!!authUser}
-        anonTeaser={anonExtras?.teaser ?? null}
+        anonTeaser={anonExtras?.teaser?.text ?? null}
+        anonTeaserTruncated={anonExtras?.teaser?.truncated ?? false}
         anonTags={anonExtras?.tags ?? []}
       />
       {/* Mobile: the hard wall, unchanged. Desktop: dismissable ("Just
