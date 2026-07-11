@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchVenueBySlug, fetchVenuePreviewBySlug } from "@/lib/queries";
+import { fetchAnonVenueTeaser } from "@/lib/venue-teaser";
 import { getAuthUser } from "@/lib/auth";
 import { SITE_URL } from "@/lib/config";
 import { VenueDetail } from "./venue-detail";
-import { AuthWall } from "@/components/auth-wall";
+import { DetailAuthWall } from "@/components/detail-auth-wall";
+import { DesktopNav } from "@/components/desktop-nav";
 
 // Top-level route OUTSIDE the (main) route group on purpose — that means
 // no bottom nav, no max-w-md shell wrapper. The detail screen handles
@@ -27,8 +29,14 @@ export async function generateMetadata(props: {
   if (!venue) return { title: "Venue not found" };
 
   const title = `${venue.name}, ${venue.neighbourhood}, London`;
+  // The SAME 140-char teaser string the anon page renders — one string, one
+  // exposure decision. (venue.longDescription here was dead code: the
+  // preview fetcher blanks it, so every meta description was the generic
+  // fallback — and a SERP snippet that then vanished on-page read as
+  // content being taken away.)
+  const { teaser } = await fetchAnonVenueTeaser(params.slug);
   const description =
-    venue.longDescription?.slice(0, 200) ||
+    teaser ||
     `${venue.name} in ${venue.neighbourhood}, London. Plan your night and book a table on Fun London.`;
   const url = `${SITE_URL}/venue/${venue.slug}`;
 
@@ -56,6 +64,10 @@ export default async function VenuePage(props: {
     ? await fetchVenueBySlug(params.slug)
     : await fetchVenuePreviewBySlug(params.slug);
   if (!venue) notFound();
+
+  // Anon teaser + top-3 tags (server-derived, capped — see lib/anon-teaser).
+  // Signed-in users get the full fields on the venue object instead.
+  const anonExtras = authUser ? null : await fetchAnonVenueTeaser(params.slug);
 
   // Structured data → rich results in Google (rating stars, price, area).
   // Only assert aggregateRating when we actually hold a rating + count.
@@ -99,10 +111,23 @@ export default async function VenuePage(props: {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <VenueDetail venue={venue} />
-      <AuthWall
+      {/* Desktop-only top nav (hidden lg:block) — visitors landing here from
+          Google/shared links on a laptop need a way into the rest of the app.
+          Mobile keeps the immersive no-chrome layout. */}
+      <DesktopNav />
+      <VenueDetail
+        venue={venue}
         signedIn={!!authUser}
-        title={`Sign up to see ${venue.name}`}
+        anonTeaser={anonExtras?.teaser ?? null}
+        anonTags={anonExtras?.tags ?? []}
+      />
+      {/* Mobile: the hard wall, unchanged. Desktop: dismissable ("Just
+          looking") and re-surfaces every few minutes — Maria's funnel
+          call, 2026-07-10. "Full guide", not "see": with the teaser, tags,
+          photos and rating visible, "see" would overclaim what's locked. */}
+      <DetailAuthWall
+        signedIn={!!authUser}
+        title={`Sign up for the full guide to ${venue.name}`}
         backHref="/explore"
       />
     </>

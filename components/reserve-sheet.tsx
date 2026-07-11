@@ -4,7 +4,7 @@
 // venue's booking platform pre-filled with that choice — and route the app
 // to the "Did you book?" page so the user can log it afterward.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import {
@@ -36,6 +36,55 @@ export function ReserveSheet({
   const [time, setTime] = useState("20:00");
   const [party, setParty] = useState(2);
 
+  // The element declares role="dialog" aria-modal="true", so implement the
+  // actual dialog contract: body scroll lock, Esc to close, focus moved
+  // into the sheet, and Tab cycling within it. Behavior only — zero pixel
+  // change on any viewport.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dateRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const prevOverflow = document.body.style.overflow;
+    const prevPadRight = document.body.style.paddingRight;
+    // Compensate for the scrollbar the lock removes, or the page shifts
+    // sideways on desktops with a non-overlay scrollbar.
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbar > 0) document.body.style.paddingRight = `${scrollbar}px`;
+    dateRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+        'button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPadRight;
+      document.removeEventListener("keydown", onKey);
+      // Hand focus back to whatever opened the dialog (the Reserve CTA).
+      opener?.focus();
+    };
+  }, [onClose]);
+
   const onContinue = () => {
     const url = buildReserveUrl(target, { date, time, party });
     // Outbound revenue signal: the click that affiliate commission is earned on.
@@ -63,11 +112,14 @@ export function ReserveSheet({
       role="dialog"
       aria-modal="true"
       aria-label={`Reserve at ${venue.name}`}
-      className="fixed inset-0 z-50 flex items-end justify-center"
+      // Mobile: bottom sheet. Desktop: centered modal — a sheet glued to the
+      // bottom of a 900px viewport is the loudest unadapted-mobile tell.
+      className="fixed inset-0 z-50 flex items-end lg:items-center justify-center"
     >
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
-        className="relative w-full max-w-md bg-bg rounded-t-3xl border-t border-border p-5"
+        ref={panelRef}
+        className="relative w-full max-w-md bg-bg rounded-t-3xl border-t border-border p-5 lg:rounded-3xl lg:border lg:shadow-elev"
         style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
       >
         <div className="flex items-center justify-between mb-1">
@@ -93,6 +145,7 @@ export function ReserveSheet({
               Date
             </div>
             <input
+              ref={dateRef}
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}

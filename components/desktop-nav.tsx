@@ -20,7 +20,10 @@ export function DesktopNav() {
   const pathname = usePathname();
   return (
     <nav className="hidden lg:block sticky top-0 z-40 bg-bg/85 backdrop-blur border-b border-border">
-      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      {/* px-8 matches the detail pages' lg:px-8 grid, so the wordmark
+          lines up with the hero's left edge and "You" with the content's
+          right edge — off-grid nav is what makes a band read as bolted-on. */}
+      <div className="max-w-6xl mx-auto px-8 h-16 flex items-center justify-between">
         <Link
           href="/explore"
           className="text-2xl font-extrabold lowercase tracking-tight"
@@ -30,7 +33,7 @@ export function DesktopNav() {
           <span className="text-heading">London</span>
         </Link>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           {LINKS.map((l) => {
             const active = pathname.startsWith(l.href);
             return (
@@ -41,7 +44,7 @@ export function DesktopNav() {
                 className={cn(
                   "px-3.5 py-2 rounded-full text-sm font-semibold transition-colors",
                   active
-                    ? "text-heading"
+                    ? "text-heading bg-muted"
                     : "text-muted-fg hover:text-fg hover:bg-muted",
                 )}
               >
