@@ -42,6 +42,12 @@ export function ReserveSheet({
   // change on any viewport.
   const panelRef = useRef<HTMLDivElement>(null);
   const dateRef = useRef<HTMLInputElement>(null);
+  // onClose is usually an inline arrow in the parent — a new identity every
+  // parent render. Reading it through a ref lets the dialog effect run
+  // exactly once per open; keyed on onClose it re-ran on unrelated parent
+  // renders, re-stealing focus to the date input mid-form (review finding).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     const opener =
       document.activeElement instanceof HTMLElement
@@ -57,7 +63,7 @@ export function ReserveSheet({
     dateRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !panelRef.current) return;
@@ -83,7 +89,7 @@ export function ReserveSheet({
       // Hand focus back to whatever opened the dialog (the Reserve CTA).
       opener?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   const onContinue = () => {
     const url = buildReserveUrl(target, { date, time, party });

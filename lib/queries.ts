@@ -15,6 +15,7 @@
 // Phase 3 after auth lands.
 // ─────────────────────────────────────────────────────────────────────────
 
+import { requestMemo as reactCache } from "@/lib/request-memo";
 import { createClient } from "@/lib/supabase/server";
 import { haversineKm } from "@/lib/geo";
 import { rankRowsByTaste } from "@/lib/taste-feed";
@@ -830,40 +831,46 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
 // fields (long_description, editorial_sources, creator_coverage, critical_flags,
 // booking_links, phone, website_url, instagram_handle, address, google_place_id,
 // opening_hours) never reach the anonymous client. The AuthWall covers the rest.
-export async function fetchVenuePreviewBySlug(
-  slug: string,
-): Promise<Venue | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("venues")
-    .select(VENUE_CARD_COLUMNS)
-    .eq("slug", slug)
-    .not("google_place_id", "is", null)
-    .is("hidden_at", null)
-    .not("img_url", "ilike", "%unsplash%")
-    .neq("img_url", "")
-    .maybeSingle();
-  if (error)
-    throw new Error(`fetchVenuePreviewBySlug(${slug}): ${error.message}`);
-  return data ? mapVenuePreview(data as VenueCardRow) : null;
-}
+// cache(): generateMetadata + the page component both call this per anon view;
+// per-request memo makes that one DB round-trip (same pattern as
+// fetchAnonVenueTeaser). supabase-js does not dedupe on its own.
+export const fetchVenuePreviewBySlug = reactCache(
+  async (slug: string): Promise<Venue | null> => {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("venues")
+      .select(VENUE_CARD_COLUMNS)
+      .eq("slug", slug)
+      .not("google_place_id", "is", null)
+      .is("hidden_at", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .maybeSingle();
+    if (error)
+      throw new Error(`fetchVenuePreviewBySlug(${slug}): ${error.message}`);
+    return data ? mapVenuePreview(data as VenueCardRow) : null;
+  },
+);
 
 // By-id variant — used for the linked venue card on the event detail page so a
 // signed-out visitor never receives that venue's moat fields either.
-export async function fetchVenuePreviewById(id: string): Promise<Venue | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("venues")
-    .select(VENUE_CARD_COLUMNS)
-    .eq("id", id)
-    .not("google_place_id", "is", null)
-    .is("hidden_at", null)
-    .not("img_url", "ilike", "%unsplash%")
-    .neq("img_url", "")
-    .maybeSingle();
-  if (error) throw new Error(`fetchVenuePreviewById(${id}): ${error.message}`);
-  return data ? mapVenuePreview(data as VenueCardRow) : null;
-}
+export const fetchVenuePreviewById = reactCache(
+  async (id: string): Promise<Venue | null> => {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("venues")
+      .select(VENUE_CARD_COLUMNS)
+      .eq("id", id)
+      .not("google_place_id", "is", null)
+      .is("hidden_at", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .maybeSingle();
+    if (error)
+      throw new Error(`fetchVenuePreviewById(${id}): ${error.message}`);
+    return data ? mapVenuePreview(data as VenueCardRow) : null;
+  },
+);
 
 // Start of "today" in Europe/London, returned as a UTC Date. Uses Intl to read
 // London's wall-clock for `now` (handles GMT/BST automatically) and derives the
@@ -1104,19 +1111,23 @@ export async function fetchEventById(id: string): Promise<Event | null> {
 // Card-level preview of a SINGLE event for the signed-out detail page. Same
 // gates as fetchEventById but selects only EVENT_CARD_COLUMNS — no source_url
 // or description reaches the anonymous client.
-export async function fetchEventPreviewById(id: string): Promise<Event | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("events")
-    .select(EVENT_CARD_COLUMNS)
-    .eq("id", id)
-    .is("cancelled_at", null)
-    .not("img_url", "ilike", "%unsplash%")
-    .neq("img_url", "")
-    .maybeSingle();
-  if (error) throw new Error(`fetchEventPreviewById(${id}): ${error.message}`);
-  return data ? mapEventPreview(data as EventCardRow) : null;
-}
+// cache(): generateMetadata + the page both call this per anon view.
+export const fetchEventPreviewById = reactCache(
+  async (id: string): Promise<Event | null> => {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("events")
+      .select(EVENT_CARD_COLUMNS)
+      .eq("id", id)
+      .is("cancelled_at", null)
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "")
+      .maybeSingle();
+    if (error)
+      throw new Error(`fetchEventPreviewById(${id}): ${error.message}`);
+    return data ? mapEventPreview(data as EventCardRow) : null;
+  },
+);
 
 /**
  * Returns the list of unique neighbourhoods present in `venues`.
