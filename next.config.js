@@ -36,6 +36,10 @@ const nextConfig = {
       // discovery pull host their posters on images.universe.com
       // rather than the s1.ticketm.net CDN.
       { protocol: "https", hostname: "images.universe.com" },
+      // Eventbrite's event-artwork CDN — organizer-uploaded posters for
+      // events ingested via Eventbrite subscriptions (stays in sync with
+      // ALLOWED_IMG_HOSTS in scripts/ingest-events.ts).
+      { protocol: "https", hostname: "img.evbuc.com" },
     ],
   },
 };

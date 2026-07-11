@@ -33,7 +33,15 @@ export type EventSource =
 export type EventSubscription =
   | {
       source: "eventbrite";
-      venueSlug: string; // matches scripts/venues-seed.ts slug
+      // Catalogue-venue subscription: identity (name/area/photo fallback)
+      // resolves from our venues row by slug.
+      venueSlug?: string; // matches scripts/venues-seed.ts slug
+      // Organizer-first (pop-up) subscription: no catalogue venue. The
+      // curator supplies the display identity when adding the organizer —
+      // both fields required when venueSlug is absent. This replaced the
+      // Gemini pop-up radar: real organizers' real events, hand-picked.
+      venueName?: string;
+      area?: string;
       eventbriteOrganizerId?: string; // Eventbrite's "organizer" id (preferred)
       eventbriteVenueId?: string; // Eventbrite venue id (fallback)
       defaultCategory: EventCategory; // mapped onto rows we ingest
@@ -89,6 +97,24 @@ export const EVENT_SUBSCRIPTIONS: EventSubscription[] = [
       "Ronnie's tours through Ticketmaster for headline acts; weeknight " +
       "slots are direct via ronniescotts.co.uk. A venue-site scrape may " +
       "complement this later.",
+  },
+  // ── Pop-up organizers via Eventbrite (replaced the Gemini radar) ──
+  // Rule: only organizers a curator has actually vetted. Every field
+  // below is real data — the organizer id was resolved against the live
+  // API and the event verified on eventbrite.co.uk before adding.
+  {
+    source: "eventbrite",
+    // Organizer-first: the supper club runs at 64 Brick Ln, not a
+    // catalogue venue.
+    venueName: "Vegan Yes, 64 Brick Lane",
+    area: "Brick Lane",
+    // Chef Mauro — Italian x Korean fusion vegan supper club. Verified
+    // live 2026-07-11: GET /v3/organizers/15216598761/events → 1 live
+    // event ("Supper Club By Vegan Yes", 30 Jul).
+    eventbriteOrganizerId: "15216598761",
+    defaultCategory: "Food",
+    notes: "First Eventbrite subscription — proof the adapter works end " +
+      "to end. Maria reviews/expands the organizer list.",
   },
   // ── Future subscriptions to consider once each provider is wired ──
   //

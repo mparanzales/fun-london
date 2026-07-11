@@ -112,6 +112,10 @@ const ALLOWED_IMG_HOSTS = [
   "places.googleapis.com",
   "lh3.googleusercontent.com",
   "images.universe.com",
+  // Eventbrite's event-artwork CDN — the organizer's own poster for the
+  // specific event (real, not stock; the no-logos rule was about generic
+  // brand marks standing in for events they don't depict).
+  "img.evbuc.com",
 ];
 
 // Returns the URL only if its host is one the app can actually render;
@@ -227,14 +231,173 @@ type FetchedEvent = {
   venue_area?: string | null;
 };
 
+// Eventbrite killed platform-wide event search in Feb 2020 — the v3 API
+// only lists events per ORGANIZER or per VENUE. So this adapter is
+// subscription-shaped by necessity (and by taste: a curator picks whose
+// events we trust, replacing the Gemini pop-up radar with real data).
+// Both endpoints verified live 2026-07-11 with the account's private
+// token: /v3/organizers/{id}/events/?status=live works for arbitrary
+// PUBLIC organizers, not just our own.
 async function fetchEventbrite(
-  _sub: Extract<EventSubscription, { source: "eventbrite" }>,
+  sub: Extract<EventSubscription, { source: "eventbrite" }>,
 ): Promise<FetchedEvent[]> {
-  // TODO(eventbrite-adapter): wire to Eventbrite Search API once
-  // EVENTBRITE_PRIVATE_TOKEN is in .env.local + GitHub Actions secrets.
-  // Endpoint: GET https://www.eventbriteapi.com/v3/organizations/<id>/events
-  // Filter: start_date.range_start=now, range_end=+14d.
-  return [];
+  const token = process.env.EVENTBRITE_PRIVATE_TOKEN;
+  if (!token) {
+    throw new Error(
+      "EVENTBRITE_PRIVATE_TOKEN missing — adapter requires it. Add to " +
+        ".env.local (local) and GitHub Actions secrets (cron).",
+    );
+  }
+
+  const path = sub.eventbriteOrganizerId
+    ? `organizers/${sub.eventbriteOrganizerId}/events/`
+    : sub.eventbriteVenueId
+      ? `venues/${sub.eventbriteVenueId}/events/`
+      : null;
+  if (!path) {
+    console.error(
+      `  ! eventbrite sub for "${sub.venueSlug ?? sub.venueName}" has ` +
+        "neither eventbriteOrganizerId nor eventbriteVenueId — skipping",
+    );
+    return [];
+  }
+
+  const horizon = new Date();
+  horizon.setDate(horizon.getDate() + EVENT_HORIZON_DAYS);
+
+  // Live (public, upcoming) events only, soonest first. The endpoint
+  // rejects page_size ("Unknown parameter" — learned from a live 400);
+  // its default page (50) is far more than any single organizer/venue
+  // runs inside the horizon. If that ever changes, follow
+  // pagination.continuation.
+  const params = new URLSearchParams({
+    status: "live",
+    order_by: "start_asc",
+    expand: "ticket_availability",
+  });
+  const url = `https://www.eventbriteapi.com/v3/${path}?${params}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Eventbrite ${res.status}: ${await res.text()}`);
+  }
+  const json = (await res.json()) as EventbriteEventsResponse;
+
+  // A truncated fetch would make the cancellation pass read absent-but-live
+  // events as "removed by the organizer". Fail loud instead of guessing —
+  // implement pagination.continuation if an organizer ever exceeds a page.
+  if (json.pagination?.has_more_items) {
+    throw new Error(
+      "Eventbrite returned more than one page — pagination.continuation " +
+        "not implemented; refusing to run against a truncated event set",
+    );
+  }
+
+  return (json.events ?? [])
+    .filter((e) => {
+      const start = e.start?.utc ? new Date(e.start.utc) : null;
+      return start !== null && start <= horizon;
+    })
+    .map((e) => ebToFetched(e, sub.defaultCategory))
+    .filter((e): e is FetchedEvent => e !== null);
+}
+
+// ── Eventbrite response types (subset of what we actually read) ────────
+
+type EventbriteEvent = {
+  id: string;
+  url?: string;
+  name?: { text?: string };
+  description?: { text?: string };
+  start?: { utc?: string; local?: string };
+  logo?: { original?: { url?: string }; url?: string };
+  ticket_availability?: {
+    is_sold_out?: boolean;
+    is_free?: boolean;
+    minimum_ticket_price?: { major_value?: string; currency?: string };
+  };
+};
+
+type EventbriteEventsResponse = {
+  events?: EventbriteEvent[];
+  pagination?: { has_more_items?: boolean; continuation?: string };
+};
+
+// Direct status check for one Eventbrite event. Used to CONFIRM a
+// cancellation before stamping it: set-difference against one
+// subscription's fetch can misread rows as "removed" when two
+// subscriptions share a venueName or a fetch was somehow partial, and a
+// wrong cancelled_at is permanent (upserts never clear it). Fail-SAFE:
+// any doubt (missing token, rate limit, network) → treat as still live
+// and skip the cancel this run; only a definitive gone (404) or a
+// non-live status confirms.
+async function eventbriteStillLive(sourceId: string): Promise<boolean> {
+  const token = process.env.EVENTBRITE_PRIVATE_TOKEN;
+  if (!token) return true;
+  try {
+    const res = await fetch(
+      `https://www.eventbriteapi.com/v3/events/${sourceId}/`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (res.status === 404) return false; // definitively gone
+    if (!res.ok) return true; // 429/5xx — can't confirm, don't cancel
+    const json = (await res.json()) as { status?: string };
+    return json.status === "live";
+  } catch {
+    return true; // network doubt — don't cancel
+  }
+}
+
+function ebToFetched(
+  e: EventbriteEvent,
+  category: string,
+): FetchedEvent | null {
+  const name = e.name?.text?.trim();
+  const startUtc = e.start?.utc;
+  if (!name || !startUtc) return null;
+
+  // start.local is "2026-07-30T19:00:00" — reuse the shared HH:mm → "7:00 PM"
+  // formatter on its time part.
+  const localTime = e.start?.local?.split("T")[1] ?? "";
+  const timeLabel = localTime ? formatTimeLabel(localTime) : "Time TBD";
+
+  const ta = e.ticket_availability;
+  const minPrice = ta?.minimum_ticket_price;
+  const minVal = Number(minPrice?.major_value);
+  const cur =
+    minPrice?.currency === "GBP"
+      ? "£"
+      : minPrice?.currency === "USD"
+        ? "$"
+        : (minPrice?.currency ?? "");
+  const price =
+    ta?.is_free || (minPrice && minVal === 0)
+      ? "Free"
+      : minPrice?.major_value && isFinite(minVal)
+        ? `From ${cur}${minVal % 1 === 0 ? minVal.toFixed(0) : minPrice.major_value}`
+        : "Tickets via Eventbrite";
+
+  return {
+    source_id: e.id,
+    source_url: e.url ?? "",
+    name,
+    starts_at: startUtc,
+    time_label: timeLabel,
+    price,
+    // Eventbrite's format taxonomy is unreliable; the subscription's
+    // curated defaultCategory is the honest label.
+    category,
+    // The organizer's own event artwork — real, not stock. Both variants
+    // were live-verified on img.evbuc.com (the cdn.evbuc.com origin is
+    // URL-encoded INSIDE the path); try each so a host change in one
+    // variant can't silently zero the adapter's output.
+    img_url:
+      safeImageUrl(e.logo?.original?.url) || safeImageUrl(e.logo?.url),
+    // Organizer-written copy — real words from the person running it.
+    description: e.description?.text?.trim() || null,
+    sold_out: ta?.is_sold_out ?? false,
+  };
 }
 
 async function fetchTicketmaster(
@@ -517,7 +680,16 @@ async function processSubscription(sub: EventSubscription): Promise<{
   upserted: number;
   cancelled: number;
 }> {
-  console.log(`\n→ ${sub.source} · ${sub.venueSlug}`);
+  // Organizer-first subscriptions (pop-ups at non-catalogue addresses)
+  // have no venueSlug: identity comes from the curated venueName/area on
+  // the subscription, venue_id stays null (the schema allows it for
+  // exactly this), and there's no venue-photo fallback — the event needs
+  // its own real poster or it's skipped.
+  const organizerFirst =
+    sub.source === "eventbrite" && !sub.venueSlug;
+  console.log(
+    `\n→ ${sub.source} · ${sub.venueSlug ?? `organizer-first: ${sub.source === "eventbrite" ? sub.venueName : ""}`}`,
+  );
 
   // Lookup venue identity + display fields once per subscription. We
   // need neighbourhood (→ events.area) and img_url (→ events.img_url
@@ -526,7 +698,16 @@ async function processSubscription(sub: EventSubscription): Promise<{
   let venueName: string | null = null;
   let venueArea: string | null = null;
   let venueImgUrl: string | null = null;
-  if (supabase) {
+  if (organizerFirst && sub.source === "eventbrite") {
+    venueName = sub.venueName ?? null;
+    venueArea = sub.area ?? null;
+    if (!venueName || !venueArea) {
+      console.error(
+        "  ! organizer-first eventbrite sub needs BOTH venueName and area — skipping",
+      );
+      return { fetched: 0, upserted: 0, cancelled: 0 };
+    }
+  } else if (supabase) {
     const { data, error } = await supabase
       .from("venues")
       .select("id, name, neighbourhood, img_url")
@@ -560,9 +741,11 @@ async function processSubscription(sub: EventSubscription): Promise<{
   }
 
   if (!supabase) throw new Error("Supabase client not initialised");
-  if (!venueId || !venueName || !venueArea) {
+  // venueId is legitimately null for organizer-first subs; name + area
+  // are required either way.
+  if ((!organizerFirst && !venueId) || !venueName || !venueArea) {
     throw new Error(
-      `Internal: venue lookup didn't populate required fields for ${sub.venueSlug}`,
+      `Internal: venue lookup didn't populate required fields for ${sub.venueSlug ?? venueName}`,
     );
   }
 
@@ -626,22 +809,41 @@ async function processSubscription(sub: EventSubscription): Promise<{
 
   let cancelled = 0;
   if (fetched.length > 0) {
-    const { data: existing, error: existErr } = await supabase
+    // Scope to THIS subscription's rows. Catalogue subs own a venue_id;
+    // organizer-first rows have venue_id null (`.eq(null)` would silently
+    // match nothing) so they're scoped by their curated venue_name.
+    let existingQuery = supabase
       .from("events")
       .select("id, source_id")
       .eq("source", sub.source)
-      .eq("venue_id", venueId)
       .gte("starts_at", nowIso)
       .is("cancelled_at", null);
+    existingQuery = organizerFirst
+      ? existingQuery.is("venue_id", null).eq("venue_name", venueName)
+      : existingQuery.eq("venue_id", venueId);
+    const { data: existing, error: existErr } = await existingQuery;
 
     if (existErr) {
       throw new Error(`cancellation lookup failed: ${existErr.message}`);
     }
 
     const fetchedSourceIds = new Set(fetched.map((e) => e.source_id));
-    const toCancel = (existing ?? []).filter(
+    let toCancel = (existing ?? []).filter(
       (e) => !fetchedSourceIds.has(e.source_id),
     );
+
+    // Eventbrite rows: absence from one sub's fetch is only a HINT (a
+    // second sub at the same venueName, or a partial fetch, would look
+    // identical) — and cancelled_at is permanent. Confirm each candidate
+    // directly against the API; doubt means keep it live this run.
+    if (sub.source === "eventbrite" && toCancel.length > 0) {
+      const confirmed: typeof toCancel = [];
+      for (const row of toCancel) {
+        if (!(await eventbriteStillLive(row.source_id))) confirmed.push(row);
+        else console.log(`  · ${row.source_id} still live upstream — kept`);
+      }
+      toCancel = confirmed;
+    }
 
     if (toCancel.length > 0) {
       const { error: cancelErr } = await supabase
@@ -821,6 +1023,11 @@ async function main() {
 
   if (runCurated) {
     for (const sub of EVENT_SUBSCRIPTIONS) {
+      // The de-dupe set only protects against the TICKETMASTER London
+      // discovery pull re-ingesting a subscription's event — other
+      // providers' ids can't collide with it, so skipping them here
+      // avoids a pointless duplicate API call per sub per run.
+      if (sub.source !== "ticketmaster") continue;
       try {
         const fetched = await dispatchFetch(sub);
         for (const e of fetched) subscriptionSourceIds.add(e.source_id);
@@ -839,7 +1046,12 @@ async function main() {
       } catch (err) {
         passFailures += 1;
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`  ✗ FAILED ${sub.source}/${sub.venueSlug}: ${msg}`);
+        console.error(
+          `  ✗ FAILED ${sub.source}/${
+            sub.venueSlug ??
+            (sub.source === "eventbrite" ? sub.venueName : "?")
+          }: ${msg}`,
+        );
       }
     }
   }
