@@ -24,22 +24,32 @@ export const TEASER_MAX = 140;
 // than a mid-sentence cut.
 const SENTENCE_MAX = 160;
 
+// Every truncated teaser trails off with an ellipsis — Maria's call
+// (2026-07-11): the dots are the signal that there IS more behind the
+// sign-up. Trailing sentence punctuation is stripped first so we never
+// render ".…". The one honest exception: when the whole description fits
+// the cap, nothing is missing, so no dots.
+function trailOff(fragment: string): string {
+  return `${fragment.trim().replace(/[.!?…]+$/, "")}…`;
+}
+
 export function deriveAnonTeaser(
   longDescription: string | null | undefined,
 ): string | null {
   const text = (longDescription ?? "").trim();
   if (!text || TEMPLATE_RE.test(text)) return null;
+  // Whole description fits the cap → it IS the teaser, nothing withheld.
+  if (text.length <= SENTENCE_MAX) return text;
   // Prefer a COMPLETE sentence (or two short ones) ending within 160 chars
   // — a full clause with a concrete fact hooks; a mid-thought cut reads as
   // withholding. The 60-char minimum skips abbreviation false-ends
   // ("St. John") for typical openers.
   const sentence = text.match(/^[\s\S]{60,159}?[.!?](?=\s|$)/);
-  if (sentence) return sentence[0].trim();
-  if (text.length <= SENTENCE_MAX) return text;
-  // Fallback: word boundary before the cap + a real ellipsis. Never a CSS
-  // clamp/fade — the full text must never reach the client.
+  if (sentence) return trailOff(sentence[0]);
+  // Fallback: word boundary before the cap. Never a CSS clamp/fade — the
+  // full text must never reach the client.
   const cut = text.slice(0, TEASER_MAX).replace(/\s+\S*$/, "");
-  return `${cut.trim()} …`;
+  return trailOff(cut);
 }
 
 // Top 3 of the venue's 20-60 tags: enough signal to read the vibe, too

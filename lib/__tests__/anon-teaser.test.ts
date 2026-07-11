@@ -25,28 +25,29 @@ describe("deriveAnonTeaser (anon moat surface)", () => {
     expect(deriveAnonTeaser(undefined)).toBeNull();
   });
 
-  it("returns a complete first sentence when it ends within 160 chars", () => {
+  it("trails a truncated first sentence with dots, stripping its full stop", () => {
     const desc =
       "Hand-rolled pasta made in the window since morning, eaten at the counter with a glass of house red for under a tenner. " +
       "The queue is the price of admission and everyone in it knows.";
     const teaser = deriveAnonTeaser(desc)!;
-    expect(teaser).toMatch(/tenner\.$/);
-    expect(teaser.length).toBeLessThanOrEqual(160);
+    // Maria's call: the dots ARE the there-is-more signal.
+    expect(teaser).toMatch(/tenner…$/);
+    expect(teaser).not.toContain(".…");
+    expect(teaser.length).toBeLessThanOrEqual(161);
     expect(teaser).not.toContain("queue");
   });
 
-  it("cuts at a word boundary + ellipsis when the first sentence runs long", () => {
+  it("cuts at a word boundary + dots when the first sentence runs long", () => {
     const long =
       "A cavernous railway-arch listening bar where the sound system was tuned by the same engineer who did the room at Spiritland and the natural wine list runs to forty pages of hand-scrawled notes";
     const teaser = deriveAnonTeaser(long)!;
     expect(teaser.endsWith("…")).toBe(true);
-    // cap + space + ellipsis
-    expect(teaser.length).toBeLessThanOrEqual(TEASER_MAX + 2);
-    // never a mid-word cut
-    expect(teaser).not.toMatch(/\w…$/);
+    expect(teaser.length).toBeLessThanOrEqual(TEASER_MAX + 1);
+    // word-boundary cut: no whitespace immediately before the dots
+    expect(teaser).not.toMatch(/\s…$/);
   });
 
-  it("never returns more than the sentence cap of the source text", () => {
+  it("adds NO dots when the whole description fits the cap (nothing is missing)", () => {
     const short = "Small plates, big room, no bookings.";
     expect(deriveAnonTeaser(short)).toBe(short);
   });
