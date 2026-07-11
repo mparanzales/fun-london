@@ -234,7 +234,7 @@ type FetchedEvent = {
 // Eventbrite killed platform-wide event search in Feb 2020 — the v3 API
 // only lists events per ORGANIZER or per VENUE. So this adapter is
 // subscription-shaped by necessity (and by taste: a curator picks whose
-// events we trust, replacing the Gemini pop-up radar with real data).
+// events we trust, replacing the old AI pop-up radar with real data).
 // Both endpoints verified live 2026-07-11 with the account's private
 // token: /v3/organizers/{id}/events/?status=live works for arbitrary
 // PUBLIC organizers, not just our own.

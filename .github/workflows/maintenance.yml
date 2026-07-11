@@ -96,6 +96,18 @@ jobs:
           FL_REVIEW_BATCH: "30"
         run: pnpm refresh-reviews
 
+      - name: Prune expired events
+        # The deleted pop-up radar cron held the only expired-event cleanup
+        # (and only for source='popup'); this is the source-agnostic
+        # replacement. Hard-deletes events whose run is definitively over
+        # (a day of grace past ends_at, or past starts_at when there is no
+        # ends_at). Rows with curated_at set are NEVER deleted, only listed:
+        # hand-written copy is a human's call.
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+        run: pnpm prune-expired-events
+
       - name: Render step summary
         # Always runs (even on script failure) so closures + dead links
         # are visible in the GitHub UI without digging into raw logs.

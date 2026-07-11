@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  pickReviewSnippet,
-  buildPlanNotePrompt,
-  isGrounded,
-  MAX_NOTE_CHARS,
-} from "@/lib/plan-note";
+import { pickReviewSnippet, isGrounded, MAX_NOTE_CHARS } from "@/lib/plan-note";
 import type { VenueReview } from "@/lib/types";
 
 const review = (p: Partial<VenueReview>): VenueReview => ({
@@ -46,19 +41,6 @@ describe("pickReviewSnippet", () => {
     });
     const picked = pickReviewSnippet([four, fiveFar, fiveNear]);
     expect(picked?.author).toBe("near"); // 5★ beats 4★; nearest 220 beats the long one
-  });
-});
-
-describe("buildPlanNotePrompt", () => {
-  it("embeds the venue, the rating, and the verbatim snippet", () => {
-    const prompt = buildPlanNotePrompt(
-      venue,
-      review({ rating: 5, text: "The robata counter is a joy." }),
-    );
-    expect(prompt).toContain("Zuma");
-    expect(prompt).toContain("Restaurant");
-    expect(prompt).toContain("The robata counter is a joy.");
-    expect(prompt).toContain(String(MAX_NOTE_CHARS));
   });
 });
 

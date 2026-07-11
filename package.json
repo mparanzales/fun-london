@@ -29,8 +29,6 @@
     "scout-candidates": "tsx scripts/scout-candidates.ts",
     "discover-venues:dry": "tsx scripts/discover-venues.ts --dry-run",
     "discover-venues": "tsx scripts/discover-venues.ts",
-    "discover-popups:dry": "tsx scripts/discover-popups.ts --dry-run",
-    "discover-popups": "tsx scripts/discover-popups.ts",
     "send-weekly-digest:dry": "tsx scripts/send-weekly-digest.ts --dry",
     "send-weekly-digest:preview": "tsx scripts/send-weekly-digest.ts --preview",
     "send-weekly-digest": "tsx scripts/send-weekly-digest.ts",
@@ -65,7 +63,9 @@
     "verify-feed-rank": "tsx scripts/verify-feed-rank.ts",
     "verify-plan": "tsx scripts/verify-plan.ts",
     "generate-plan-notes:dry": "tsx scripts/generate-plan-notes.ts --dry-run",
-    "generate-plan-notes": "tsx scripts/generate-plan-notes.ts"
+    "generate-plan-notes": "tsx scripts/generate-plan-notes.ts",
+    "prune-expired-events:dry": "tsx scripts/prune-expired-events.ts --dry-run",
+    "prune-expired-events": "tsx scripts/prune-expired-events.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

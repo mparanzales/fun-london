@@ -1,19 +1,20 @@
-// Stage 4.3 — grounded "why this stop" notes for Plan My Night.
+// Stage 4.3, grounded "why this stop" notes for Plan My Night.
 //
-// Each plan stop can carry a one-line editorial reason it's worth going, e.g.
-// "Worth it for the robata counter and the buzz." The pipeline is deliberately
-// honest end-to-end (same provenance rule as the verbatim reviews and the
-// once-fabricated editorial sources):
+// Each plan stop can carry a one-line reason it's worth going. The pipeline is
+// deliberately honest end-to-end (same provenance rule as the verbatim reviews
+// and the once-fabricated editorial sources), and since the 2026-07 LLM
+// removal it is zero-AI:
 //
-//   real review snippet  →  LLM line (grounded ONLY in that snippet)  →  a
-//   groundedness gate that REJECTS any line making a claim the snippet doesn't.
+//   real review snippet  →  a verbatim quote from that snippet (built by
+//   scripts/generate-plan-notes.ts)  →  a groundedness gate that REJECTS any
+//   line making a claim the snippet doesn't.
 //
-// The line is precomputed offline (scripts/generate-plan-notes.ts, Gemini free
-// tier) and stored on the venue, so the plan UI just renders it — no per-request
-// LLM cost or latency, and a venue with no note simply shows none (fail-open).
+// The note is precomputed offline (scripts/generate-plan-notes.ts) and stored
+// on the venue, so the plan UI just renders it: no per-request cost or latency,
+// and a venue with no note simply shows none (fail-open).
 //
 // Everything in THIS file is pure + deterministic so it can be unit-tested
-// without the network: snippet choice, the prompt, and the fact-checker gate.
+// without the network: snippet choice and the fact-checker gate.
 
 import type { VenueReview } from "./types";
 
@@ -56,35 +57,12 @@ export function pickReviewSnippet(
   })[0];
 }
 
-// The generation prompt. Constrains Gemini HARD to the snippet so the fact-check
-// gate below has a real chance of passing: no invented dishes, prices, or facts.
-export function buildPlanNotePrompt(
-  venue: { name: string; type: string; neighbourhood: string },
-  snippet: VenueReview,
-): string {
-  return [
-    `You write one short line for a London night-out planner explaining why a`,
-    `venue is worth a stop. Voice: a friend with great taste, warm and confident,`,
-    `never salesy, no clichés ("hidden gem", "must-visit", "nestled").`,
-    ``,
-    `Venue: "${venue.name}", a ${venue.type} in ${venue.neighbourhood}.`,
-    `A real Google review (${snippet.rating}/5):`,
-    `"""${snippet.text.trim()}"""`,
-    ``,
-    `Write ONE line (max ${MAX_NOTE_CHARS} characters, no quotes, no emoji,`,
-    `optional trailing full stop) on why to go. Ground it ONLY in the review`,
-    `above and the venue type. Do NOT invent dishes, prices, awards, or facts`,
-    `the review doesn't mention. Reply with the line only, nothing else.`,
-  ].join("\n");
-}
-
 // ── The fact-checker gate ────────────────────────────────────────────────────
 //
-// A cheap, deterministic groundedness check (no second LLM call — the repo runs
-// on the Gemini free tier and deliberately minimises calls). It rejects a line
-// whose CLAIM words don't trace back to the review snippet or the venue's own
-// identity. Generic connective words and mild positive sentiment are allowed:
-// the sentiment is earned by the 4–5★ snippet we grounded on.
+// A cheap, deterministic groundedness check (no LLM anywhere). It rejects a
+// line whose CLAIM words don't trace back to the review snippet or the venue's
+// own identity. Generic connective words and mild positive sentiment are
+// allowed: the sentiment is earned by the 4–5★ snippet we grounded on.
 
 const STOPWORDS = new Set([
   "a",
@@ -268,6 +246,7 @@ export function isGrounded(
   // 0.55 tolerates natural paraphrase/synonyms (a 5★ "treated well" → "spoils you",
   // "stayed for two" → "won't want to leave") while the hard guards above stay
   // strict (digits/prices/counts must appear verbatim). Calibrated on a real
-  // sample where 0.7 rejected ~70% of faithful lines (scripts/verify-plan-notes.ts).
+  // sample where 0.7 rejected ~70% of faithful lines (via a since-deleted
+  // calibration script from the LLM era; today's verbatim quotes pass trivially).
   return grounded / claims >= 0.55;
 }

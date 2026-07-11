@@ -699,11 +699,10 @@ alter table public.venue_embeddings enable row level security;
 revoke all on public.venue_embeddings from anon, authenticated;
 
 -- 2026-06-30 · Stage 4.3 — grounded "why this stop" note for Plan My Night ────
--- One short editorial line per venue ("Great for the robata grill and creative
--- cocktails"), distilled from a real Google review and gated by a groundedness
--- check (lib/plan-note.ts) so it never makes a claim the review doesn't.
--- Populated offline by scripts/generate-plan-notes.ts (Gemini free tier);
--- re-run `pnpm generate-plan-notes --stale` after a reviews refresh.
+-- One short line per venue, a verbatim quote from a real Google review, gated
+-- by a groundedness check (lib/plan-note.ts) so it never makes a claim the
+-- review doesn't. Populated offline by scripts/generate-plan-notes.ts (zero
+-- AI); re-run `pnpm generate-plan-notes --stale` after a reviews refresh.
 -- DERIVED FROM REVIEW TEXT → moat field: it is deliberately LEFT OUT of the
 -- anon column GRANT above and of VENUE_CARD_COLUMNS, so it reaches only the
 -- signed-in planner (which already fetches the full row). plan_note_synced_at
