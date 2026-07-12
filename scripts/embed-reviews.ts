@@ -33,6 +33,11 @@ const STALE_ONLY = process.argv.includes("--stale");
 const MISSING_ONLY = process.argv.includes("--missing-only");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const LIMIT = limitArg ? parseInt(limitArg.slice("--limit=".length), 10) : null;
+// A typo'd limit in a cron must fail loudly, not silently embed 0 venues.
+if (limitArg && (!Number.isFinite(LIMIT) || (LIMIT as number) <= 0)) {
+  console.error(`Invalid ${limitArg}: --limit needs a positive integer`);
+  process.exit(1);
+}
 const DRY_LIMIT = 8;
 const UPSERT_BATCH = 100;
 
@@ -150,7 +155,7 @@ async function main() {
     candidates = candidates.filter(({ v }) => embeddable.has(v.id));
   }
 
-  if (LIMIT != null && Number.isFinite(LIMIT)) {
+  if (LIMIT != null) {
     candidates = candidates.slice(0, LIMIT);
   }
 

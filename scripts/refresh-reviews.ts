@@ -15,7 +15,7 @@ import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
-import type { VenueReview } from "@/lib/types";
+import { mapGoogleReviews, fetchPlaceReviews } from "./google-reviews";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const BATCH = Number(process.env.FL_REVIEW_BATCH ?? "70");
@@ -42,45 +42,10 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE ?? "anon", {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Google Places Details review shape (the fields we keep).
-type GoogleReview = {
-  rating?: number;
-  text?: { text?: string };
-  authorAttribution?: { displayName?: string; photoUri?: string };
-  publishTime?: string;
-  relativePublishTimeDescription?: string;
-};
-
-// Map Google's review objects to our stored shape — text kept VERBATIM, never
-// edited. Drops reviews with no text (rating-only).
-function mapReviews(g: GoogleReview[] | undefined): VenueReview[] {
-  return (g ?? [])
-    .map((r) => ({
-      author: r.authorAttribution?.displayName ?? "Google user",
-      rating: r.rating ?? 0,
-      text: r.text?.text ?? "",
-      relativeTime: r.relativePublishTimeDescription ?? "",
-      publishTime: r.publishTime,
-      authorPhotoUrl: r.authorAttribution?.photoUri,
-    }))
-    .filter((r) => r.text.trim().length > 0);
-}
-
-// Place Details for just the reviews field (server-side; key in the header).
-async function placeReviews(placeId: string): Promise<GoogleReview[]> {
-  const res = await fetch(
-    `https://places.googleapis.com/v1/places/${placeId}`,
-    {
-      headers: {
-        "X-Goog-Api-Key": PLACES_KEY ?? "",
-        "X-Goog-FieldMask": "reviews",
-      },
-    },
-  );
-  if (!res.ok) throw new Error(`placeDetails HTTP ${res.status}`);
-  const json = (await res.json()) as { reviews?: GoogleReview[] };
-  return json.reviews ?? [];
-}
+// Review shape mapping + the reviews-only Details call live in
+// scripts/google-reviews.ts, shared with the approve-time fetch in
+// scripts/ingest-from-pending.ts so the two writers of venues.reviews
+// cannot drift apart.
 
 async function main(): Promise<void> {
   console.log(DRY_RUN ? "DRY RUN (no API calls, no writes)\n" : "");
@@ -126,7 +91,9 @@ async function main(): Promise<void> {
       continue;
     }
     try {
-      const reviews = mapReviews(await placeReviews(v.google_place_id));
+      const reviews = mapGoogleReviews(
+        await fetchPlaceReviews(v.google_place_id, PLACES_KEY ?? ""),
+      );
       const { error: upErr } = await supabase
         .from("venues")
         .update({ reviews, reviews_synced_at: new Date().toISOString() })

@@ -45,9 +45,10 @@ import {
   fallbackCanonicalTags,
   TAG_VERSION,
 } from "@/lib/tag-vocabulary";
-import type { BookingLink, BookingPlatform, VenueReview } from "@/lib/types";
+import type { BookingLink, BookingPlatform } from "@/lib/types";
 import { areaFromPostcode } from "@/lib/postcode-areas";
 import { embedAndUpsertVenue } from "./venue-embedding";
+import { mapGoogleReviews, fetchPlaceReviews } from "./google-reviews";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const RETRY_FAILED = process.argv.includes("--retry-failed");
@@ -201,48 +202,6 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
     );
   }
   return (await res.json()) as PlaceDetails;
-}
-
-// ── Reviews (for approve-time embedding) ─────────────────────────────────────
-// Google Places Details review shape (the fields we keep). Same mapping as
-// scripts/refresh-reviews.ts: text kept VERBATIM, never edited; rating-only
-// reviews dropped. This is a separate Details call because `reviews` bills the
-// Atmosphere SKU, so it is requested ONLY here (per published venue, a
-// human-gated trickle), never in the bulk fieldMask above.
-
-type GoogleReview = {
-  rating?: number;
-  text?: { text?: string };
-  authorAttribution?: { displayName?: string; photoUri?: string };
-  publishTime?: string;
-  relativePublishTimeDescription?: string;
-};
-
-function mapGoogleReviews(g: GoogleReview[] | undefined): VenueReview[] {
-  return (g ?? [])
-    .map((r) => ({
-      author: r.authorAttribution?.displayName ?? "Google user",
-      rating: r.rating ?? 0,
-      text: r.text?.text ?? "",
-      relativeTime: r.relativePublishTimeDescription ?? "",
-      publishTime: r.publishTime,
-      authorPhotoUrl: r.authorAttribution?.photoUri,
-    }))
-    .filter((r) => r.text.trim().length > 0);
-}
-
-async function placeReviews(placeId: string): Promise<GoogleReview[]> {
-  const res = await fetch(`${PLACES_BASE}/${placeId}`, {
-    headers: {
-      "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY!,
-      "X-Goog-FieldMask": "reviews",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`Place reviews failed for ${placeId}: ${res.status}`);
-  }
-  const json = (await res.json()) as { reviews?: GoogleReview[] };
-  return json.reviews ?? [];
 }
 
 // ── Booking platform detection ───────────────────────────────────────────────
@@ -807,8 +766,11 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   // published and is caught by the nightly missing-embeddings net in
   // .github/workflows/maintenance.yml.
   let embed: "embedded" | "no_reviews" | "failed" = "failed";
+  let embedError: string | undefined;
   try {
-    const reviews = mapGoogleReviews(await placeReviews(details.id));
+    const reviews = mapGoogleReviews(
+      await fetchPlaceReviews(details.id, GOOGLE_PLACES_API_KEY!),
+    );
     const reviewsSyncedAt = new Date().toISOString();
     const { error: revErr } = await supabase
       .from("venues")
@@ -830,6 +792,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     }
   } catch (embedErr) {
     const msg = embedErr instanceof Error ? embedErr.message : String(embedErr);
+    embedError = msg;
     console.error(
       `  ✗ EMBED FAILED (venue stays published · nightly net will retry): ${msg}`,
     );
@@ -855,7 +818,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     google_place_id: details.id,
   });
 
-  return { status: "ingested" as const, embed };
+  return { status: "ingested" as const, embed, embedError };
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -953,7 +916,11 @@ async function main() {
         results.ingested++;
         if (r.embed === "embedded") results.embedded++;
         else if (r.embed === "no_reviews") results.embedDeferred++;
-        else results.embedFailed.push({ name: candidate.name });
+        else
+          results.embedFailed.push({
+            name: candidate.name,
+            error: r.embedError,
+          });
       } else if (r.status === "skipped") results.skipped++;
       else if (r.status === "needs_review") results.needsReview++;
     } catch (err) {
@@ -1002,7 +969,9 @@ async function main() {
     console.log(
       `\n⚠ EMBED FAILED for ${results.embedFailed.length} published venue(s) · they are LIVE but invisible to For You until the nightly missing-embeddings net (or a manual \`pnpm embed-reviews:missing\`) picks them up:`,
     );
-    results.embedFailed.forEach((f) => console.log(`  ✗ ${f.name}`));
+    results.embedFailed.forEach((f) =>
+      console.log(`  ✗ ${f.name}${f.error ? `: ${f.error}` : ""}`),
+    );
   }
   if (results.stuck.length > 0) {
     console.log(

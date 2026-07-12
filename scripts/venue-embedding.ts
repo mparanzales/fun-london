@@ -97,6 +97,8 @@ export function buildEmbeddingRow(
     model: EMBED_MODEL,
     source_reviews_count: sourceReviewsCount,
     reviews_synced_at: reviewsSyncedAt,
+    // Per-row timestamp (not per-run) is deliberate: it records when THIS
+    // venue's vector was built, which is what staleness checks care about.
     updated_at: new Date().toISOString(),
   };
 }
