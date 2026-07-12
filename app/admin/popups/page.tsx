@@ -1,15 +1,20 @@
-// /admin/popups — review surface for the autonomous pop-up radar.
+// /admin/popups — review surface for live pop-ups.
 //
-// The radar (scripts/discover-popups.ts) auto-publishes pop-ups to
-// public.events (source='popup'). This page is the maintainer's heads-up + control:
-// it lists every LIVE pop-up so she can see what the robot added, and a
-// one-tap "Hide" pulls any from the app (sets cancelled_at via a Server
-// Action, which is sticky against re-discovery).
+// Pop-ups arrive via the events pipeline's Eventbrite organizer
+// subscriptions (scripts/ingest-events.ts; the old AI radar is gone).
+// Two row shapes count as a pop-up here: legacy radar rows (source='popup')
+// and organizer-first Eventbrite rows (source='eventbrite' with no catalogue
+// venue_id — the pop-up signature per the subscription design).
+// This page is the maintainer's heads-up + control: it lists every LIVE
+// pop-up so she can see what arrived, and a one-tap "Hide" pulls any from
+// the app (sets cancelled_at via a Server Action, which is sticky against
+// re-ingestion).
 //
 // Gated to admin emails (FL_ADMIN_EMAILS). The per-run additions are also
 // printed in the GitHub Actions run summary for each cron tick.
 
 import { redirect } from "next/navigation";
+import { Radar } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthUser, isAdminEmail } from "@/lib/auth";
 import { hidePopup } from "./actions";
@@ -53,10 +58,14 @@ export default async function AdminPopupsPage() {
     .select(
       "id, name, venue_name, area, category, starts_at, ends_at, price, source_url, description",
     )
-    .eq("source", "popup")
+    // Legacy radar rows AND organizer-first Eventbrite rows (no catalogue
+    // venue_id) are both pop-ups. A null ends_at means the provider didn't
+    // state the end; treat it as live (the nightly prune retires it once
+    // its start is definitively past).
+    .or("source.eq.popup,and(source.eq.eventbrite,venue_id.is.null)")
     .is("cancelled_at", null)
-    .gte("ends_at", today.toISOString())
-    .order("ends_at", { ascending: true })
+    .or(`ends_at.gte.${today.toISOString()},ends_at.is.null`)
+    .order("ends_at", { ascending: true, nullsFirst: false })
     .limit(100);
 
   if (error) {
@@ -120,13 +129,19 @@ function NotAuthorised({ email }: { email: string }) {
 function EmptyState() {
   return (
     <div className="rounded-2xl bg-card border border-border p-6 text-center">
-      <div className="text-3xl mb-2">🛰️</div>
+      <Radar
+        className="w-9 h-9 text-muted-fg mx-auto mb-2"
+        strokeWidth={1.75}
+        aria-hidden
+      />
       <h2 className="text-sm font-extrabold text-heading mb-1">
         No live pop-ups yet
       </h2>
       <p className="text-xs text-muted-fg leading-relaxed">
-        The radar runs every 4 hours. Run <code>pnpm discover-popups:dry</code>{" "}
-        locally to preview what it would add.
+        Pop-ups arrive with the events ingest (every 4 hours) from the
+        Eventbrite organizers in <code>scripts/events-seed.ts</code>. Run{" "}
+        <code>pnpm ingest-events:dry</code> locally to preview what it would
+        add.
       </p>
     </div>
   );

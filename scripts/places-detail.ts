@@ -2,9 +2,9 @@
 // need to give an event page venue-level richness: rating, address, hours,
 // website, phone, map, reviews, and Google's own factual editorial blurb.
 //
-// Deterministic + real: facts come from Places, never from an LLM (see the
-// Gemini policy). The event's photo is still handled separately by
-// places-photo.ts (mirrored to keyless Storage); this only adds the text/data.
+// Deterministic + real: facts come from Places, never from an LLM (generative
+// facts were banned with the 2026-07 LLM removal). The event's photo is
+// handled separately by its ingest pipeline; this only adds the text/data.
 //
 // The normalized `openingHours` matches lib/opening-hours' OpeningHours shape so
 // the event page can reuse getOpenState()/formatOpeningLine() unchanged.

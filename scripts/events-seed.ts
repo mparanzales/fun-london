@@ -39,7 +39,7 @@ export type EventSubscription =
       // Organizer-first (pop-up) subscription: no catalogue venue. The
       // curator supplies the display identity when adding the organizer —
       // both fields required when venueSlug is absent. This replaced the
-      // Gemini pop-up radar: real organizers' real events, hand-picked.
+      // old AI pop-up radar: real organizers' real events, hand-picked.
       venueName?: string;
       area?: string;
       eventbriteOrganizerId?: string; // Eventbrite's "organizer" id (preferred)
@@ -98,7 +98,7 @@ export const EVENT_SUBSCRIPTIONS: EventSubscription[] = [
       "slots are direct via ronniescotts.co.uk. A venue-site scrape may " +
       "complement this later.",
   },
-  // ── Pop-up organizers via Eventbrite (replaced the Gemini radar) ──
+  // ── Pop-up organizers via Eventbrite (replaced the old AI radar) ──
   // Rule: only organizers a curator has actually vetted. Every field
   // below is real data — the organizer id was resolved against the live
   // API and the event verified on eventbrite.co.uk before adding.
