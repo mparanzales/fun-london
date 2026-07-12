@@ -88,7 +88,7 @@ const NEIGHBOURHOODS = [
   "Spitalfields",
   "London Fields",
   "Camberwell",
-  // West / North / South-west broadening (2026-06-04) — the grid was
+  // West / North / South-west broadening (2026-06-04): the grid was
   // east/south-east heavy, so the catalogue clustered there. These open up
   // the rest of the map. The 4-hourly cron rotates through them over time.
   "Camden",
@@ -139,7 +139,7 @@ const CATEGORIES: Category[] = [
     timeOfDay: "Day",
   },
   { keyword: "gastropub", type: "Pub", moods: ["drinks"], timeOfDay: "Night" },
-  // Day-spots — fill the Morning/Afternoon mood decks (Culture/Market/Outdoors,
+  // Day-spots: fill the Morning/Afternoon mood decks (Culture/Market/Outdoors,
   // which the catalog currently has zero of).
   {
     keyword: "independent art gallery",
@@ -174,7 +174,7 @@ const ALLOWED_TYPES = new Set([
   "fine_dining_restaurant",
   "bakery",
   "brunch_restaurant",
-  // Day-spots (used leniently — see typesOk).
+  // Day-spots (used leniently, see typesOk).
   "art_gallery",
   "museum",
   "tourist_attraction",
@@ -247,7 +247,7 @@ function normName(s: string): string {
     .trim();
 }
 
-// The BRAND part of a venue name — strip any branch/location suffix that
+// The BRAND part of a venue name: strip any branch/location suffix that
 // follows a separator ("Be At One - Farringdon" → "be at one", "Dishoom |
 // Shoreditch" → "dishoom", "Forza Wine (Peckham)" → "forza wine"). Searching
 // the brand (not the branch-specific name) is what makes the chain count
@@ -293,7 +293,7 @@ type Editorial = {
   critical_flags: { label: string; body: string }[];
 };
 
-// Draft copy WITHOUT any model call — templated from the data we already have
+// Draft copy WITHOUT any model call, templated from the data we already have
 // (type and postcode-derived area). It is stored on the pending candidate as
 // vibe_draft / long_description_draft, purely as raw material for the human
 // reviewer; ingest-from-pending builds the published row from its own Places
@@ -337,13 +337,13 @@ function templateEditorial(
     ? [
         {
           label: "Check times before you go",
-          body: `Opening days and hours for ${name} vary by season — confirm on the day so you're not caught out.`,
+          body: `Opening days and hours for ${name} vary by season. Confirm on the day so you're not caught out.`,
         },
       ]
     : [
         {
-          label: "Independent — plan ahead",
-          body: `Small, owner-run ${noun} — booking, hours and walk-in policy vary, so check ahead, especially at weekends.`,
+          label: "Independent: plan ahead",
+          body: `Small, owner-run ${noun}. Booking, hours and walk-in policy vary, so check ahead, especially at weekends.`,
         },
       ];
 
@@ -358,7 +358,7 @@ function typesOk(types: string[] | undefined, venueType?: VenueType): boolean {
     venueType === "Culture" ||
     venueType === "Market" ||
     venueType === "Outdoors";
-  // Markets frequently tag as shopping_mall — don't reject that when hunting
+  // Markets frequently tag as shopping_mall, don't reject that when hunting
   // markets specifically.
   const reject =
     venueType === "Market"
@@ -382,7 +382,8 @@ async function fetchColumnValues(
   const out = new Set<string>();
   if (!supabase) return out;
   const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
+  let from = 0;
+  for (;;) {
     const { data, error } = await supabase
       .from(table)
       .select(column)
@@ -393,7 +394,11 @@ async function fetchColumnValues(
       const v = r[column];
       if (typeof v === "string" && v) out.add(v);
     }
-    if (!data || data.length < PAGE) break;
+    // Loop until an EMPTY page, advancing by rows actually received: if the
+    // server's max-rows cap is lower than PAGE, a short page is NOT the end,
+    // and fixed PAGE-size jumps would skip the rows the cap withheld.
+    if (!data || data.length === 0) break;
+    from += data.length;
   }
   return out;
 }
@@ -434,6 +439,12 @@ async function main() {
   // Count the failures so we can fail loud.
   let insertFailures = 0;
   let skippedAlreadyQueued = 0;
+  // Same guard for the OTHER systemic failure: a dead GOOGLE_PLACES_API_KEY
+  // makes every grid search throw, which used to read as a quiet green run
+  // with nothing examined. Count successes and failures so we can tell "every
+  // search errored" apart from "the grid slice was genuinely empty".
+  let searchFailures = 0;
+  let searchSuccesses = 0;
   const seen = new Set<string>();
   let scanned = 0;
 
@@ -446,9 +457,11 @@ async function main() {
         DISCOVERY_FIELDS,
       );
     } catch (e) {
+      searchFailures++;
       console.error(`  ✗ search ${cat.type}·${area}: ${(e as Error).message}`);
       continue;
     }
+    searchSuccesses++;
     await sleep(200);
 
     for (const p of places) {
@@ -479,7 +492,7 @@ async function main() {
       seen.add(p.id);
       scanned++;
 
-      // Chain check (location count) — skip for day-spots: parks/markets/
+      // Chain check (location count), skipped for day-spots: parks/markets/
       // galleries aren't franchise chains, and name-word counting false-flags
       // generically-named ones (e.g. "Victoria Park").
       let chainLocations: number | null = null;
@@ -488,7 +501,7 @@ async function main() {
         if (locations >= CHAIN_LOCATIONS) {
           const reason = Number.isFinite(locations)
             ? `chain (${locations} locations)`
-            : `unverifiable (Places error/blank brand) — skipped, will retry next run`;
+            : `unverifiable (Places error/blank brand), skipped, will retry next run`;
           console.log(`  ⊘ ${reason}: ${name}`);
           continue;
         }
@@ -507,14 +520,17 @@ async function main() {
 
       // The pending_candidates row. Field shape follows the two consumers:
       //   • scripts/ingest-from-pending.ts reads name, neighbourhood,
-      //     type_guess, vibe_tags_draft and sources[].source, and refetches
-      //     everything else from Places at ingest time.
+      //     type_guess, vibe_tags_draft, the drafts, and sources[] (source,
+      //     time_of_day, moods), and refetches everything else from Places
+      //     at ingest time.
       //   • /admin/candidates renders vibe_draft, long_description_draft,
       //     sources_count, chain_risk_score and sources[].{publication,url,
       //     title,date}.
       // The single source entry carries the FACTUAL Places data (no press
       // claims): the deterministic Google Maps link plus the numbers the
-      // gates saw, so the reviewer can judge from evidence.
+      // gates saw, so the reviewer can judge from evidence. time_of_day and
+      // moods carry the discovery category's intent so ingest publishes a
+      // gallery as a Day/culture spot, not the old Evening/dinner default.
       const runDate = new Date().toISOString().slice(0, 10);
       const row = {
         name,
@@ -532,6 +548,8 @@ async function main() {
             google_types: p.types ?? [],
             search_keyword: cat.keyword,
             search_area: area,
+            time_of_day: cat.timeOfDay,
+            moods: cat.moods,
           },
         ],
         sources_count: 1,
@@ -612,6 +630,19 @@ async function main() {
       `GREEN-BUT-EMPTY GUARD: scanned ${scanned}, queued 0, ` +
         `${insertFailures} insert failures. Likely systemic (DB/schema). ` +
         `Exiting 1 so the alert fires.`,
+    );
+    process.exit(1);
+  }
+
+  // Total Places failure guard: every grid search errored and none succeeded,
+  // which is a dead/revoked GOOGLE_PLACES_API_KEY or a Places outage, never a
+  // genuinely empty slice. Applies to dry runs too, a broken key should never
+  // report green anywhere.
+  if (searchFailures > 0 && searchSuccesses === 0) {
+    console.error(
+      `TOTAL SEARCH FAILURE GUARD: all ${searchFailures} Places searches ` +
+        `errored (0 succeeded). Likely a dead GOOGLE_PLACES_API_KEY or a ` +
+        `Places outage. Exiting 1 so the alert fires.`,
     );
     process.exit(1);
   }

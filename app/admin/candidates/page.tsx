@@ -213,10 +213,11 @@ function EmptyState() {
       <div className="text-3xl mb-2">🎉</div>
       <h2 className="text-sm font-extrabold text-heading mb-1">Queue clear</h2>
       <p className="text-xs text-muted-fg leading-relaxed">
-        No candidates waiting. The scout is currently scaffold-only, publication
-        adapters land in Phase 2B, autonomous cron in Phase 2B+. Run{" "}
-        <code>pnpm scout-candidates:dry</code> locally to test the pipeline
-        shape.
+        No candidates waiting. The discovery cron (discover-venues, every 4
+        hours) queues new Google Places finds here for approval; approved
+        candidates are published by <code>pnpm ingest:from-pending</code>. Run{" "}
+        <code>pnpm discover-venues:dry</code> locally to preview what the next
+        run would queue.
       </p>
     </div>
   );

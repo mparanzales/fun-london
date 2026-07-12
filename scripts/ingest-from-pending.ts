@@ -29,6 +29,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import {
   resolveVenuePhotos,
   mirrorMapToStorage,
+  photoStorageEnabled,
   FALLBACK_IMG_URL,
 } from "./photo-storage";
 import {
@@ -68,6 +69,17 @@ if (!SUPABASE_SERVICE_ROLE_KEY && !DRY_RUN) {
   );
   process.exit(1);
 }
+// Refuse to publish photo-less venues: with the photo-storage env absent,
+// resolveVenuePhotos returns [] and every ingested venue would silently ship
+// with img_url "" (broken cards). Fail loud instead of publishing blanks.
+if (!DRY_RUN && !photoStorageEnabled()) {
+  console.error(
+    "Photo storage env not configured (see photoStorageEnabled in " +
+      "scripts/photo-storage.ts). A write run would publish venues with no " +
+      "photos. Set the photo/R2 env, or use --dry-run.",
+  );
+  process.exit(1);
+}
 
 const supabase =
   SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -84,6 +96,12 @@ type Candidate = {
   neighbourhood: string | null;
   type_guess: string | null;
   vibe_tags_draft: string[] | null;
+  // Claim-free templated drafts written by scripts/discover-venues.ts. These
+  // are what the reviewer approved, so publishing prefers them; legacy
+  // (onezone/scout) candidates have them null and keep the old behaviour.
+  vibe_draft: string | null;
+  long_description_draft: string | null;
+  real_talk_drafts: { label: string; body: string }[] | null;
   sources: Array<{
     source: string;
     cuisine_type?: string | null;
@@ -92,6 +110,10 @@ type Candidate = {
     vibe_lists?: string[];
     top_lists?: string[];
     london_region?: string | null;
+    // discover-venues carries its category's intent so the published row
+    // doesn't fall back to the food/drink-shaped defaults below.
+    time_of_day?: "Day" | "Evening" | "Night";
+    moods?: string[];
   }>;
 };
 
@@ -299,13 +321,26 @@ function mapVenueType(candidate: Candidate, googleTypes?: string[]): string {
 
   if (typeGuess === "market" || cuisine === "street food") return "Market";
 
+  // Day-spot types from the discover-venues queue (galleries, parks). Without
+  // these branches an approved gallery published as a "Restaurant".
+  if (typeGuess === "culture") return "Culture";
+  if (typeGuess === "outdoors") return "Outdoors";
+
   if (googleTypes?.includes("night_club")) return "Live Music";
 
   return "Restaurant";
 }
 
-// Derive mood tags from OneZone occasion lists and vibe lists
+// Derive mood tags. Discover-venues candidates carry their discovery
+// category's moods verbatim (a gallery is ["culture"], a park ["activity"],
+// a cafe []), so use those as-is: forcing "dinner" onto a park is wrong.
+// OneZone candidates keep the keyword derivation below.
 function deriveMoodTags(candidate: Candidate): string[] {
+  const discover = candidate.sources.find(
+    (s) => s.source === "discover-venues",
+  );
+  if (discover?.moods) return discover.moods;
+
   const source = candidate.sources.find((s) => s.source === "onezone");
   if (!source) return ["dinner"];
 
@@ -405,17 +440,26 @@ function buildVenueRow(
 ) {
   const bookingLinks = detectBookingLinks(details.websiteUri);
   const source = candidate.sources.find((s) => s.source === "onezone");
+  const discover = candidate.sources.find(
+    (s) => s.source === "discover-venues",
+  );
 
   return {
     slug,
     name: details.displayName.text,
     type: mapVenueType(candidate, details.types),
-    // vibe and long_description are intentionally minimal — the admin can
-    // enrich these after ingestion, or a future AI pass can fill them in.
+    // Publish the drafts the reviewer actually approved (discover-venues
+    // writes claim-free templated vibe_draft / long_description_draft /
+    // real_talk_drafts). Legacy candidates without drafts keep the old
+    // minimal copy, which the admin can enrich after ingestion.
     // NOTE: long_description / next_slot_label are "" and tables_free 0 (not
     // null) because those columns are NOT NULL — a null would fail the insert.
-    vibe: source?.cuisine_type ?? candidate.type_guess ?? "London favourite",
-    long_description: "",
+    vibe:
+      candidate.vibe_draft ??
+      source?.cuisine_type ??
+      candidate.type_guess ??
+      "London favourite",
+    long_description: candidate.long_description_draft ?? "",
     // Neighbourhood comes from the venue's real Google postcode (validated),
     // not the unreliable import — falls back to the import only when there's
     // no usable postcode. See lib/postcode-areas.ts.
@@ -427,7 +471,9 @@ function buildVenueRow(
     lat: details.location?.latitude ?? null,
     lng: details.location?.longitude ?? null,
     price: mapPriceLevel(details.priceLevel),
-    time_of_day: "Evening", // sensible default; admin can refine
+    // Discover-venues candidates carry their category's time of day (a
+    // gallery/park is "Day"); only legacy candidates fall back to "Evening".
+    time_of_day: discover?.time_of_day ?? "Evening",
     rating: details.rating ?? 4.0,
     review_count: details.userRatingCount ?? 0,
     walking_mins: 12,
@@ -451,9 +497,19 @@ function buildVenueRow(
     instagram_handle: null,
     editorial_sources: [],
     creator_coverage: [],
-    critical_flags: [],
+    critical_flags: candidate.real_talk_drafts ?? [],
     opening_hours: normalizeOpeningHours(details.regularOpeningHours),
   };
+}
+
+// Honest provenance label for the BD pipeline: derived from the candidate's
+// actual source, never hardcoded (a discover-venues prospect labelled "OneZone
+// import" is fabricated provenance, the exact failure the audit flagged).
+function sourceLabel(candidate: Candidate): string {
+  const src = candidate.sources[0]?.source;
+  if (src === "onezone") return "OneZone import";
+  if (src === "discover-venues") return "venue discovery (Google Places)";
+  return src ? `${src} import` : "unknown source";
 }
 
 function buildProspectRow(candidate: Candidate, details: PlaceDetails) {
@@ -481,14 +537,13 @@ function buildProspectRow(candidate: Candidate, details: PlaceDetails) {
     phone:
       details.nationalPhoneNumber ?? details.internationalPhoneNumber ?? null,
     instagram_handle: null,
-    why_qualified:
-      "Approved from OneZone import. No major booking platform detected — added to BD pipeline.",
+    why_qualified: `Approved from ${sourceLabel(candidate)}. No major booking platform detected, added to BD pipeline.`,
     current_booking_method: bookingMethod,
     editorial_sources: [],
     creator_coverage: [],
     critical_flags: [],
     bd_status: "prospect" as const,
-    notes: `OneZone source. Area: ${candidate.neighbourhood ?? "unknown"}`,
+    notes: `${sourceLabel(candidate)} source. Area: ${candidate.neighbourhood ?? "unknown"}`,
   };
 }
 
@@ -733,7 +788,9 @@ async function main() {
   let query = supabase
     ? supabase
         .from("pending_candidates")
-        .select("id, name, neighbourhood, type_guess, vibe_tags_draft, sources")
+        .select(
+          "id, name, neighbourhood, type_guess, vibe_tags_draft, vibe_draft, long_description_draft, real_talk_drafts, sources",
+        )
         .in("status", statuses)
         .order("created_at", { ascending: true })
     : null;
@@ -741,7 +798,7 @@ async function main() {
   if (!query) {
     // dry-run without supabase: fetch via REST for display
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/pending_candidates?select=id,name,neighbourhood,type_guess,vibe_tags_draft,sources&status=in.(${statuses.join(",")})&order=created_at.asc${LIMIT ? `&limit=${LIMIT}` : ""}`,
+      `${SUPABASE_URL}/rest/v1/pending_candidates?select=id,name,neighbourhood,type_guess,vibe_tags_draft,vibe_draft,long_description_draft,real_talk_drafts,sources&status=in.(${statuses.join(",")})&order=created_at.asc${LIMIT ? `&limit=${LIMIT}` : ""}`,
       {
         headers: {
           apikey: SUPABASE_SERVICE_ROLE_KEY ?? "",
