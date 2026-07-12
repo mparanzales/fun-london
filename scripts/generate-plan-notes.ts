@@ -187,7 +187,10 @@ async function main() {
       .from("venues")
       .update({
         plan_note: built.note,
-        plan_note_synced_at: v.reviews_synced_at,
+        // Stamp with the reviews snapshot the note came from; fall back to
+        // now when reviews_synced_at is null, otherwise the venue would be
+        // re-selected as "never generated" on every run.
+        plan_note_synced_at: v.reviews_synced_at ?? new Date().toISOString(),
       })
       .eq("id", v.id);
     if (error) {

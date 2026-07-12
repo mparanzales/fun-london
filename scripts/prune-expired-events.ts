@@ -10,9 +10,15 @@
 //   - ends_at is null and starts_at < now() - 1 day
 // Rows with neither date are left alone (we can't prove their run ended).
 //
-// EXCEPTION: rows with curated_at set are NEVER deleted, only listed in the
-// output. That column marks Maria's hand-written copy, and hand-written copy
-// must never be silently destroyed; a human decides what happens to those.
+// EXCEPTIONS (never deleted, only listed in the output):
+//   - curated_at set: that column marks Maria's hand-written copy, and
+//     hand-written copy must never be silently destroyed; a human decides.
+//   - cancelled_at set: that stamp is how Hide works, and ingest-events.ts
+//     promises it is permanent. Deleting the row would let the next cron
+//     tick re-insert the event WITHOUT the stamp, silently undoing the Hide.
+//     Hidden rows are already invisible to readers; leave them be.
+// Both guards live in the queries themselves (and the delete), not just in
+// post-filtering, so a code shuffle can't silently drop them.
 //
 // Run:
 //   pnpm prune-expired-events:dry   # print what would be deleted/skipped, no writes
@@ -46,7 +52,11 @@ type EventRow = {
   starts_at: string | null;
   ends_at: string | null;
   curated_at: string | null;
+  cancelled_at: string | null;
 };
+
+const EVENT_COLUMNS =
+  "id, name, source, starts_at, ends_at, curated_at, cancelled_at";
 
 const fmtDay = (iso: string | null): string =>
   iso ? iso.slice(0, 10) : "(no date)";
@@ -63,23 +73,42 @@ async function main() {
 
   // Definitively over: the run's end (or its only known date) is more than a
   // day in the past. Rows with no dates at all never match either branch.
-  const { data, error } = await supabase
+  const expiredFilter = `and(ends_at.not.is.null,ends_at.lt.${cutoff}),and(ends_at.is.null,starts_at.lt.${cutoff})`;
+
+  // Deletable: expired AND unprotected. The curated/cancelled guards are part
+  // of the query itself (and repeated on the delete below), by design.
+  const { data: delData, error: delReadErr } = await supabase
     .from("events")
-    .select("id, name, source, starts_at, ends_at, curated_at")
-    .or(
-      `and(ends_at.not.is.null,ends_at.lt.${cutoff}),and(ends_at.is.null,starts_at.lt.${cutoff})`,
-    )
+    .select(EVENT_COLUMNS)
+    .or(expiredFilter)
+    .is("curated_at", null)
+    .is("cancelled_at", null)
     .order("ends_at", { ascending: true, nullsFirst: false });
-  if (error) {
-    console.error(`read failed: ${error.message}`);
+  if (delReadErr) {
+    console.error(`read failed: ${delReadErr.message}`);
     process.exit(1);
   }
-  const rows = (data ?? []) as EventRow[];
+  const deletable = (delData ?? []) as EventRow[];
 
-  const curated = rows.filter((r) => r.curated_at !== null);
-  const deletable = rows.filter((r) => r.curated_at === null);
+  // Protected: expired but curated (hand-written) or cancelled (Hidden).
+  // Fetched separately so the skip report can name them.
+  const { data: skipData, error: skipReadErr } = await supabase
+    .from("events")
+    .select(EVENT_COLUMNS)
+    .or(expiredFilter)
+    .or("curated_at.not.is.null,cancelled_at.not.is.null")
+    .order("ends_at", { ascending: true, nullsFirst: false });
+  if (skipReadErr) {
+    console.error(`read failed: ${skipReadErr.message}`);
+    process.exit(1);
+  }
+  const skipped = (skipData ?? []) as EventRow[];
+  const curated = skipped.filter((r) => r.curated_at !== null);
+  const cancelled = skipped.filter(
+    (r) => r.curated_at === null && r.cancelled_at !== null,
+  );
 
-  console.log(`${rows.length} expired event(s) found`);
+  console.log(`${deletable.length + skipped.length} expired event(s) found`);
 
   if (curated.length > 0) {
     console.log(
@@ -88,6 +117,17 @@ async function main() {
     for (const r of curated) {
       console.log(
         `  • ${r.name} [${r.source ?? "?"}] ended ${fmtDay(r.ends_at ?? r.starts_at)} (curated ${fmtDay(r.curated_at)})`,
+      );
+    }
+  }
+
+  if (cancelled.length > 0) {
+    console.log(
+      `\nSKIPPED (cancelled_at set, deleting would let the next ingest undo the Hide):`,
+    );
+    for (const r of cancelled) {
+      console.log(
+        `  • ${r.name} [${r.source ?? "?"}] ended ${fmtDay(r.ends_at ?? r.starts_at)} (hidden ${fmtDay(r.cancelled_at)})`,
       );
     }
   }
@@ -103,10 +143,14 @@ async function main() {
     }
     if (!DRY_RUN) {
       const ids = deletable.map((r) => r.id);
+      // Guards repeated here on purpose: even a stale id list can never
+      // take out a curated or Hidden row.
       const { error: delError } = await supabase
         .from("events")
         .delete()
-        .in("id", ids);
+        .in("id", ids)
+        .is("curated_at", null)
+        .is("cancelled_at", null);
       if (delError) {
         console.error(`\ndelete failed: ${delError.message}`);
         process.exit(1);
@@ -120,6 +164,7 @@ async function main() {
     `${DRY_RUN ? "Would delete" : "Deleted"}: ${deletable.length} expired event(s)`,
   );
   console.log(`Skipped (curated): ${curated.length}`);
+  console.log(`Skipped (hidden/cancelled): ${cancelled.length}`);
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Prune complete."}`);
 }
 

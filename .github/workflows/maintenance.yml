@@ -101,12 +101,14 @@ jobs:
         # (and only for source='popup'); this is the source-agnostic
         # replacement. Hard-deletes events whose run is definitively over
         # (a day of grace past ends_at, or past starts_at when there is no
-        # ends_at). Rows with curated_at set are NEVER deleted, only listed:
-        # hand-written copy is a human's call.
+        # ends_at). Rows with curated_at set (hand-written copy) or
+        # cancelled_at set (Maria's Hide) are NEVER deleted, only listed.
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-        run: pnpm prune-expired-events
+        run: |
+          set -o pipefail
+          pnpm prune-expired-events 2>&1 | tee prune.log
 
       - name: Render step summary
         # Always runs (even on script failure) so closures + dead links
@@ -124,6 +126,16 @@ jobs:
               awk '/─── SUMMARY ───/{found=1} found' refresh.log
             else
               tail -40 refresh.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+            echo ""
+            echo "## Expired-events prune"
+            echo ""
+            echo '```'
+            if grep -q "─── SUMMARY ───" prune.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' prune.log
+            else
+              tail -40 prune.log 2>/dev/null || echo "(no log captured)"
             fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -218,6 +218,10 @@ type FetchedEvent = {
   source_url: string; // ticket page
   name: string;
   starts_at: string; // ISO timestamptz
+  // ISO timestamptz of the run's end, or null when the provider doesn't say.
+  // Matters downstream: prune-expired-events keeps a row alive until ends_at
+  // has passed, so multi-day runs must carry their real end.
+  ends_at: string | null;
   time_label: string; // "8:00 PM" etc.
   price: string; // "From £15" — provider-formatted
   category: string; // EventCategory
@@ -311,6 +315,7 @@ type EventbriteEvent = {
   name?: { text?: string };
   description?: { text?: string };
   start?: { utc?: string; local?: string };
+  end?: { utc?: string; local?: string };
   logo?: { original?: { url?: string }; url?: string };
   ticket_availability?: {
     is_sold_out?: boolean;
@@ -383,6 +388,9 @@ function ebToFetched(
     source_url: e.url ?? "",
     name,
     starts_at: startUtc,
+    // Eventbrite always carries the run's end; without it a multi-day
+    // residency looks "over" one day after it STARTS to the expiry prune.
+    ends_at: e.end?.utc ?? null,
     time_label: timeLabel,
     price,
     // Eventbrite's format taxonomy is unreliable; the subscription's
@@ -392,8 +400,7 @@ function ebToFetched(
     // were live-verified on img.evbuc.com (the cdn.evbuc.com origin is
     // URL-encoded INSIDE the path); try each so a host change in one
     // variant can't silently zero the adapter's output.
-    img_url:
-      safeImageUrl(e.logo?.original?.url) || safeImageUrl(e.logo?.url),
+    img_url: safeImageUrl(e.logo?.original?.url) || safeImageUrl(e.logo?.url),
     // Organizer-written copy — real words from the person running it.
     description: e.description?.text?.trim() || null,
     sold_out: ta?.is_sold_out ?? false,
@@ -541,6 +548,13 @@ type TicketmasterEvent = {
       localTime?: string;
       dateTime?: string;
     };
+    // Rarely populated by Ticketmaster (mostly multi-day runs); map it
+    // when present so the expiry prune sees the real end.
+    end?: {
+      localDate?: string;
+      localTime?: string;
+      dateTime?: string;
+    };
     status?: { code?: string };
   };
   classifications?: {
@@ -602,11 +616,18 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
     (e.dates?.status?.code ?? "").toLowerCase() === "cancelled" ||
     (e.dates?.status?.code ?? "").toLowerCase() === "offsale";
 
+  const endsAt =
+    e.dates?.end?.dateTime ??
+    (e.dates?.end?.localDate
+      ? `${e.dates.end.localDate}T${e.dates.end.localTime ?? "23:00:00"}Z`
+      : null);
+
   return {
     source_id: e.id,
     source_url: e.url ?? "",
     name: e.name,
     starts_at: startsAt,
+    ends_at: endsAt,
     time_label: timeLabel,
     price,
     category,
@@ -685,8 +706,7 @@ async function processSubscription(sub: EventSubscription): Promise<{
   // the subscription, venue_id stays null (the schema allows it for
   // exactly this), and there's no venue-photo fallback — the event needs
   // its own real poster or it's skipped.
-  const organizerFirst =
-    sub.source === "eventbrite" && !sub.venueSlug;
+  const organizerFirst = sub.source === "eventbrite" && !sub.venueSlug;
   console.log(
     `\n→ ${sub.source} · ${sub.venueSlug ?? `organizer-first: ${sub.source === "eventbrite" ? sub.venueName : ""}`}`,
   );
@@ -773,6 +793,7 @@ async function processSubscription(sub: EventSubscription): Promise<{
       date_label: dateLabelFor(new Date(e.starts_at)),
       time_label: e.time_label,
       starts_at: e.starts_at,
+      ends_at: e.ends_at,
       price: e.price,
       category: e.category,
       img_url: img,
@@ -933,6 +954,7 @@ async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
     date_label: dateLabelFor(new Date(e.starts_at)),
     time_label: e.time_label,
     starts_at: e.starts_at,
+    ends_at: e.ends_at,
     price: e.price,
     category: e.category,
     // Poster guaranteed non-empty — fetchLondonDiscovery drops events
@@ -1048,8 +1070,7 @@ async function main() {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(
           `  ✗ FAILED ${sub.source}/${
-            sub.venueSlug ??
-            (sub.source === "eventbrite" ? sub.venueName : "?")
+            sub.venueSlug ?? (sub.source === "eventbrite" ? sub.venueName : "?")
           }: ${msg}`,
         );
       }

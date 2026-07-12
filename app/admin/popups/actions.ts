@@ -30,14 +30,27 @@ export async function hidePopup(formData: FormData): Promise<void> {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase
+  // Pop-ups come in two shapes: legacy radar rows (source='popup') and
+  // organizer-first Eventbrite rows (source='eventbrite', no catalogue
+  // venue_id). Both must be hideable from the same review surface.
+  const { data: updated, error } = await supabase
     .from("events")
     .update({ cancelled_at: new Date().toISOString() })
     .eq("id", id)
-    .eq("source", "popup");
+    .or("source.eq.popup,and(source.eq.eventbrite,venue_id.is.null)")
+    .select("id");
 
   if (error) {
     console.error(`[admin/popups] hide failed:`, error);
+    return;
+  }
+  if (!updated || updated.length === 0) {
+    // RLS makes a disallowed update look like "0 rows", not an error. Most
+    // likely cause: the live "events admin update popups" policy predates
+    // the eventbrite widening (see supabase/schema.sql) — re-paste it.
+    console.warn(
+      `[admin/popups] hide matched no rows for ${id} (already hidden, or the RLS policy needs updating)`,
+    );
     return;
   }
 

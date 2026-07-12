@@ -348,20 +348,24 @@ grant select (
   starts_at, price, category, img_url, source, ends_at, cancelled_at
 ) on public.events to anon;
 
--- Pop-up radar: admin may hide an auto-published pop-up (set cancelled_at)
--- without the service-role key. Scoped to source='popup' + the admin email
+-- Pop-up review: admin may hide an auto-published pop-up (set cancelled_at)
+-- without the service-role key. A "pop-up" is a legacy radar row
+-- (source='popup') OR an organizer-first Eventbrite row (source='eventbrite'
+-- with no catalogue venue_id). Scoped to those shapes + the admin email
 -- (mirror FL_ADMIN_EMAILS). Migration: events_admin_hide_popups_policy.
 drop policy if exists "events admin update popups" on public.events;
 create policy "events admin update popups" on public.events for update
   using (
-    source = 'popup'
+    (source = 'popup' or (source = 'eventbrite' and venue_id is null))
     -- auth.jwt() wrapped in a subselect so it's evaluated once per query, not
     -- per row (Supabase Auth RLS InitPlan advisory). Admin email is
     -- environment-specific and kept out of source (public repo) — set it for
     -- your own deploy. The live prod policy already carries the real address.
     and ((select auth.jwt()) ->> 'email') = 'admin@funldn.example'
   )
-  with check (source = 'popup');
+  with check (
+    source = 'popup' or (source = 'eventbrite' and venue_id is null)
+  );
 
 -- Saved: users only see/modify their own
 drop policy if exists "saved self read"   on public.saved_venues;
