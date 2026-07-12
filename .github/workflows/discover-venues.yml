@@ -1,28 +1,24 @@
 name: discover-venues
 
-# Tier 2 — autonomous venue discovery (strict, all-Google, free).
+# Tier 2 candidate discovery (all-Google, free, human-gated).
 #
 # Runs scripts/discover-venues.ts every 4 hours. Each run loops a rotating
-# slice of the London grid (neighbourhood × category) on Google Places until
-# it has up to 10 venues that pass EVERY gate:
-#   • operational · rating >= 4.4 · >= 400 reviews · has website · food/drink
-#   • NOT a chain (Google Places location count >= 6 = chain — by count, not
-#     a denylist)
-#   • verifiable in >= 2 trusted publications (Time Out / Infatuation / Eater
-#     / Square Meal / Hot Dinners / Harden's / Michelin / Good Food Guide /
-#     Condé Nast / Evening Standard / Guardian / Foodism / World's 50 Best),
-#     checked by Gemini 2.5 Flash with built-in Google Search
-# then the venue is AUTO-PUBLISHED to public.venues with honest TEMPLATED
-# copy and editorial_sources: [] — Gemini acts ONLY as the 2-source publish
-# gate; it writes no editorial and no sources are persisted (provenance
-# honesty, after the fabricated-claims incident).
+# slice of the London grid (neighbourhood x category) on Google Places and
+# queues up to 3 candidates that pass every numeric gate:
+#   - operational, rating >= 4.4, >= 400 reviews, has website, food/drink
+#     type allowlist (day-spots get a relaxed bar)
+#   - NOT a chain (Google Places brand location count, not a name denylist)
+# Candidates land in public.pending_candidates (status "pending") for human
+# review at /admin/candidates. NOTHING is auto-published and no generative
+# model is involved: the numeric gates plus human approval are the quality
+# bar. Approved candidates are published by scripts/ingest-from-pending.ts.
 #
-# All-Google + free: Google Places + Gemini (one personal-account key does
-# the validation-by-search). No Custom Search / no 3rd party.
+# All-Google + free: Google Places only. No Gemini, no Custom Search, no
+# third party.
 #
 # Distinct from:
-#   • maintenance.yml (Tier 1) — keeps EXISTING venues fresh (daily).
-#   • events-ingest.yml (Tier 3) — keeps the Events tab fresh (4-hourly).
+#   - maintenance.yml (Tier 1) keeps EXISTING venues fresh (daily).
+#   - events-ingest.yml (Tier 3) keeps the Events tab fresh (4-hourly).
 #
 # Schedule offset to :15 past the odd-4h hours so it never queues with the
 # events cron (:30) or the daily maintenance cron (03:00).
@@ -35,7 +31,7 @@ on:
 
 jobs:
   discover-venues:
-    name: discover + auto-publish venues
+    name: discover + queue venue candidates
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -65,16 +61,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # Mirror new venue photos to Storage (keyless public URLs) instead
-          # of embedding the Places key. Bucket name, not a secret.
-          FL_PHOTO_BUCKET: venue-photos
-          # Store new photos in Cloudflare R2 (img.funldn.com), not Supabase
-          # Storage. photo-storage.ts routes to R2 when these are set; bucket +
-          # public base default in code, so only the S3 credentials are secrets.
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          # No photo/R2 env needed here: photos are fetched and mirrored by
+          # ingest-from-pending.ts after a human approves the candidate.
         run: |
           set -o pipefail
           pnpm exec tsx scripts/discover-venues.ts 2>&1 | tee discover-venues.log
