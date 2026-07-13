@@ -42,11 +42,11 @@ function trailOff(fragment: string): string {
 // byte-identical (confirmed review finding, 2026-07-11).
 export type AnonTeaser = { text: string; truncated: boolean };
 
-export function deriveAnonTeaser(
-  longDescription: string | null | undefined,
-): AnonTeaser | null {
-  const text = (longDescription ?? "").trim();
-  if (!text || TEMPLATE_RE.test(text)) return null;
+// Shared cap/truncate core. `text` is already trimmed, non-empty, and has
+// passed whatever template gate the caller applies. Used by both the venue
+// and event derivers so the cap/ellipsis/surrogate rules can never drift
+// between the two surfaces.
+function teaserFromText(text: string): AnonTeaser {
   // Whole description fits the cap → it IS the teaser, nothing withheld.
   if (text.length <= SENTENCE_MAX) return { text, truncated: false };
   // Prefer a COMPLETE sentence (or two short ones) ending within 160 chars
@@ -63,6 +63,30 @@ export function deriveAnonTeaser(
     .replace(/[\uD800-\uDBFF]$/, "")
     .replace(/\s+\S*$/, "");
   return { text: trailOff(cut), truncated: true };
+}
+
+// VENUE: gate out the 217 AI-fabricated template descriptions (never show
+// unapproved boilerplate to logged-out strangers) + empty.
+export function deriveAnonTeaser(
+  longDescription: string | null | undefined,
+): AnonTeaser | null {
+  const text = (longDescription ?? "").trim();
+  if (!text || TEMPLATE_RE.test(text)) return null;
+  return teaserFromText(text);
+}
+
+// EVENT: the only gate is empty → null. Event descriptions are real source
+// prose (Ticketmaster/Eventbrite/Places), NOT the AI-fabricated boilerplate
+// class venues had, so there is no template regex to apply — Maria's call
+// 2026-07-13 ("show any real description"; verified on prod: 35/43 real, 0
+// template signature). curated_at is NOT required (it marks hand-curation,
+// a higher bar than "real and showable").
+export function deriveAnonEventTeaser(
+  description: string | null | undefined,
+): AnonTeaser | null {
+  const text = (description ?? "").trim();
+  if (!text) return null;
+  return teaserFromText(text);
 }
 
 // Top 3 of the venue's 20-60 tags: enough signal to read the vibe, too

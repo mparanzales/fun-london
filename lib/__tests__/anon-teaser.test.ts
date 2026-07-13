@@ -3,6 +3,7 @@ import {
   ANON_TAG_LIMIT,
   deriveAnonTags,
   deriveAnonTeaser,
+  deriveAnonEventTeaser,
   TEASER_MAX,
 } from "@/lib/anon-teaser";
 
@@ -72,6 +73,42 @@ describe("deriveAnonTeaser (anon moat surface)", () => {
     const noSpaces = "x".repeat(139) + "🍷" + "y".repeat(60);
     const teaser = deriveAnonTeaser(noSpaces)!;
     expect(teaser.text).not.toMatch(/[\uD800-\uDBFF]…$/);
+  });
+});
+
+describe("deriveAnonEventTeaser (event anon surface)", () => {
+  it("gates only on empty (null/blank description returns null)", () => {
+    expect(deriveAnonEventTeaser("")).toBeNull();
+    expect(deriveAnonEventTeaser("   ")).toBeNull();
+    expect(deriveAnonEventTeaser(null)).toBeNull();
+    expect(deriveAnonEventTeaser(undefined)).toBeNull();
+  });
+
+  it("does NOT apply the venue template regex (events have no such class)", () => {
+    // This exact string is null for a VENUE (fabricated boilerplate) but a
+    // real event could legitimately open this way — events must still tease.
+    const venueTemplate =
+      "An independent restaurant in Soho. Opening hours can vary, so check ahead. A solid pick for a night out in the area.";
+    expect(deriveAnonTeaser(venueTemplate)).toBeNull(); // venue: gated
+    expect(deriveAnonEventTeaser(venueTemplate)).not.toBeNull(); // event: shown
+  });
+
+  it("shares the cap/ellipsis core: truncates long real prose with dots", () => {
+    const long =
+      "A major Tate Modern exhibition showcasing over 130 works, archives and rarely seen photographs spanning seven decades of the artist's singular career from the earliest street scenes through to the late abstract period and beyond";
+    expect(long.length).toBeGreaterThan(160); // guard: this must actually truncate
+    const t = deriveAnonEventTeaser(long)!;
+    expect(t.truncated).toBe(true);
+    expect(t.text.endsWith("…")).toBe(true);
+    expect(t.text.length).toBeLessThanOrEqual(TEASER_MAX + 1);
+  });
+
+  it("whole-fit short description: no dots, truncated:false", () => {
+    const short = "Shakespeare performed outdoors in Regent's Park.";
+    expect(deriveAnonEventTeaser(short)).toEqual({
+      text: short,
+      truncated: false,
+    });
   });
 });
 
