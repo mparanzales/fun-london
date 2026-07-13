@@ -668,7 +668,14 @@ export function ExploreFeed({
     })
       .then((res) => {
         if (myReq !== reqIdRef.current) return;
-        setLoaded((prev) => [...prev, ...res.venues]);
+        // Dedupe by id when appending: an unstable server sort could return a
+        // row already on a previous page, and a repeated id renders as a
+        // duplicate card (the key is `venue-${id}`). Belt-and-suspenders on top
+        // of the stable sort tiebreaker.
+        setLoaded((prev) => {
+          const seen = new Set(prev.map((v) => v.id));
+          return [...prev, ...res.venues.filter((v) => !seen.has(v.id))];
+        });
         setFeedHasMore(res.hasMore);
       })
       .finally(() => {
