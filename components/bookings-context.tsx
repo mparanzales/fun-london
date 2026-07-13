@@ -27,6 +27,7 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Booking } from "@/lib/types";
+import { isSignOutTransition } from "@/lib/auth-transition";
 
 const STORAGE_KEY = "fl.bookings.v1";
 
@@ -81,10 +82,34 @@ export function BookingsProvider({
   useEffect(() => {
     bookingsRef.current = bookings;
   }, [bookings]);
+  // Previous authUserId, so the hydrate effect can spot the signed-in →
+  // signed-out transition. Initialised to the current value so a normal
+  // anonymous FIRST mount is never mistaken for a sign-out.
+  const prevAuthUserIdRef = useRef(authUserId);
 
   // ── Hydrate (and migrate if newly signed in) ────────────────────────
   useEffect(() => {
     let cancelled = false;
+
+    // On sign-out (uuid → null) reset local state. The anon branch below
+    // MERGES localStorage into the current in-memory list, so without this it
+    // would keep the just-signed-out account's bookings (localStorage was
+    // emptied on that account's sign-in migration, line ~166), persist them
+    // back, and migrate them into the NEXT account on a shared browser. Gated
+    // on the transition so a genuine anonymous mount keeps its bookings.
+    const signedOut = isSignOutTransition(
+      prevAuthUserIdRef.current,
+      authUserId,
+    );
+    prevAuthUserIdRef.current = authUserId;
+    if (signedOut) {
+      setBookings([]);
+      try {
+        window.localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // localStorage unavailable
+      }
+    }
 
     if (!authUserId) {
       // Anonymous: hydrate from localStorage, merge with current state

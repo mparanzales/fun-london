@@ -30,6 +30,7 @@ import { createClient } from "@/lib/supabase/client";
 import { MOCK_SAVED_IDS } from "@/lib/mock-data";
 import { track } from "@/lib/analytics";
 import { recordSignal, type SignalSurface } from "@/lib/signals";
+import { isSignOutTransition } from "@/lib/auth-transition";
 
 const STORAGE_KEY = "fl.saved.v1";
 
@@ -65,10 +66,36 @@ export function SavedProvider({
   useEffect(() => {
     savedSetRef.current = savedSet;
   }, [savedSet]);
+  // Previous authUserId, so the hydrate effect can spot the signed-in →
+  // signed-out transition. Initialised to the current value so a normal
+  // anonymous FIRST mount is never mistaken for a sign-out.
+  const prevAuthUserIdRef = useRef(authUserId);
 
   // ── Hydrate (and migrate if we're newly signed in) ──────────────────
   useEffect(() => {
     let cancelled = false;
+
+    // On sign-out (uuid → null) reset local state. The in-memory set still
+    // holds the previous account's slugs, and the anon hydrate below can't
+    // clear them: fl.saved.v1 was emptied during that account's sign-in
+    // migration (line ~136) and never rewritten while signed in, so `raw` is
+    // null and setSavedSet is skipped. Left as-is, the retained set is
+    // persisted to localStorage and then migrated into the NEXT account signed
+    // in on this browser. Clearing is gated on the actual transition, so a
+    // genuine anonymous mount (prev null) keeps its saved spots.
+    const signedOut = isSignOutTransition(
+      prevAuthUserIdRef.current,
+      authUserId,
+    );
+    prevAuthUserIdRef.current = authUserId;
+    if (signedOut) {
+      setSavedSet(new Set());
+      try {
+        window.localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // localStorage unavailable
+      }
+    }
 
     if (!authUserId) {
       // Anonymous path
