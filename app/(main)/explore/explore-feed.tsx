@@ -534,36 +534,42 @@ export function ExploreFeed({
       snap.filters.openNow,
     );
 
-    // Restore scroll by CONVERGING, not one-shot. The restored pages paint on
-    // a LATER frame (setLoaded above is async), so on the first frame the page
-    // is still just the 24-card server page-0 — a single window.scrollTo then
-    // clamps against a short page, the browser drops us back at the top, and
-    // nothing re-applies once the full list finally paints. (Next's own
-    // back-nav scroll handling can also reset us after we fire.) So re-apply
-    // the target every frame until the page is tall enough to actually hold it,
-    // then stop — and bail the instant the user scrolls, so we never fight a
-    // deliberate gesture.
+    // Restore scroll by CONVERGING toward the target and HOLDING it until it
+    // sticks. v1 ran a fixed 600ms loop that could stop before the page had
+    // finished growing (landing short of a deep offset), and didn't re-correct
+    // when Next's own back-nav scroll fired afterwards — leaving you at a random
+    // mid-scroll spot. So each frame we scroll to the target CLAMPED to the
+    // page's current height (sit at the bottom while it's still short — which
+    // also trips the pagination sentinel to grow it — then climb as the restored
+    // pages paint), and we only stop once we've sat exactly on the TRUE target
+    // for several consecutive frames. That steadiness re-overwrites a late layout
+    // shift or a Next scroll-stomp before we let go. Generous budget for heavy
+    // feeds; bail the instant the user scrolls so we never fight a real gesture.
     const targetY = snap.scrollY;
     let raf = 0;
     let cancelled = false;
+    let settledFrames = 0;
     const cancel = () => {
       cancelled = true;
     };
     if (targetY > 0) {
-      const deadline = performance.now() + 600;
+      const deadline = performance.now() + 1500;
       window.addEventListener("wheel", cancel, { passive: true });
       window.addEventListener("touchmove", cancel, { passive: true });
       window.addEventListener("keydown", cancel);
       const step = () => {
         if (cancelled) return;
-        window.scrollTo(0, targetY);
         const maxY = document.documentElement.scrollHeight - window.innerHeight;
-        const reached = Math.abs(window.scrollY - targetY) <= 2;
-        // Done when we've hit the spot on a page tall enough to hold it, or the
-        // page can't grow any further, or the time budget runs out.
-        if ((reached && maxY >= targetY - 2) || performance.now() > deadline) {
-          return;
-        }
+        // Aim for the target, but never past what's actually rendered yet.
+        const goal = Math.max(0, Math.min(targetY, maxY));
+        window.scrollTo(0, goal);
+        // "Landed" = the page is finally tall enough for the real target AND
+        // we're sitting on it. Needs a few steady frames so a late shift or
+        // Next's restore gets overwritten before we release.
+        const landed =
+          maxY >= targetY - 2 && Math.abs(window.scrollY - targetY) <= 2;
+        settledFrames = landed ? settledFrames + 1 : 0;
+        if (settledFrames >= 4 || performance.now() > deadline) return;
         raf = requestAnimationFrame(step);
       };
       raf = requestAnimationFrame(step);
@@ -575,7 +581,8 @@ export function ExploreFeed({
       window.removeEventListener("touchmove", cancel);
       window.removeEventListener("keydown", cancel);
     };
-    // Mount-only: the converge loop above self-terminates within ~600ms.
+    // Mount-only: the loop self-terminates once it holds the target for a few
+    // frames, or after the ~1.5s budget.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
