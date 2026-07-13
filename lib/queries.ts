@@ -303,6 +303,7 @@ export async function fetchPlanVenues(): Promise<Venue[]> {
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
       .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`fetchPlanVenues: ${error.message}`);
     const page = (data as VenuePlanRow[]) ?? [];
@@ -417,6 +418,7 @@ export async function fetchVenuePreview(limit: number): Promise<Venue[]> {
     .neq("img_url", "")
     .order("curation_tier", { ascending: true })
     .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
     .limit(limit);
   if (error) throw new Error(`fetchVenuePreview: ${error.message}`);
   return (data as VenueCardRow[]).map(mapVenuePreview);
@@ -440,6 +442,7 @@ export async function fetchAllVenueCards(): Promise<Venue[]> {
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
       .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`fetchAllVenueCards: ${error.message}`);
     const page = (data as VenueCardRow[]) ?? [];
@@ -480,6 +483,7 @@ export async function fetchAllVenueSearchRows(): Promise<
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
       .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`fetchAllVenueSearchRows: ${error.message}`);
     const page = (data as VenueRow[]) ?? [];
@@ -552,6 +556,7 @@ async function getVenueIndex(): Promise<FeedRankRow[]> {
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
       .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`getVenueIndex: ${error.message}`);
     const page = (data as FeedRankRow[]) ?? [];
@@ -714,7 +719,8 @@ export async function fetchVenueCategoryPreview(
       .not("img_url", "ilike", "%unsplash%")
       .neq("img_url", "")
       .order("curation_tier", { ascending: true })
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
   const [general, restaurants, bars, cafes, music] = await Promise.all([
     base().limit(perCategory), // For You head (curated first)
     base().eq("type", "Restaurant").limit(perCategory),
