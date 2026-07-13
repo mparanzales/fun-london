@@ -534,12 +534,48 @@ export function ExploreFeed({
       snap.filters.openNow,
     );
 
-    // Scroll once the restored list has painted — the cards' fixed aspect
-    // ratios give the page its full height immediately, no image wait needed.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.scrollTo(0, snap.scrollY));
-    });
-    // Mount-only: restores once, before any user interaction can race it.
+    // Restore scroll by CONVERGING, not one-shot. The restored pages paint on
+    // a LATER frame (setLoaded above is async), so on the first frame the page
+    // is still just the 24-card server page-0 — a single window.scrollTo then
+    // clamps against a short page, the browser drops us back at the top, and
+    // nothing re-applies once the full list finally paints. (Next's own
+    // back-nav scroll handling can also reset us after we fire.) So re-apply
+    // the target every frame until the page is tall enough to actually hold it,
+    // then stop — and bail the instant the user scrolls, so we never fight a
+    // deliberate gesture.
+    const targetY = snap.scrollY;
+    let raf = 0;
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+    };
+    if (targetY > 0) {
+      const deadline = performance.now() + 600;
+      window.addEventListener("wheel", cancel, { passive: true });
+      window.addEventListener("touchmove", cancel, { passive: true });
+      window.addEventListener("keydown", cancel);
+      const step = () => {
+        if (cancelled) return;
+        window.scrollTo(0, targetY);
+        const maxY = document.documentElement.scrollHeight - window.innerHeight;
+        const reached = Math.abs(window.scrollY - targetY) <= 2;
+        // Done when we've hit the spot on a page tall enough to hold it, or the
+        // page can't grow any further, or the time budget runs out.
+        if ((reached && maxY >= targetY - 2) || performance.now() > deadline) {
+          return;
+        }
+        raf = requestAnimationFrame(step);
+      };
+      raf = requestAnimationFrame(step);
+    }
+    return () => {
+      cancelled = true;
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("wheel", cancel);
+      window.removeEventListener("touchmove", cancel);
+      window.removeEventListener("keydown", cancel);
+    };
+    // Mount-only: the converge loop above self-terminates within ~600ms.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
