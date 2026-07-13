@@ -17,6 +17,7 @@
 
 import { requestMemo as reactCache } from "@/lib/request-memo";
 import { createClient } from "@/lib/supabase/server";
+import { createStaticAnonClient } from "@/lib/supabase/static";
 import { haversineKm } from "@/lib/geo";
 import { rankRowsByTaste } from "@/lib/taste-feed";
 import { createServiceClient } from "@/lib/supabase/admin";
@@ -834,9 +835,12 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
 // cache(): generateMetadata + the page component both call this per anon view;
 // per-request memo makes that one DB round-trip (same pattern as
 // fetchAnonVenueTeaser). supabase-js does not dedupe on its own.
+// Cookie-FREE client (createStaticAnonClient): reading cookies() would force
+// dynamic rendering and silently disable ISR on the /anon detail twins. This
+// path only reads card columns via the anon role, so no session is needed.
 export const fetchVenuePreviewBySlug = reactCache(
   async (slug: string): Promise<Venue | null> => {
-    const supabase = await createClient();
+    const supabase = createStaticAnonClient();
     const { data, error } = await supabase
       .from("venues")
       .select(VENUE_CARD_COLUMNS)
@@ -854,9 +858,10 @@ export const fetchVenuePreviewBySlug = reactCache(
 
 // By-id variant — used for the linked venue card on the event detail page so a
 // signed-out visitor never receives that venue's moat fields either.
+// Cookie-free (see fetchVenuePreviewBySlug) so the /anon event twin stays ISR.
 export const fetchVenuePreviewById = reactCache(
   async (id: string): Promise<Venue | null> => {
-    const supabase = await createClient();
+    const supabase = createStaticAnonClient();
     const { data, error } = await supabase
       .from("venues")
       .select(VENUE_CARD_COLUMNS)
@@ -1112,9 +1117,10 @@ export async function fetchEventById(id: string): Promise<Event | null> {
 // gates as fetchEventById but selects only EVENT_CARD_COLUMNS — no source_url
 // or description reaches the anonymous client.
 // cache(): generateMetadata + the page both call this per anon view.
+// Cookie-free (see fetchVenuePreviewBySlug) so the /anon event twin stays ISR.
 export const fetchEventPreviewById = reactCache(
   async (id: string): Promise<Event | null> => {
-    const supabase = await createClient();
+    const supabase = createStaticAnonClient();
     const { data, error } = await supabase
       .from("events")
       .select(EVENT_CARD_COLUMNS)

@@ -10,6 +10,9 @@ import { TAGLINE } from "@/lib/config";
 export const alt = "Fun London venue";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
+// Cache the generated card per slug (matches the /anon twin's TTL) so every
+// social unfurl doesn't re-render + re-query. The fetcher is cookie-free.
+export const revalidate = 900;
 
 export default async function Image({
   params,

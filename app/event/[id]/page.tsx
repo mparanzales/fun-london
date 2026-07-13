@@ -1,42 +1,21 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import {
-  fetchEventById,
-  fetchVenueById,
-  fetchEventPreviewById,
-  fetchVenuePreviewById,
-} from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
-import { SITE_URL } from "@/lib/config";
-import { EventDetail } from "./event-detail";
-import { DetailAuthWall } from "@/components/detail-auth-wall";
-import { DesktopNav } from "@/components/desktop-nav";
+import { buildEventMetadata, EventPageBody } from "./event-page-shared";
+
+// DYNAMIC twin of /anon/event/[id]: reads the auth cookie, full data
+// signed-in. Cookie-less traffic is rewritten to the ISR twin by the
+// middleware. Shared implementation lives in event-page-shared.tsx.
 
 // Force dynamic so changes from the events ingest cron show up
-// immediately on the detail page (no static cache).
+// immediately for signed-in users (no static cache on THIS route; the
+// anon twin accepts 15-minute staleness for cacheability).
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(props: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const params = await props.params;
-  // Card-level fetch: metadata is public (crawlers/link unfurls run as anon), so
-  // never select the full row here.
-  const event = await fetchEventPreviewById(params.id);
-  if (!event) return { title: "Event not found" };
-
-  const title = `${event.name}, ${event.venueName}, ${event.area}`;
-  const description = `${event.name} at ${event.venueName}, ${event.area}. ${event.dateLabel}${event.timeLabel ? ` · ${event.timeLabel}` : ""}.`;
-  const url = `${SITE_URL}/event/${event.id}`;
-
-  return {
-    title,
-    description,
-    alternates: { canonical: url },
-    // OG/Twitter images auto-wired by opengraph-image.tsx in this folder.
-    openGraph: { type: "article", url, title, description },
-    twitter: { card: "summary_large_image", title, description },
-  };
+  return buildEventMetadata(params.id);
 }
 
 export default async function EventDetailPage(props: {
@@ -44,70 +23,5 @@ export default async function EventDetailPage(props: {
 }) {
   const params = await props.params;
   const authUser = await getAuthUser();
-  // Signed-out visitors get a CARD-LEVEL preview only (no sourceUrl /
-  // description / moat fields); the AuthWall overlays the sign-up prompt.
-  const event = authUser
-    ? await fetchEventById(params.id)
-    : await fetchEventPreviewById(params.id);
-  if (!event) notFound();
-
-  // Pull the linked venue when we have one. Gives the detail page access to
-  // neighbourhood vibe for richer context. Null is fine — the UI degrades
-  // gracefully. Anonymous visitors get the card-level venue preview, not the
-  // full row.
-  const venue = event.venueId
-    ? authUser
-      ? await fetchVenueById(event.venueId)
-      : await fetchVenuePreviewById(event.venueId)
-    : null;
-
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Event",
-    name: event.name,
-    startDate: event.startsAt,
-    eventStatus: "https://schema.org/EventScheduled",
-    eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
-    image: event.imgUrl,
-    url: `${SITE_URL}/event/${event.id}`,
-    location: {
-      "@type": "Place",
-      name: event.venueName,
-      address: {
-        "@type": "PostalAddress",
-        addressLocality: event.area,
-        addressRegion: "London",
-        addressCountry: "GB",
-      },
-    },
-    ...(event.sourceUrl
-      ? {
-          offers: {
-            "@type": "Offer",
-            url: event.sourceUrl,
-            availability: "https://schema.org/InStock",
-          },
-        }
-      : {}),
-  };
-
-  return (
-    <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-      {/* Desktop-only top nav (hidden lg:block) — same treatment as the
-          venue route: laptop landers need a way into the app. */}
-      <DesktopNav />
-      <EventDetail event={event} venue={venue} signedIn={!!authUser} />
-      {/* Mobile: hard wall unchanged. Desktop: dismissable ("Just looking")
-          and re-surfaces every few minutes — same DetailAuthWall as /venue. */}
-      <DetailAuthWall
-        signedIn={!!authUser}
-        title={`Sign up to see ${event.name}`}
-        backHref="/explore"
-      />
-    </>
-  );
+  return <EventPageBody id={params.id} signedIn={!!authUser} />;
 }
