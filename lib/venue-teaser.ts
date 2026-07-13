@@ -35,6 +35,11 @@ export const fetchAnonVenueTeaser = cache(
       // derive from a non-catalogue row (demo seeds have no place id),
       // independent of caller ordering.
       .not("google_place_id", "is", null)
+      // The teaser gate is now the MARKER, not the template regex: only a
+      // curated description is shown to strangers (see the
+      // description_curated_at migration in schema.sql). deriveAnonTeaser's
+      // regex stays as a harmless second gate for any not-yet-backfilled row.
+      .not("description_curated_at", "is", null)
       .maybeSingle();
     if (error || !data) return EMPTY;
     return {
