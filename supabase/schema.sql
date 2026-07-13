@@ -731,3 +731,39 @@ alter table public.venues
 create index if not exists venues_feed_order_idx
   on public.venues (curation_tier, created_at)
   where google_place_id is not null and hidden_at is null;
+
+-- 2026-07-13 · Anon teaser gate → a real marker, not a regex ───────────────────
+-- description_curated_at marks a venue whose long_description is shown-worthy to
+-- logged-out strangers (the anon teaser, lib/venue-teaser.ts). It REPLACES the
+-- brittle template-signature regex in lib/anon-teaser.ts (which excluded the
+-- 217 AI-fabricated "An independent {type}… Opening hours can vary" boilerplate)
+-- with a column the curation pipeline / admin can set per venue. The teaser is
+-- gated on `description_curated_at IS NOT NULL`.
+-- SERVER-ONLY: read only via the service client, so it needs NO anon column
+-- GRANT — it is not stranger-visible, it just decides IF the teaser runs.
+-- Idempotent — paste-and-run in the Supabase SQL Editor, then confirm the
+-- column exists BEFORE deploying the venue-teaser.ts gate that reads it (a
+-- SELECT of a missing column errors the anon venue page).
+alter table public.venues
+  add column if not exists description_curated_at timestamptz;
+
+-- Backfill — RUN-ONCE: the guard only seeds when NO venue has the marker yet
+-- (first application), so re-pasting this file later can NEVER resurrect a
+-- venue a curator deliberately suppressed by clearing its marker. NULL means
+-- "not yet curated", NOT "suppressed" — suppression uses hidden_at. Marks
+-- every venue whose description is non-empty and NOT the template boilerplate,
+-- from the same signature the runtime regex used — on btrim() to match
+-- lib/anon-teaser.ts (which trims before testing), so which venues tease is
+-- UNCHANGED. Future venues get the marker set when their copy is curated.
+do $$
+begin
+  if not exists (
+    select 1 from public.venues where description_curated_at is not null
+  ) then
+    update public.venues
+      set description_curated_at = now()
+      where long_description is not null
+        and btrim(long_description) <> ''
+        and btrim(long_description) !~* '^An independent [\s\S]*Opening hours can vary';
+  end if;
+end$$;
