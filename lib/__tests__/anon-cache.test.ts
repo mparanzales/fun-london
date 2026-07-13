@@ -25,6 +25,13 @@ describe("anonCachePath (ISR rewrite targeting)", () => {
   it("never double-rewrites an /anon path", () => {
     expect(anonCachePath("/anon/venue/padella")).toBeNull();
   });
+
+  it("normalizes a single trailing slash so it still rewrites", () => {
+    expect(anonCachePath("/venue/padella/")).toBe("/anon/venue/padella");
+    expect(anonCachePath("/event/abc/")).toBe("/anon/event/abc");
+    // trailing slash must not turn a deeper segment into a match
+    expect(anonCachePath("/venue/padella/opengraph-image/")).toBeNull();
+  });
 });
 
 describe("hasSupabaseAuthCookie", () => {
@@ -39,6 +46,17 @@ describe("hasSupabaseAuthCookie", () => {
   it("ignores unrelated cookies (consent, analytics, none)", () => {
     expect(hasSupabaseAuthCookie([])).toBe(false);
     expect(hasSupabaseAuthCookie(["fl-consent", "ph_phc_x"])).toBe(false);
-    expect(hasSupabaseAuthCookie(["sb-fxfuzabr-code-verifier"])).toBe(false);
+  });
+
+  it("treats the PKCE verifier cookie as 'has cookie' (safe over-detection)", () => {
+    // Supabase's real mid-OAuth cookie is `sb-<ref>-auth-token-code-verifier`,
+    // which contains `-auth-token` and so matches → routes to the DYNAMIC path.
+    // That is the SAFE direction: the matcher must always fail toward "has
+    // cookie" (dynamic, never cached), never toward serving the anon cache to
+    // someone who might be mid-auth. Do NOT "optimize" by excluding verifier
+    // names.
+    expect(
+      hasSupabaseAuthCookie(["sb-fxfuzabr-auth-token-code-verifier"]),
+    ).toBe(true);
   });
 });

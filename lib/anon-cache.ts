@@ -15,7 +15,10 @@ const ANON_CACHEABLE_RE = /^\/(venue|event)\/[^/]+$/;
 
 export function anonCachePath(pathname: string): string | null {
   if (pathname.startsWith("/anon/")) return null; // never double-rewrite
-  return ANON_CACHEABLE_RE.test(pathname) ? `/anon${pathname}` : null;
+  // Strip a single trailing slash so `/venue/x/` rewrites directly instead of
+  // relying on Next's 308 → then a second middleware pass (a perf miss).
+  const p = pathname.length > 1 ? pathname.replace(/\/$/, "") : pathname;
+  return ANON_CACHEABLE_RE.test(p) ? `/anon${p}` : null;
 }
 
 // Supabase SSR session cookies are named `sb-<project-ref>-auth-token`,
