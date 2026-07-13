@@ -30,6 +30,8 @@ export function EventDetail({
   event,
   venue,
   signedIn,
+  anonTeaser = null,
+  anonTeaserTruncated = false,
 }: {
   event: Event;
   venue: Venue | null;
@@ -37,6 +39,11 @@ export function EventDetail({
   // desktop masthead CTA needs to know it's the ANON state so it can say
   // "sign in" instead of the misleading "No ticket link yet".
   signedIn: boolean;
+  // Server-derived, capped teaser of the event's own description (moat
+  // field, withheld from anon). `anonTeaserTruncated` gates the "Continue
+  // reading" pull to only when text was actually cut (honest-copy).
+  anonTeaser?: string | null;
+  anonTeaserTruncated?: boolean;
 }) {
   const router = useRouter();
   const place = event.placeDetails;
@@ -201,6 +208,26 @@ export function EventDetail({
           <p className="text-[15px] text-fg/90 leading-relaxed mt-5">
             {event.description}
           </p>
+        )}
+
+        {/* Anon desktop: the server-capped teaser of the description (which is
+            a moat field, so event.description above is null for anon). Typeset
+            like the real blurb; sign-up pull only when text was truncated.
+            Desktop-only — mobile's hard wall blurs everything anyway. */}
+        {!signedIn && anonTeaser && (
+          <div className="hidden lg:block mt-5">
+            <p className="text-[15px] text-fg/90 leading-relaxed">
+              {anonTeaser}
+            </p>
+            {anonTeaserTruncated && (
+              <Link
+                href={signInHref}
+                className="mt-1.5 inline-block rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Continue reading · free
+              </Link>
+            )}
+          </div>
         )}
 
         {/* Add to calendar (.ics) + share */}

@@ -8,6 +8,7 @@ import {
 } from "@/lib/queries";
 import { SITE_URL } from "@/lib/config";
 import { EventDetail } from "./event-detail";
+import { fetchAnonEventTeaser } from "@/lib/event-teaser";
 import { DetailAuthWall } from "@/components/detail-auth-wall";
 import { DesktopNav } from "@/components/desktop-nav";
 
@@ -66,6 +67,11 @@ export async function EventPageBody({
       : await fetchVenuePreviewById(event.venueId)
     : null;
 
+  // Anon teaser of the event's own description (server-derived, capped — see
+  // lib/event-teaser). Signed-in users get the full description on the event
+  // object instead. Cookie-free so the /anon event twin stays ISR.
+  const anonTeaser = signedIn ? null : (await fetchAnonEventTeaser(id)).teaser;
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Event",
@@ -105,7 +111,13 @@ export async function EventPageBody({
       {/* Desktop-only top nav (hidden lg:block) — same treatment as the
           venue route: laptop landers need a way into the app. */}
       <DesktopNav />
-      <EventDetail event={event} venue={venue} signedIn={signedIn} />
+      <EventDetail
+        event={event}
+        venue={venue}
+        signedIn={signedIn}
+        anonTeaser={anonTeaser?.text ?? null}
+        anonTeaserTruncated={anonTeaser?.truncated ?? false}
+      />
       {/* Mobile: hard wall unchanged. Desktop: dismissable ("Just looking")
           and re-surfaces every few minutes — same DetailAuthWall as /venue. */}
       <DetailAuthWall
