@@ -1,13 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
-import { AnalyticsGate } from "@/components/analytics-gate";
-import { ConsentBanner } from "@/components/consent-banner";
-import { SignInTracker } from "@/components/signin-tracker";
-import { SavedProvider } from "@/components/saved-context";
-import { BookingsProvider } from "@/components/bookings-context";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ProfilePrefsMigration } from "@/components/profile-prefs-migration";
-import { getAuthUser } from "@/lib/auth";
+import { AuthUserProvider } from "@/components/auth-user-context";
+import { AuthedProviders } from "@/components/authed-providers";
 import { SITE_URL } from "@/lib/config";
 import "./globals.css";
 
@@ -64,19 +59,16 @@ export const viewport: Viewport = {
   ],
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // Fetch the auth user once at the root and pass its id (or null)
-  // into both client providers. When this changes (sign-in, sign-out)
-  // the layout re-renders and the providers re-hydrate from the
-  // appropriate backing store (DB or localStorage) and run the
-  // one-time local→DB migration if needed.
-  const authUser = await getAuthUser();
-  const authUserId = authUser?.id ?? null;
-
+  // Cookie-FREE on purpose: this layout no longer reads getAuthUser(), so it
+  // doesn't force every route into dynamic rendering (which disabled ISR on
+  // the /anon detail twins). The signed-in id now flows from AuthUserProvider
+  // (browser session) into AuthedProviders, which passes it to the same four
+  // client providers, unchanged. See components/auth-user-context.tsx.
   return (
     // suppressHydrationWarning: the inline anti-flash script below writes
     // data-theme onto <html> before React hydrates, so the client DOM has an
@@ -94,21 +86,15 @@ export default async function RootLayout({
               "(function(){try{var m=localStorage.getItem('fl.theme.v1');var t;if(m==='day'||m==='night'){t=m}else{var h=new Date().getHours();t=(h>=18||h<6)?'night':'day'}document.documentElement.dataset.theme=t}catch(e){}})();",
           }}
         />
-        {/* SavedProvider, BookingsProvider, ThemeProvider live at root so
-            every route (consumer (main) shell, splash, onboarding,
-            /venue/[slug], /booking/[slug]/confirmed) shares one provider
-            tree. Bookings sits inside Saved purely for read order; they
-            don't depend on each other. */}
+        {/* One provider tree at root so every route (consumer (main) shell,
+            splash, onboarding, /venue/[slug], /booking/[slug]/confirmed)
+            shares it and state persists across client navigations.
+            AuthUserProvider (browser session) feeds the id into
+            AuthedProviders → the four unchanged providers. */}
         <ThemeProvider />
-        <ProfilePrefsMigration authUserId={authUserId} />
-        <SavedProvider authUserId={authUserId}>
-          <BookingsProvider authUserId={authUserId}>
-            {children}
-          </BookingsProvider>
-        </SavedProvider>
-        <ConsentBanner />
-        <SignInTracker authUserId={authUserId} />
-        <AnalyticsGate />
+        <AuthUserProvider>
+          <AuthedProviders>{children}</AuthedProviders>
+        </AuthUserProvider>
       </body>
     </html>
   );
