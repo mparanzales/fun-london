@@ -1,0 +1,113 @@
+name: backup-db
+
+# Weekly logical database backup to a PRIVATE Cloudflare R2 bucket.
+#
+# Once the venue photos moved to R2, Supabase Pro's daily backups were the only
+# remaining reason to keep paying for Pro. This job replaces them at zero cost:
+# it exports every public table (service role) into one gzipped JSON archive and
+# uploads it to a private R2 bucket, keeping the last 12 weeks. See
+# scripts/backup-db.ts + docs/RESTORE.md.
+#
+# Schedule: 04:00 UTC every Sunday. Manual trigger also enabled.
+#
+# Requires one repo variable/secret NOT shared with the app: R2_BACKUP_BUCKET
+# (the private bucket name). The R2_* credentials + Supabase secrets are reused.
+
+on:
+  schedule:
+    # 04:00 UTC every Sunday. https://crontab.guru/#0_4_*_*_0
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: back up the database to private R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write # for the failure-alert step to open/comment an issue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Matches the other cron workflows: @supabase/supabase-js needs the
+          # native WebSocket support that arrived in Node 22.
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Back up the database + write summary
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          # Reused R2 credentials (same ones the photo pipeline uses)...
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          # ...but a SEPARATE private bucket, never the public photos one.
+          R2_BACKUP_BUCKET: ${{ secrets.R2_BACKUP_BUCKET }}
+        run: |
+          set -o pipefail
+          # Deterministic archive key: date resolved once, in the runner.
+          export BACKUP_DATE="$(date -u +%F)"
+          pnpm backup-db 2>&1 | tee backup.log
+
+      - name: Render step summary
+        # Always runs so the manifest is visible in the Actions UI without
+        # digging into raw logs.
+        if: always()
+        run: |
+          {
+            echo "## Database backup summary"
+            echo ""
+            echo '```'
+            if grep -q "─── SUMMARY ───" backup.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' backup.log
+            else
+              tail -40 backup.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Alert on failure
+        # cancelled() covers timeout-minutes kills, which are NOT failure()
+        if: failure() || cancelled()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🤖 cron failing: ${context.workflow}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Scheduled run failed: ${runUrl}`;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'cron-failure',
+              per_page: 100,
+            });
+            const hit = open.data.find((i) => i.title === title);
+            if (hit) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: hit.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['cron-failure'],
+              });
+            }
