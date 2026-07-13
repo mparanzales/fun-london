@@ -5,7 +5,11 @@
 //   2. Google Place Details for canonical data (lat/lng, photos, hours, etc.).
 //   3. Upsert into public.venues (curation_tier = "discovered").
 //      Also upsert into partner_prospects if no major booking platform detected.
-//   4. Mark the candidate as status = "ingested" in pending_candidates.
+//   4. Fetch the venue's Google reviews (verbatim, refresh-reviews shape) and
+//      embed them into venue_embeddings, so the venue is visible to the taste
+//      ranker immediately. Embed failures are loud but non-fatal (the nightly
+//      missing-embeddings net in maintenance.yml catches strays).
+//   5. Mark the candidate as status = "ingested" in pending_candidates.
 //
 // Idempotent: safe to re-run. Skips candidates whose google_place_id is
 // already in venues. Skips candidates that previously failed (status =
@@ -43,6 +47,8 @@ import {
 } from "@/lib/tag-vocabulary";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 import { areaFromPostcode } from "@/lib/postcode-areas";
+import { embedAndUpsertVenue } from "./venue-embedding";
+import { mapGoogleReviews, fetchPlaceReviews } from "./google-reviews";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const RETRY_FAILED = process.argv.includes("--retry-failed");
@@ -724,7 +730,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
 
   if (DRY_RUN) {
     console.log(
-      `  [dry-run] would upsert as slug="${slug}" · type=${mapVenueType(candidate, details.types)} · booking=${bookingLinks[0]?.platform ?? "none"}`,
+      `  [dry-run] would upsert as slug="${slug}" · type=${mapVenueType(candidate, details.types)} · booking=${bookingLinks[0]?.platform ?? "none"} · then fetch reviews + embed`,
     );
     return { status: "dry" as const };
   }
@@ -744,11 +750,53 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     ...buildVenueRow(candidate, details, imgUrl, slug, photoUrls),
     map_url: mapUrl,
   };
-  const { error: venueErr } = await supabase
+  const { data: published, error: venueErr } = await supabase
     .from("venues")
-    .upsert(venueRow, { onConflict: "google_place_id" });
+    .upsert(venueRow, { onConflict: "google_place_id" })
+    .select("id")
+    .single();
   if (venueErr) throw new Error(`venues upsert failed: ${venueErr.message}`);
   console.log(`  ✓ venues · slug="${slug}"`);
+
+  // Approve-time embedding. A published venue without a venue_embeddings row
+  // is INVISIBLE to the taste ranker (For You), so embed in the same run:
+  // pull the venue's Google reviews once (stored verbatim, same shape as
+  // scripts/refresh-reviews.ts), then embed locally and upsert the vector.
+  // Fail-loud per venue, never fatal: an embed failure leaves the venue
+  // published and is caught by the nightly missing-embeddings net in
+  // .github/workflows/maintenance.yml.
+  let embed: "embedded" | "no_reviews" | "failed" = "failed";
+  let embedError: string | undefined;
+  try {
+    const reviews = mapGoogleReviews(
+      await fetchPlaceReviews(details.id, GOOGLE_PLACES_API_KEY!),
+    );
+    const reviewsSyncedAt = new Date().toISOString();
+    const { error: revErr } = await supabase
+      .from("venues")
+      .update({ reviews, reviews_synced_at: reviewsSyncedAt })
+      .eq("id", published.id);
+    if (revErr) throw new Error(`reviews update failed: ${revErr.message}`);
+    const embedded = await embedAndUpsertVenue(supabase, {
+      id: published.id,
+      reviews,
+      reviews_synced_at: reviewsSyncedAt,
+    });
+    embed = embedded.status;
+    if (embedded.status === "embedded") {
+      console.log(`  ✓ venue_embeddings (${embedded.reviewCount} reviews)`);
+    } else {
+      console.log(
+        `  ⚠ no review text on Google yet · embedding deferred to the nightly net`,
+      );
+    }
+  } catch (embedErr) {
+    const msg = embedErr instanceof Error ? embedErr.message : String(embedErr);
+    embedError = msg;
+    console.error(
+      `  ✗ EMBED FAILED (venue stays published · nightly net will retry): ${msg}`,
+    );
+  }
 
   if (!hasMajor) {
     const prospectRow = buildProspectRow(candidate, details);
@@ -770,7 +818,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     google_place_id: details.id,
   });
 
-  return { status: "ingested" as const };
+  return { status: "ingested" as const, embed, embedError };
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -852,6 +900,9 @@ async function main() {
 
   const results = {
     ingested: 0,
+    embedded: 0,
+    embedDeferred: 0, // published, but no review text on Google yet
+    embedFailed: [] as { name: string; error?: string }[],
     skipped: 0,
     needsReview: 0,
     failed: [] as { name: string; error: string }[],
@@ -861,8 +912,16 @@ async function main() {
   for (const candidate of candidates) {
     try {
       const r = await processCandidate(candidate, usedSlugs);
-      if (r.status === "ingested") results.ingested++;
-      else if (r.status === "skipped") results.skipped++;
+      if (r.status === "ingested") {
+        results.ingested++;
+        if (r.embed === "embedded") results.embedded++;
+        else if (r.embed === "no_reviews") results.embedDeferred++;
+        else
+          results.embedFailed.push({
+            name: candidate.name,
+            error: r.embedError,
+          });
+      } else if (r.status === "skipped") results.skipped++;
       else if (r.status === "needs_review") results.needsReview++;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -896,12 +955,23 @@ async function main() {
 
   console.log("\n─────────── SUMMARY ───────────");
   console.log(`Ingested (published):        ${results.ingested}`);
+  console.log(`  embedded (taste-rankable): ${results.embedded}`);
+  console.log(`  embed deferred (no revs):  ${results.embedDeferred}`);
+  console.log(`  embed FAILED:              ${results.embedFailed.length}`);
   console.log(`Needs review (quarantined):  ${results.needsReview}`);
   console.log(`Skipped (already in venues): ${results.skipped}`);
   console.log(`Failed (lookup error):       ${results.failed.length}`);
   if (results.failed.length > 0) {
     results.failed.forEach((f) => console.log(`  ✗ ${f.name}: ${f.error}`));
     console.log("\nRe-run with --retry-failed to retry only the failed ones.");
+  }
+  if (results.embedFailed.length > 0) {
+    console.log(
+      `\n⚠ EMBED FAILED for ${results.embedFailed.length} published venue(s) · they are LIVE but invisible to For You until the nightly missing-embeddings net (or a manual \`pnpm embed-reviews:missing\`) picks them up:`,
+    );
+    results.embedFailed.forEach((f) =>
+      console.log(`  ✗ ${f.name}${f.error ? `: ${f.error}` : ""}`),
+    );
   }
   if (results.stuck.length > 0) {
     console.log(

@@ -30,7 +30,9 @@ jobs:
   refresh-venues:
     name: refresh real venues + link-check
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 15 (was 10): the missing-embeddings net downloads the MiniLM model
+    # (~30 MB, cold cache) and can embed up to 50 venues on CPU.
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write # for the failure-alert step to open/comment an issue
@@ -96,6 +98,24 @@ jobs:
           FL_REVIEW_BATCH: "30"
         run: pnpm refresh-reviews
 
+      - name: Embed venues missing embeddings
+        # Safety net for the approve-time embedding in
+        # scripts/ingest-from-pending.ts: a visible venue with no row in
+        # venue_embeddings is invisible to the taste ranker (For You), so this
+        # catches anything that slipped through (an embed failure at approve
+        # time, venues published before that path existed, reviews that only
+        # just landed via the rotating refresh above). Bounded at 50/run (the
+        # :missing script pins --limit=50). The model (Xenova/all-MiniLM-L6-v2)
+        # runs locally on the runner's CPU: no API key, no Google quota, ~$0.
+        # Runs AFTER the reviews refresh so venues whose reviews arrived
+        # tonight are embedded the same night.
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+        run: |
+          set -o pipefail
+          pnpm embed-reviews:missing 2>&1 | tee embed.log
+
       - name: Prune expired events
         # The deleted pop-up radar cron held the only expired-event cleanup
         # (and only for source='popup'); this is the source-agnostic
@@ -126,6 +146,20 @@ jobs:
               awk '/─── SUMMARY ───/{found=1} found' refresh.log
             else
               tail -40 refresh.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+            echo ""
+            echo "## Missing-embeddings net"
+            echo ""
+            echo '```'
+            # embed-reviews has no SUMMARY divider, and a cold model cache
+            # spams download-progress lines, so pull only the marker lines:
+            # the run header, counts, the missing-venue list, and the final
+            # Done/FATAL line.
+            if grep -q "missing-only" embed.log 2>/dev/null; then
+              grep -E "embed-reviews|visible venues|missing-only|no reviews yet|^  ·|and [0-9]+ more|Done|FATAL|Invalid" embed.log
+            else
+              tail -30 embed.log 2>/dev/null || echo "(no log captured)"
             fi
             echo '```'
             echo ""

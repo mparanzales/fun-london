@@ -3,24 +3,41 @@
 // alone can't: two venues that share no tags but read the same end up as
 // neighbours. Runs locally on CPU via all-MiniLM-L6-v2 (~$0, no API/vendor).
 //
-// Each review is embedded separately — the model truncates at 256 tokens, so
-// concatenating 5 reviews would drop most of them — then the per-review unit
-// vectors are mean-pooled and re-normalised into one venue vector.
+// The embedding core (model, pooling, row shape) lives in
+// scripts/venue-embedding.ts and is shared with the approve-time embedding in
+// scripts/ingest-from-pending.ts, so every writer produces identical rows.
 //
-//   pnpm embed-reviews:dry      # smoke-test on a few venues (dims/norm), no write
-//   pnpm embed-reviews          # embed every visible venue, upsert venue_embeddings
-//   pnpm embed-reviews --stale  # only (re)embed venues whose reviews changed
+//   pnpm embed-reviews:dry             # smoke-test on a few venues (dims/norm), no write
+//   pnpm embed-reviews                 # embed every visible venue, upsert venue_embeddings
+//   pnpm embed-reviews --stale         # only (re)embed venues whose reviews changed
+//   pnpm embed-reviews:missing         # only venues with NO venue_embeddings row, max 50
+//   pnpm embed-reviews:missing:dry     # same, no write (lists who is missing)
+//   pnpm embed-reviews --missing-only --limit=N   # explicit form
 //
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
-import { pipeline } from "@huggingface/transformers";
+import {
+  EMBED_MODEL as MODEL,
+  reviewTexts,
+  embedReviews,
+  buildEmbeddingRow,
+} from "./venue-embedding";
 
-const MODEL = "Xenova/all-MiniLM-L6-v2";
-const DIM = 384;
 const DRY = process.argv.includes("--dry-run");
 const STALE_ONLY = process.argv.includes("--stale");
+// Nightly safety-net mode (maintenance.yml): only venues that have NO row in
+// venue_embeddings at all. A visible venue without a row is invisible to the
+// taste ranker, so the net catches anything the approve-time path missed.
+const MISSING_ONLY = process.argv.includes("--missing-only");
+const limitArg = process.argv.find((a) => a.startsWith("--limit="));
+const LIMIT = limitArg ? parseInt(limitArg.slice("--limit=".length), 10) : null;
+// A typo'd limit in a cron must fail loudly, not silently embed 0 venues.
+if (limitArg && (!Number.isFinite(LIMIT) || (LIMIT as number) <= 0)) {
+  console.error(`Invalid ${limitArg}: --limit needs a positive integer`);
+  process.exit(1);
+}
 const DRY_LIMIT = 8;
 const UPSERT_BATCH = 100;
 
@@ -42,62 +59,11 @@ type VenueRow = {
   reviews_synced_at: string | null;
 };
 
-// Minimal structural type so we don't couple to @xenova's exported generics.
-type Extractor = (
-  texts: string[],
-  opts: { pooling: "mean"; normalize: boolean },
-) => Promise<{ tolist(): number[][] }>;
-
-let _extractor: Extractor | null = null;
-async function getExtractor(): Promise<Extractor> {
-  if (!_extractor) {
-    _extractor = (await pipeline(
-      "feature-extraction",
-      MODEL,
-    )) as unknown as Extractor;
-  }
-  return _extractor;
-}
-
-function reviewTexts(reviews: Review[] | null): string[] {
-  if (!Array.isArray(reviews)) return [];
-  return reviews
-    .map((r) => (typeof r?.text === "string" ? r.text.trim() : ""))
-    .filter((t) => t.length > 0);
-}
-
-function meanPoolUnit(vectors: number[][]): number[] {
-  const out = new Array<number>(DIM).fill(0);
-  for (const v of vectors) for (let i = 0; i < DIM; i++) out[i] += v[i];
-  let mag = 0;
-  for (let i = 0; i < DIM; i++) {
-    out[i] /= vectors.length;
-    mag += out[i] * out[i];
-  }
-  mag = Math.sqrt(mag) || 1;
-  for (let i = 0; i < DIM; i++) out[i] /= mag;
-  return out;
-}
-
 function cosine(a: number[], b: number[]): number {
   let dot = 0;
-  for (let i = 0; i < DIM; i++) dot += a[i] * b[i];
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
   return dot; // both unit-norm → dot == cosine
 }
-
-// Embed a venue's review texts → one unit 384-d vector (null if no usable text).
-async function embedReviews(texts: string[]): Promise<number[] | null> {
-  if (texts.length === 0) return null;
-  const extractor = await getExtractor();
-  const out = await extractor(texts, { pooling: "mean", normalize: true });
-  const perReview = out.tolist(); // [n, 384] unit vectors
-  if (!perReview.length || perReview[0].length !== DIM) {
-    throw new Error(`unexpected embedding shape ${perReview.length}x${perReview[0]?.length}`);
-  }
-  return meanPoolUnit(perReview);
-}
-
-const toVectorLiteral = (v: number[]) => `[${v.map((x) => x.toFixed(6)).join(",")}]`;
 
 async function loadVenues(): Promise<VenueRow[]> {
   const rows: VenueRow[] = [];
@@ -144,7 +110,7 @@ async function loadExisting(): Promise<Map<string, { syncedAt: string | null; mo
 
 async function main() {
   console.log(
-    `embed-reviews · model=${MODEL} · ${DRY ? "DRY-RUN (no write)" : "WRITE"}${STALE_ONLY ? " · stale-only" : ""}\n`,
+    `embed-reviews · model=${MODEL} · ${DRY ? "DRY-RUN (no write)" : "WRITE"}${STALE_ONLY ? " · stale-only" : ""}${MISSING_ONLY ? " · missing-only" : ""}${LIMIT != null ? ` · limit=${LIMIT}` : ""}\n`,
   );
 
   const venues = await loadVenues();
@@ -163,6 +129,34 @@ async function main() {
       return new Date(v.reviews_synced_at) > new Date(e.syncedAt); // reviews refreshed since
     });
     console.log(`stale-only → ${candidates.length} need (re)embedding`);
+  }
+
+  if (MISSING_ONLY) {
+    // Strictly "no row at all" (model mismatch and staleness belong to
+    // --stale). Report venues that are missing but have no review text yet,
+    // too: they cannot be embedded until refresh-reviews syncs them, and the
+    // cron log should say so instead of silently showing zero.
+    const existing = await loadExisting();
+    const missing = venues.filter((v) => !existing.has(v.id));
+    const embeddable = new Set(
+      candidates.filter(({ v }) => !existing.has(v.id)).map(({ v }) => v.id),
+    );
+    console.log(
+      `missing-only → ${missing.length} visible venues have no embedding row · ${embeddable.size} embeddable now (rest await a reviews sync)`,
+    );
+    const LIST_CAP = 20;
+    for (const v of missing.slice(0, LIST_CAP)) {
+      console.log(
+        `  ${embeddable.has(v.id) ? "·" : "(no reviews yet)"} ${v.name}`,
+      );
+    }
+    if (missing.length > LIST_CAP)
+      console.log(`  … and ${missing.length - LIST_CAP} more`);
+    candidates = candidates.filter(({ v }) => embeddable.has(v.id));
+  }
+
+  if (LIMIT != null) {
+    candidates = candidates.slice(0, LIMIT);
   }
 
   if (DRY) {
@@ -204,18 +198,10 @@ async function main() {
     batch = [];
   };
 
-  const nowIso = new Date().toISOString();
   for (const { v, texts } of candidates) {
     const vec = await embedReviews(texts);
     if (!vec) continue;
-    batch.push({
-      venue_id: v.id,
-      review_embedding: toVectorLiteral(vec),
-      model: MODEL,
-      source_reviews_count: texts.length,
-      reviews_synced_at: v.reviews_synced_at,
-      updated_at: nowIso,
-    });
+    batch.push(buildEmbeddingRow(v.id, vec, texts.length, v.reviews_synced_at));
     done++;
     if (batch.length >= UPSERT_BATCH) await flush();
     if (done % 200 === 0) console.log(`  embedded ${done}/${candidates.length}`);

@@ -47,6 +47,8 @@
     "compute-tag-idf": "tsx scripts/compute-tag-idf.ts",
     "embed-reviews:dry": "tsx scripts/embed-reviews.ts --dry-run",
     "embed-reviews": "tsx scripts/embed-reviews.ts",
+    "embed-reviews:missing:dry": "tsx scripts/embed-reviews.ts --missing-only --limit=50 --dry-run",
+    "embed-reviews:missing": "tsx scripts/embed-reviews.ts --missing-only --limit=50",
     "backfill-missing-venues:dry": "tsx scripts/backfill-missing-venues.ts --dry-run",
     "backfill-missing-venues": "tsx scripts/backfill-missing-venues.ts",
     "verify-hybrid": "tsx scripts/verify-hybrid.ts",
