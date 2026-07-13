@@ -1,3 +1,11 @@
+// MECHANICAL guard: this module bypasses RLS with the service-role key, so it
+// must never end up in a client bundle. `server-only` throws at build time if
+// anything in a Client Component's import graph pulls this in — turning the
+// comment rule below into an enforced one. (Vitest runs in Node and would also
+// throw on this import, so vitest.config.ts aliases `server-only` to an empty
+// stub for tests — the same client-build resolution trap lib/request-memo.ts
+// documents for react.cache.)
+import "server-only";
 import { createClient } from "@supabase/supabase-js";
 
 // Service-role Supabase client for admin-gated SERVER code that must read or
