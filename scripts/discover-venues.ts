@@ -192,6 +192,53 @@ const REJECT_TYPES = new Set([
   "shopping_mall",
   "night_club",
   "liquor_store",
+  // Non-venues that leaked in tagged "Restaurant"/"Cafe" — e.g. a nail salon
+  // Google ALSO tags "cafe". Reject wins over allow (see typesOk), so a place
+  // carrying any of these is dropped even if it also has a food/drink type, and
+  // day-spots (which accept anything not rejected) are gated too. Unknown type
+  // strings are inert — they simply never match — so this list is safe to widen.
+  // Personal care:
+  "beauty_salon",
+  "hair_salon",
+  "hair_care",
+  "nail_salon",
+  "barber_shop",
+  "spa",
+  "massage",
+  "tanning_studio",
+  "skin_care_clinic",
+  // Medical / health:
+  "dentist",
+  "doctor",
+  "hospital",
+  "pharmacy",
+  "drugstore",
+  "physiotherapist",
+  "chiropractor",
+  "veterinary_care",
+  "wellness_center",
+  // Fitness:
+  "gym",
+  "fitness_center",
+  "yoga_studio",
+  // Retail / services / other non-venues:
+  "convenience_store",
+  "hardware_store",
+  "furniture_store",
+  "home_goods_store",
+  "laundry",
+  "gas_station",
+  "car_repair",
+  "car_dealer",
+  "car_wash",
+  "bank",
+  "atm",
+  "real_estate_agency",
+  "insurance_agency",
+  "lawyer",
+  "accounting",
+  "storage",
+  "post_office",
 ]);
 
 // ── Google Places ────────────────────────────────────────────────────────
