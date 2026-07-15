@@ -447,22 +447,24 @@ export function VenueDetail({
           </div>
         )}
 
-        {/* Anon desktop: top-3 tags as a plain metadata line — deliberately
-            NOT the pill chips signed-in users get (those are Links with
-            hover states; an identical-looking chip that ignores clicks
-            reads as a broken site). Same info register as the eyebrow. */}
+        {/* Anon: top-3 tags as a plain metadata line — deliberately NOT the
+            pill chips signed-in users get (those are Links with hover states;
+            an identical-looking chip that ignores clicks reads as a broken
+            site). Same info register as the eyebrow. Shown on every viewport
+            (mobile "Just looking" reveals this too). */}
         {!signedIn && anonTags.length > 0 && (
-          <p className="hidden lg:block mt-4 text-sm text-muted-fg select-none">
+          <p className="mt-4 text-sm text-muted-fg select-none">
             {anonTags.join(" · ")}
           </p>
         )}
 
-        {/* Anon desktop: the server-capped teaser, typeset exactly like the
-            signed-in description, with the sign-up pull in the "Read more"
-            slot where curiosity peaks. Never a fade/clamp — the full text
-            never reaches the client. */}
+        {/* Anon: the server-capped teaser, typeset exactly like the signed-in
+            description, with the sign-up pull in the "Read more" slot where
+            curiosity peaks. Never a fade/clamp — the full text never reaches
+            the client. Shown on every viewport (the mobile "Just looking"
+            reveal renders this as the venue's one real line of copy). */}
         {!signedIn && anonTeaser && (
-          <div className="hidden lg:block mt-5">
+          <div className="mt-5">
             <p className="text-base leading-relaxed text-fg">{anonTeaser}</p>
             {/* Only when text was actually cut — a whole-fit description is
                 complete, and "Continue reading" under it would be a lie. */}
@@ -477,26 +479,32 @@ export function VenueDetail({
           </div>
         )}
 
-        <div className="mt-5">
-          <p
-            className={
-              "text-base leading-relaxed text-fg " +
-              (descOpen ? "" : "line-clamp-3")
-            }
-          >
-            {venue.longDescription}
-          </p>
-          {venue.longDescription.length > 160 && (
-            <button
-              type="button"
-              onClick={() => setDescOpen((v) => !v)}
-              aria-expanded={descOpen}
-              className="mt-1.5 rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        {/* Signed-in only: the FULL description. For anon, longDescription is
+            blanked by mapVenuePreview, so rendering this unconditionally emitted
+            an empty <p> + dead margin — the "empty band" on the mobile anon
+            reveal. The anon teaser block above is the anon description. */}
+        {signedIn && (
+          <div className="mt-5">
+            <p
+              className={
+                "text-base leading-relaxed text-fg " +
+                (descOpen ? "" : "line-clamp-3")
+              }
             >
-              {descOpen ? "Read less" : "Read more"}
-            </button>
-          )}
-        </div>
+              {venue.longDescription}
+            </p>
+            {venue.longDescription.length > 160 && (
+              <button
+                type="button"
+                onClick={() => setDescOpen((v) => !v)}
+                aria-expanded={descOpen}
+                className="mt-1.5 rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {descOpen ? "Read less" : "Read more"}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* ── Hours / Open now ──────────────────────────────────────
             Live open/closed computed in Europe/London from the structured
@@ -661,13 +669,14 @@ export function VenueDetail({
           ) : (
             <>
               {/* Skeletons mean "not synced yet" — true only when signed in.
-                  For anon at lg they'd read as a permanently broken fetch,
-                  so the desktop anon state gets an honest unlock card
-                  instead (mobile keeps today's exact rendering). */}
+                  For anon they'd read as a permanently broken fetch, so anon
+                  gets NO skeletons on any viewport (was lg-only; the mobile
+                  "Just looking" reveal made the phone skeleton visible and it
+                  read as an error) — the honest unlock card below stands in. */}
               <div
                 className={
                   "flex gap-3 overflow-x-auto -mx-5 px-5 pb-1 lg:grid lg:grid-cols-2 lg:mx-0 lg:px-0 lg:overflow-visible" +
-                  (signedIn ? "" : " lg:hidden")
+                  (signedIn ? "" : " hidden")
                 }
               >
                 {[0, 1].map((i) => (
@@ -692,7 +701,7 @@ export function VenueDetail({
                 ))}
               </div>
               {!signedIn && (
-                <div className="hidden lg:flex items-center gap-3 border border-fg/15 rounded-2xl px-4 py-4">
+                <div className="flex items-center gap-3 border border-fg/15 rounded-2xl px-4 py-4">
                   <Lock
                     className="w-4 h-4 shrink-0 text-muted-fg"
                     strokeWidth={2}
