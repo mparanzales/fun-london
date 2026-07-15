@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PREVIEW_COUNT, FEED_PAGE_SIZE } from "@/lib/feed-constants";
+import {
+  PREVIEW_COUNT,
+  ANON_BROWSE_MAX,
+  FEED_PAGE_SIZE,
+} from "@/lib/feed-constants";
 import {
   fetchVenueCategoryPreview,
   fetchEventCategoryPreview,
@@ -18,6 +22,16 @@ describe("anonymous preview cap", () => {
     expect(PREVIEW_COUNT).toBeGreaterThan(0);
     // "A taste, not the catalogue" — and never wider than a signed-in page.
     expect(PREVIEW_COUNT).toBeLessThanOrEqual(FEED_PAGE_SIZE);
+  });
+
+  it("ANON_BROWSE_MAX (the Just-looking cap) is bounded, never the catalogue", () => {
+    // The anon browse set widens the VISIBLE LIST (card-level only; moat fields
+    // are still stripped by mapVenuePreview). It must stay a BOUNDED look-around
+    // so an anon session can't enumerate the whole catalogue — anti-scraping.
+    expect(Number.isFinite(ANON_BROWSE_MAX)).toBe(true);
+    expect(ANON_BROWSE_MAX).toBeGreaterThanOrEqual(PREVIEW_COUNT);
+    // Hard ceiling: a few rows per category, not thousands of venues.
+    expect(ANON_BROWSE_MAX).toBeLessThanOrEqual(50);
   });
 
   it("category-preview fetchers fail loudly on a broken cap, never open", async () => {
@@ -40,7 +54,7 @@ describe("anonymous preview cap", () => {
     }
   });
 
-  it("no Server Component imports PREVIEW_COUNT across the client boundary", () => {
+  it("no Server Component imports the anon cap across the client boundary", () => {
     const root = join(__dirname, "..", "..");
     // The two feed client modules must NOT export the cap...
     for (const clientModule of [
@@ -63,14 +77,14 @@ describe("anonymous preview cap", () => {
         src,
         `${serverPage} must import the cap from feed-constants`,
       ).toMatch(
-        /import\s+\{[^}]*PREVIEW_COUNT[^}]*\}\s+from\s+"[^"]*feed-constants"/,
+        /import\s+\{[^}]*(PREVIEW_COUNT|ANON_BROWSE_MAX)[^}]*\}\s+from\s+"[^"]*feed-constants"/,
       );
       // Negative: any specifier ending in -feed (relative, alias, or app path).
       expect(
         src,
-        `${serverPage} must not import PREVIEW_COUNT from a "use client" feed module`,
+        `${serverPage} must not import the anon cap from a "use client" feed module`,
       ).not.toMatch(
-        /import\s+\{[^}]*PREVIEW_COUNT[^}]*\}\s+from\s+"[^"]*-feed"/,
+        /import\s+\{[^}]*(PREVIEW_COUNT|ANON_BROWSE_MAX)[^}]*\}\s+from\s+"[^"]*-feed"/,
       );
     }
   });

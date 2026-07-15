@@ -11,7 +11,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { ExploreFeed } from "./explore-feed";
 import { VenueCard } from "@/components/venue-card";
-import { FEED_PAGE_SIZE, PREVIEW_COUNT } from "@/lib/feed-constants";
+import { FEED_PAGE_SIZE, ANON_BROWSE_MAX } from "@/lib/feed-constants";
 
 // Server Component. Two distinct paths so the wall is enforced HERE, not in
 // the client:
@@ -69,12 +69,14 @@ export default async function ExplorePage(props: {
   }
 
   if (!authUser) {
-    // Anonymous: a per-category metered preview so the chips (Eats/Bars/Cafés/
-    // Music/Events) each show their own first few cards + the sign-up wall,
-    // never the full catalogue.
+    // Anonymous: a per-category metered preview. We ship a BOUNDED card-level
+    // set (ANON_BROWSE_MAX per category, moat fields stripped) so a visitor who
+    // taps "Just looking" can browse ~4 rows and keep scrolling a capped amount
+    // — never the full catalogue. The initial view still shows only a few rows;
+    // the client reveals the rest on "Just looking" and re-walls every few mins.
     const [venues, events] = await Promise.all([
-      fetchVenueCategoryPreview(PREVIEW_COUNT),
-      fetchEventCategoryPreview(PREVIEW_COUNT),
+      fetchVenueCategoryPreview(ANON_BROWSE_MAX),
+      fetchEventCategoryPreview(ANON_BROWSE_MAX),
     ]);
     return (
       <ExploreFeed
