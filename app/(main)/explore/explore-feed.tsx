@@ -1032,10 +1032,16 @@ export function ExploreFeed({
               ))}
             </div>
           )}
-          {!signedIn && !justLooking && (
+          {/* The wall ALWAYS caps the anon set so it never reads as the whole
+              catalogue. Before "Just looking" it offers the browse escape;
+              after, it's the end-cap ("See all of London" → sign up) under the
+              last of the bounded cards. */}
+          {!signedIn && (
             <SignupWall
               returnTo="/explore"
-              onJustLooking={() => setJustLooking(true)}
+              onJustLooking={
+                justLooking ? undefined : () => setJustLooking(true)
+              }
             />
           )}
         </>
