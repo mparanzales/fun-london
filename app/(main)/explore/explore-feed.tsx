@@ -32,6 +32,7 @@ import {
   FEED_PAGE_SIZE,
   FEED_SNAPSHOT_KEY,
   PREVIEW_COUNT,
+  ANON_BROWSE_MAX,
 } from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
@@ -100,6 +101,13 @@ function getEyebrow(): "today in" | "tonight in" {
 
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
+
+// Anon "Just looking" browse: how many cards the initial preview shows before
+// the sign-up wall (mobile = PREVIEW_COUNT; desktop ≈ 4 rows), and how long
+// after dismissing the wall it re-surfaces. Same cadence as the detail pages'
+// DetailAuthWall so the whole app pushes sign-up on one rhythm.
+const ANON_INITIAL_DESKTOP = 16; // ~4 rows at the lg/xl grid widths
+const REWALL_MS = 3 * 60_000;
 
 // ── Back-navigation restore ──────────────────────────────────────────────────
 // Tapping into a venue unmounts this component, so the chip, refine filters,
@@ -188,6 +196,15 @@ export function ExploreFeed({
   // null = no wall.
   const [wallFor, setWallFor] = useState<WallTarget | null>(null);
 
+  // Anon "Just looking": once the visitor dismisses the sign-up wall they can
+  // browse the bounded card-level set (ANON_BROWSE_MAX/category); after
+  // REWALL_MS a soft "Keep browsing" wall re-surfaces (reWalled) so the push to
+  // sign up keeps coming back. anonDesktop widens the INITIAL preview to ~4 rows
+  // on a laptop while phones still open on PREVIEW_COUNT.
+  const [justLooking, setJustLooking] = useState(false);
+  const [reWalled, setReWalled] = useState(false);
+  const [anonDesktop, setAnonDesktop] = useState(false);
+
   // Preferences come only from a signed-in profile now — the anonymous taste
   // quiz was removed. Anonymous visitors therefore have no taste signal: the
   // feed keeps its default order and the "Sorted around your taste" label
@@ -214,6 +231,25 @@ export function ExploreFeed({
   useEffect(() => {
     setUserGeo(readFreshUserGeo());
   }, []);
+
+  // Anon only: widen the INITIAL preview to ~4 rows on a laptop. First paint
+  // (and phones) stays at PREVIEW_COUNT.
+  useEffect(() => {
+    if (signedIn) return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const update = () => setAnonDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, [signedIn]);
+
+  // Anon only: after "Just looking", re-surface the wall every REWALL_MS. Each
+  // "Keep browsing" flips reWalled false, which re-arms this timer.
+  useEffect(() => {
+    if (signedIn || !justLooking || reWalled) return;
+    const t = setTimeout(() => setReWalled(true), REWALL_MS);
+    return () => clearTimeout(t);
+  }, [signedIn, justLooking, reWalled]);
 
   // One-time "turn on location" nudge for signed-in users. The old anonymous
   // welcome sheet used to ask for location; it's retired, so signed-in users
@@ -936,7 +972,14 @@ export function ExploreFeed({
           <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
             {(signedIn
               ? displayItems
-              : displayItems.slice(0, PREVIEW_COUNT)
+              : displayItems.slice(
+                  0,
+                  justLooking
+                    ? ANON_BROWSE_MAX
+                    : anonDesktop
+                      ? ANON_INITIAL_DESKTOP
+                      : PREVIEW_COUNT,
+                )
             ).map((item, index) =>
               item.kind === "venue" ? (
                 <VenueCard
@@ -989,7 +1032,12 @@ export function ExploreFeed({
               ))}
             </div>
           )}
-          {!signedIn && <SignupWall returnTo="/explore" />}
+          {!signedIn && !justLooking && (
+            <SignupWall
+              returnTo="/explore"
+              onJustLooking={() => setJustLooking(true)}
+            />
+          )}
         </>
       )}
 
@@ -1020,6 +1068,18 @@ export function ExploreFeed({
           mainShell
           title={WALL_TITLES[wallFor]}
           onBack={() => setWallFor(null)}
+        />
+      )}
+
+      {/* Anon "Just looking" re-surface: after REWALL_MS of browsing the wall
+          comes back; "Keep browsing" (AuthWall's default back-out) dismisses it
+          and re-arms the timer. */}
+      {!signedIn && justLooking && reWalled && (
+        <AuthWall
+          signedIn={false}
+          mainShell
+          title="Seen something you like? Sign up to see all of London."
+          onBack={() => setReWalled(false)}
         />
       )}
     </div>

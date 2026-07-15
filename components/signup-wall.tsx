@@ -1,3 +1,5 @@
+"use client";
+
 // Sign-up wall for anonymous visitors.
 //
 // The feed shows a short, general preview to signed-out users (see
@@ -12,7 +14,16 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-export function SignupWall({ returnTo = "/explore" }: { returnTo?: string }) {
+export function SignupWall({
+  returnTo = "/explore",
+  onJustLooking,
+}: {
+  returnTo?: string;
+  // When provided, the wall shows a "Just looking" back-out that reveals the
+  // bounded browse set instead of being a dead end (the feed re-walls after a
+  // few minutes). Omitted → the wall is a hard gate (its old behaviour).
+  onJustLooking?: () => void;
+}) {
   const href = `/sign-in?return=${encodeURIComponent(returnTo)}`;
   return (
     // Pulled up under the last preview cards so they fade into the wall — the
@@ -46,6 +57,16 @@ export function SignupWall({ returnTo = "/explore" }: { returnTo?: string }) {
           >
             Already have an account? Sign in
           </Link>
+
+          {onJustLooking && (
+            <button
+              type="button"
+              onClick={onJustLooking}
+              className="mt-5 block w-full text-[13px] font-semibold text-muted-fg/80 hover:text-fg"
+            >
+              Just looking, keep browsing
+            </button>
+          )}
         </div>
       </div>
     </div>
