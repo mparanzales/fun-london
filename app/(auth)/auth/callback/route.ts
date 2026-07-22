@@ -33,10 +33,15 @@ export async function GET(request: NextRequest) {
   const providerErrorCode = searchParams.get("error_code");
   const providerErrorDesc = searchParams.get("error_description");
   if (providerError) {
+    // These come straight off the query string, so strip CR/LF and cap the
+    // length before logging. Otherwise a crafted callback URL can inject fake
+    // lines into the log and make the auth trail unreadable during an incident.
+    const safe = (v: string | null) =>
+      v ? v.replace(/[\r\n]+/g, " ").slice(0, 200) : v;
     console.error(
-      `[callback] provider error: ${providerError}` +
-        (providerErrorCode ? ` (${providerErrorCode})` : "") +
-        (providerErrorDesc ? `, ${providerErrorDesc}` : ""),
+      `[callback] provider error: ${safe(providerError)}` +
+        (providerErrorCode ? ` (${safe(providerErrorCode)})` : "") +
+        (providerErrorDesc ? `, ${safe(providerErrorDesc)}` : ""),
     );
     return NextResponse.redirect(`${origin}/sign-in?error=oauth_failed`);
   }

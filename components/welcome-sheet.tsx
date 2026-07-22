@@ -11,9 +11,9 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { MapPin, X, type LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { storeUserGeo } from "@/lib/geo";
 
 const SEEN_KEY = "fl.welcome.v1";
-const GEO_KEY = "fl.geo.v1";
 
 type PermState = "idle" | "on" | "off";
 
@@ -74,18 +74,11 @@ export function WelcomeSheet({ signedIn }: { signedIn: boolean }) {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        try {
-          window.localStorage.setItem(
-            GEO_KEY,
-            JSON.stringify({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              at: Date.now(),
-            }),
-          );
-        } catch {
-          /* ignore */
-        }
+        // Route through storeUserGeo rather than writing the key directly, so
+        // the coarsening in lib/geo.ts applies here too. Writing fl.geo.v1
+        // from two places is how the precise fix got persisted in the first
+        // place.
+        storeUserGeo({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         setLoc("on");
       },
       () => setLoc("off"),
