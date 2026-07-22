@@ -23,19 +23,16 @@ updates:
         dependency-type: production
         update-types: ["patch"]
 
+    # NOTE ON IGNORES AND SECURITY. An `ignore` here can suppress the version
+    # updates that carry a CVE fix, so anything added below must be narrow and
+    # must be checked against open Dependabot ALERTS before it goes in.
+    #
+    # This bit me immediately. sharp was ignored here because 0.35.0 broke
+    # typecheck, and 0.35.0 was also the first version to patch four HIGH
+    # libvips CVEs. The ignore would have held the repo on a vulnerable sharp
+    # indefinitely. 0.35.1 fixed the types export, so the real answer was to
+    # move forward to 0.35.3, not to pin backwards. No sharp ignore now.
     ignore:
-      # sharp 0.35.0 added a package.json "exports" map with NO "types"
-      # condition. Under our moduleResolution: "bundler", exports wins over the
-      # top-level "types" field, so TypeScript cannot resolve sharp's types at
-      # all and `tsc --noEmit` fails on scripts/r2-storage.ts. 0.33.5 has no
-      # exports map, so the "types" field is honoured and it works.
-      #
-      # Re-check when upstream ships a "types" condition, then remove this.
-      # Verify with `pnpm typecheck` BEFORE merging any sharp bump.
-      - dependency-name: sharp
-        update-types:
-          ["version-update:semver-major", "version-update:semver-minor"]
-
       # Next.js majors are a deliberate, tested migration, never a drive-by.
       - dependency-name: next
         update-types: ["version-update:semver-major"]
