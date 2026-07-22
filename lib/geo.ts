@@ -40,12 +40,31 @@ export function readFreshUserGeo(now = Date.now()): LatLng | null {
   }
 }
 
+// Precision we persist. 3 decimal places is ~110m at London's latitude, which
+// is finer than any "near you" decision needs (the nearest venues are sorted
+// by hundreds of metres, and the radius ladder starts at 800m). Storing the
+// raw GPS fix instead pins the user's home to within a few metres and leaves
+// it sitting in localStorage on a possibly-shared device. Round on the way in,
+// so the precise fix never reaches storage at all.
+const GEO_PRECISION_DP = 3;
+
+function coarsen(n: number): number {
+  const f = 10 ** GEO_PRECISION_DP;
+  return Math.round(n * f) / f;
+}
+
 // Persist a fix with a capture timestamp (powers the freshness check above).
+// This is the ONLY place the geo key is written. Anything that captures a
+// position calls through here so the rounding cannot be bypassed.
 export function storeUserGeo(g: LatLng): void {
   try {
     window.localStorage.setItem(
       GEO_STORAGE_KEY,
-      JSON.stringify({ lat: g.lat, lng: g.lng, at: Date.now() }),
+      JSON.stringify({
+        lat: coarsen(g.lat),
+        lng: coarsen(g.lng),
+        at: Date.now(),
+      }),
     );
   } catch {
     /* storage unavailable — non-fatal */
