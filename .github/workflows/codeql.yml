@@ -1,0 +1,51 @@
+name: codeql
+
+# Static security analysis (GitHub code scanning). Free for public repos.
+#
+# Catches the class of bug the other gates cannot: injection, unsafe redirects,
+# tainted data reaching a sink, hardcoded credentials. `pnpm check` proves the
+# code compiles and behaves; this asks whether it is safe.
+#
+# Findings appear under Security -> Code scanning, not as a failing PR check,
+# so this never blocks a merge on a false positive.
+#
+# security-extended goes beyond the default query set. If it turns out noisy on
+# this codebase, drop `queries:` back to the default rather than deleting the
+# workflow.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly sweep so newly published queries run against unchanged code.
+    # Monday 05:00 UTC, clear of discover-venues (01:15) and maintenance (03:00).
+    - cron: "0 5 * * 1"
+
+jobs:
+  analyze:
+    name: analyze javascript-typescript
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # required to upload results
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      # No build step. CodeQL analyses JS/TS directly, and a Next.js build here
+      # would need the full Supabase/Vercel env for no analytical benefit.
+      - name: Analyse
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
