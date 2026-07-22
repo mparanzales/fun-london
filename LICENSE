@@ -1,0 +1,40 @@
+Copyright (c) 2026 Maria Paula Aranzales. All rights reserved.
+
+This source code is made public for reading, review and evaluation: by
+prospective employers and collaborators, and by anyone curious about how the
+project is built. It is published, not open sourced.
+
+PERMITTED, no permission needed
+
+  - Reading, browsing and cloning the repository.
+  - Quoting short excerpts with attribution, for review, teaching, commentary
+    or academic citation.
+  - Running the code locally for the sole purpose of evaluating it.
+
+NOT PERMITTED without prior written permission from the copyright holder
+
+  - Using this code, in whole or in part, in any other project, product or
+    service, whether or not it is commercial.
+  - Copying, redistributing, sublicensing or selling the code.
+  - Deploying or hosting it, publicly or privately, beyond local evaluation.
+  - Creating derivative works or competing services from it.
+  - Training machine learning models on this repository.
+
+The Fun London name, wordmark, visual identity, written copy and curated
+editorial content are not covered by any of the permissions above and remain
+fully reserved.
+
+This repository does not accept contributions. Pull requests will not be
+merged. If you want to use any part of this, please ask first.
+
+Third-party dependencies are licensed by their respective owners under their
+own terms; nothing here changes those.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Contact: https://github.com/mparanzales

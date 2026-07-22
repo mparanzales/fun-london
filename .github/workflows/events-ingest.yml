@@ -9,10 +9,15 @@ name: events-ingest
 # constraint), and sets cancelled_at on events that have disappeared
 # from the provider's response.
 #
-# Until provider adapters are wired (each behind its own API key — see
-# scripts/event-sources/), this workflow runs successfully but produces
-# zero events. That's fine: it proves the cron infrastructure works,
-# and the moment any single adapter is wired its events start flowing.
+# LIVE. The Eventbrite and Ticketmaster adapters are real (inline in
+# scripts/ingest-events.ts) and need EVENTBRITE_PRIVATE_TOKEN and
+# TICKETMASTER_API_KEY in Actions secrets. Skiddle and DICE are still
+# stubs returning []. If a token is missing the run stays green and
+# ingests nothing, so check the step summary, not just the tick.
+#
+# NOTE: this workflow does NOT call the Google Places API, so its
+# cadence is unrelated to the Places quota. Don't throttle it to save
+# money; it costs nothing. See discover-venues.yml for the metered one.
 #
 # Schedule: two interleaved crons, both 30 minutes past the hour and
 # offset from the maintenance cron at 03:00 UTC so jobs don't queue

@@ -1,6 +1,8 @@
-// Fun London, Tier 2: autonomous venue discovery (all-Google, free, human-gated).
+// Fun London, Tier 2: autonomous venue discovery (all-Google, METERED,
+// human-gated). Places is NOT free — see .github/workflows/discover-venues.yml
+// for the cost breakdown that set this cadence.
 //
-// Runs unattended (GitHub Actions, every 4h). For each run it loops until it
+// Runs unattended (GitHub Actions, WEEKLY). For each run it loops until it
 // has QUEUED up to TARGET compliant new candidates, or it exhausts the search
 // grid. Pipeline per candidate:
 //
@@ -32,10 +34,11 @@ import { areaFromPostcode } from "@/lib/postcode-areas";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
-// Default target per run is small (3) on purpose: the cron fires 6x/day, so a
-// modest per-run target keeps the review queue trickling instead of dumping a
-// wall of candidates on the reviewer at once. Override with --limit=N for a
-// manual catch-up run.
+// Default target per run is small (3) on purpose: it keeps the review queue
+// trickling instead of dumping a wall of candidates on the reviewer at once.
+// Note the cron is WEEKLY (was 6x/day until the Places bill made that
+// untenable), so MAX_SCAN_PER_RUN is the real cost lever, not TARGET.
+// Override with --limit=N for a manual catch-up run.
 const TARGET = limitArg ? Number(limitArg.split("=")[1]) : 3;
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
