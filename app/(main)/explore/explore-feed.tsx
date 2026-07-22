@@ -56,12 +56,7 @@ import type {
 } from "@/lib/types";
 
 type FilterKey =
-  | "for-you"
-  | "restaurants"
-  | "bars"
-  | "cafes"
-  | "music"
-  | "events";
+  "for-you" | "restaurants" | "bars" | "cafes" | "music" | "events";
 
 // Anon-only: which thing a soft AuthWall is gating. The CATEGORY chips are NOT
 // here — for anon they filter to a 4-card preview + the sign-up wall, just like

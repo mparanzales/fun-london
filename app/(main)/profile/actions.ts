@@ -97,8 +97,7 @@ export async function submitFeedback(
 // ─────────────────────────────────────────────────────────────────────────
 
 export type ExportResult =
-  | { ok: true; data: Record<string, unknown> }
-  | { ok: false; error: string };
+  { ok: true; data: Record<string, unknown> } | { ok: false; error: string };
 
 export async function exportMyData(): Promise<ExportResult> {
   const user = await getAuthUser();

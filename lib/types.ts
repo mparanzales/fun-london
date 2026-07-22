@@ -29,11 +29,7 @@ export type EventCategory = "Music" | "Food" | "Art" | "Comedy" | "Club";
 // that they reserved at the venue's own platform. Fun London did NOT make or
 // verify this booking, so it must never be presented as "confirmed".
 export type BookingStatus =
-  | "pending"
-  | "confirmed"
-  | "cancelled"
-  | "completed"
-  | "self_added";
+  "pending" | "confirmed" | "cancelled" | "completed" | "self_added";
 
 // Lifecycle states for an ingest candidate in public.pending_candidates.
 // Mirrors the status CHECK in supabase/schema.sql — keep the two in sync.
