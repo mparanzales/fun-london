@@ -138,11 +138,6 @@ runs on every pull request.
 
 Venues come from the Google Places API. Events come from Eventbrite and Ticketmaster.
 
-**No generative model is anywhere in the facts or publication path**, and the project has no LLM
-SDK as a dependency. An earlier version used one to find "trusted press coverage" and it
-hallucinated sources onto live pages, so it was removed. Numeric gates plus human approval are
-the quality bar now, and Google reviews are stored verbatim, never summarised.
-
 A candidate venue must be operational, rated 4.4+ with 400+ reviews (150 for galleries, markets
 and parks), have a website, match a type allowlist, and have fewer than four London locations
 under the same brand. Nothing is auto-published: candidates land in a queue and a human approves
@@ -191,6 +186,5 @@ every PR. Every mutating script has a `:dry` twin, so `pnpm ingest:dry` shows yo
 ## Status
 
 In active development, in production, with real users. Built by
-[Maria Paula Aranzales](https://github.com/mparanzales) as part of the UCL Venture Builder
-programme. Design, architecture and code are mine; it is not open to contributions, but the
-code is here to read.
+[Maria Paula Aranzales](https://github.com/mparanzales). Design, architecture and code are mine; 
+it is not open to contributions, but the code is here to read.
