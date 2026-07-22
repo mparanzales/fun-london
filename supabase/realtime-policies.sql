@@ -1,55 +1,68 @@
 -- ─────────────────────────────────────────────────────────────────────────
 -- Realtime access policies for Plan Together rooms.
 --
--- ⚠️ NOT APPLIED AUTOMATICALLY. Paste this into the Supabase SQL editor.
---    Nothing in this repo runs it, and schema.sql does not contain it.
+-- ✅ ALREADY APPLIED IN PRODUCTION. This file is a RECORD of what is live,
+--    not a change to run. It exists because these policies were applied
+--    through the Supabase dashboard and never captured in the repo, which led
+--    someone (me) to run `grep realtime supabase/schema.sql` -> 0 and wrongly
+--    conclude the rooms were unprotected. Absence from the repo is not
+--    absence from the database.
 --
--- THE GAP THIS CLOSES
+-- HOW ROOMS ARE ACTUALLY PROTECTED — two independent controls:
 --
--- lib/realtime/room.ts subscribes with `private: true` and hands Realtime the
--- signed-in user's access token. That flag only means "enforce RLS on
--- realtime.messages" — it is not access control by itself. Until this file is
--- applied there is NO policy on realtime.messages, so the room channel is
--- effectively open: anyone holding the (public, client-side) anon key who
--- guesses a 4-character room code can read everything broadcast into it,
--- including the taste maps members share.
+--   1. Project Settings -> Realtime -> "Allow public access to channels" = OFF.
+--      Without this, RLS on realtime.messages is bypassed and every policy
+--      below is decorative. This is the control doing the real work.
 --
--- scripts/prove-group-veto.ts demonstrates this today: it subscribes with no
--- auth at all and still works.
+--   2. The policies below on realtime.messages, restricting plan-* topics
+--      (broadcast AND presence) to the `authenticated` role.
 --
--- WHAT THIS DOES AND DOES NOT DO
+-- VERIFIED 2026-07-22: `pnpm tsx scripts/prove-group-veto.ts`, which subscribes
+-- anonymously on the anon key, fails with "subscribe timeout". Anonymous
+-- clients cannot join a room.
 --
---   Does:     restricts plan-* channels to SIGNED-IN users. Anonymous clients
---             on the anon key can no longer read or write them.
---   Does NOT: restrict a signed-in user to rooms they were invited to. Room
---             membership is deliberately ephemeral (there is no rooms table),
---             so there is nothing to join against. A signed-in user who
---             guesses a code can still enter.
+-- WHAT IS STILL OPEN
 --
--- That residual risk is accepted for now: codes are ~1M combinations, rooms
--- are short-lived, and the contents are venue preferences. Closing it properly
--- means persisting room membership, which is a product decision, not a patch.
--- Do not describe rooms as "private" in user-facing copy until it is done.
+-- A SIGNED-IN user who guesses a room code can still enter. Codes are 4 chars
+-- from a 32-char alphabet (~1M) with no rate limit, and membership is
+-- deliberately ephemeral (there is no rooms table), so there is nothing to
+-- join against. Accepted for now: rooms are short-lived and contain venue
+-- preferences. Closing it means persisting membership, a product decision.
 --
--- AFTER APPLYING
+-- NOTES IF YOU EVER RE-APPLY THESE
 --
---   1. `pnpm tsx scripts/prove-group-veto.ts` should now FAIL to subscribe.
---      That failure is the fix working. Give the harness a signed-in token.
---   2. Open a room on two signed-in devices and confirm they still sync.
+--   - Do NOT add `alter table realtime.messages enable row level security`.
+--     Supabase enables it by default and the table is owned by
+--     supabase_realtime_admin, so it fails with:
+--       ERROR: 42501: must be owner of table messages
+--   - Keep the `(select realtime.topic())` wrapper. The scalar subquery is
+--     evaluated once per statement instead of once per row.
+--   - Keep `extension in ('broadcast','presence')`. Rooms use presence for the
+--     live member list; filtering to broadcast alone breaks the lobby.
+--
+-- Verify what is live:
+--   select policyname, cmd, roles, qual, with_check
+--   from pg_policies
+--   where schemaname = 'realtime' and tablename = 'messages';
 -- ─────────────────────────────────────────────────────────────────────────
 
-alter table realtime.messages enable row level security;
+-- Commented out deliberately: these are ALREADY in the database. Uncomment
+-- only when rebuilding a project from scratch.
 
-drop policy if exists "plan rooms readable by signed-in users" on realtime.messages;
-create policy "plan rooms readable by signed-in users"
-  on realtime.messages
-  for select
-  to authenticated
-  using (realtime.topic() like 'plan-%');
+-- create policy "authenticated can read plan-together rooms"
+--   on realtime.messages
+--   for select
+--   to authenticated
+--   using (
+--     (select realtime.topic()) like 'plan-%'
+--     and extension in ('broadcast', 'presence')
+--   );
 
-drop policy if exists "plan rooms writable by signed-in users" on realtime.messages;
-create policy "plan rooms writable by signed-in users"
-  on realtime.messages
-  for insert
-  to authenticated
-  with check (realtime.topic() like 'plan-%');
+-- create policy "authenticated can write plan-together rooms"
+--   on realtime.messages
+--   for insert
+--   to authenticated
+--   with check (
+--     (select realtime.topic()) like 'plan-%'
+--     and extension in ('broadcast', 'presence')
+--   );

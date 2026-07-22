@@ -46,10 +46,12 @@ Out of scope:
 
 Recorded here so nobody spends time re-reporting them:
 
-- **Plan Together room codes are guessable.** Codes are 4 characters from a
-  32-character alphabet with no rate limit. Rooms are ephemeral and contain
-  venue preferences. See `supabase/realtime-policies.sql` for the policy that
-  restricts rooms to signed-in users, and for what remains open after it.
+- **Plan Together room codes are guessable by signed-in users.** Codes are 4
+  characters from a 32-character alphabet with no rate limit, so a signed-in
+  user could brute-force their way into someone else's room. Rooms are
+  ephemeral and contain venue preferences. Anonymous access is already blocked
+  (see `supabase/realtime-policies.sql`); closing the rest means persisting
+  room membership, which is a product decision rather than a patch.
 - **Signed-out visitors can read card-level venue data.** That is deliberate.
   Descriptions, tags, reviews, phone numbers and opening hours are withheld by
   column-level grants on the `anon` role.
