@@ -1,9 +1,12 @@
 "use client";
 
-// Option B preview: the plan route on a REAL dark street map (Leaflet + CARTO
-// dark tiles built on OpenStreetMap data). Keyless — no Maps API key in the
-// browser; tiles are public with attribution. Numbered violet markers match the
-// stop list; a dashed line is the walk.
+// The plan route on a REAL street map: Leaflet + CARTO "light_all" (Positron)
+// tiles built on OpenStreetMap data, desaturated to greyscale in CSS (see the
+// .fl-map tile filter in globals.css) so the violet markers carry the colour.
+// Keyless — no Maps API key in the browser; tiles are public with attribution.
+// Numbered violet markers match the stop list. The walking line is SOLID when
+// OSRM returns real street geometry, DASHED when it timed out and we fell back
+// to straight-line hops.
 
 import { useEffect, useRef } from "react";
 import "leaflet/dist/leaflet.css";

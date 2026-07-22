@@ -8,9 +8,9 @@ actually make. On your own, or with friends deciding together in real time.
 
 Live at **[funldn.com](https://www.funldn.com)** · ~2,100 curated London venues · built solo.
 
-<!-- SCREENSHOT SLOT: drop a phone frame at docs/screenshot.png and uncomment
-     ![Fun London](docs/screenshot.png)
--->
+<p align="center">
+  <img src="docs/screenshot.png" alt="The Fun London explore feed at night: category rail, filters, and venue cards for Padella Borough Market and Monmouth Coffee" width="300">
+</p>
 
 ## What it does
 
@@ -186,5 +186,7 @@ every PR. Every mutating script has a `:dry` twin, so `pnpm ingest:dry` shows yo
 ## Status
 
 In active development, in production, with real users. Built by
-[Maria Paula Aranzales](https://github.com/mparanzales). Design, architecture and code are mine; 
-it is not open to contributions, but the code is here to read.
+[Maria Paula Aranzales](https://github.com/mparanzales). Design, architecture and code are mine.
+
+Published for reading, not open sourced: the repository takes no contributions and the code is
+not licensed for reuse. See [LICENSE](./LICENSE). If you want to use part of it, ask.

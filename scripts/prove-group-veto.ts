@@ -2,8 +2,21 @@
 // others) over the app's real Realtime — the same channel/events the app uses —
 // to prove that group react/veto actually syncs between devices: a member's veto
 // reaches the others, a majority makes the host swap the stop, the swap lands on
-// everyone, and a member who leaves stops counting. No UI / no auth needed (the
-// room channel is public), so this exercises the exact transport four phones use.
+// everyone, and a member who leaves stops counting. No UI / no auth needed, so
+// this exercises the exact transport four phones use.
+//
+// ⚠️ DIVERGENCE, and it is the point. The app subscribes with `private: true`
+// (lib/realtime/room.ts) and hands Realtime the signed-in access token; this
+// harness subscribes WITHOUT it, on the anon key. That this still works means
+// the channel is not actually locked down: `private: true` only takes effect
+// with a matching RLS policy on realtime.messages, and NO SUCH POLICY EXISTS
+// IN THIS REPO. So today, anyone who guesses a 4-character room code can read
+// the room, including the taste maps members broadcast into it.
+//
+// Until that policy is written and applied, do not claim room channels are
+// private anywhere user-facing. When it IS applied, this harness will start
+// failing to subscribe — that failure is the fix landing, not a regression;
+// give it a signed-in token at that point.
 //
 // Run: pnpm tsx scripts/prove-group-veto.ts
 

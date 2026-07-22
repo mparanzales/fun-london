@@ -1,6 +1,7 @@
 // Fun London — events ingestion (Phase 5 Tier 3).
 //
-// SKELETON ONLY — provider adapters are stubs. The script reads
+// LIVE. Eventbrite and Ticketmaster adapters are real and running; Skiddle
+// and DICE are still stubs that return []. The script reads
 // scripts/events-seed.ts and walks each subscription:
 //
 //   1. Look up the local venue row by slug (so we can write venue_id +
@@ -11,13 +12,15 @@
 //   5. Re-check existing rows from this provider that AREN'T in the
 //      pulled set, and mark cancelled_at on them.
 //
-// Each provider adapter is a separate file under scripts/event-sources/
-// (created in follow-up sessions when API keys are in place):
+// The adapters live INLINE in this file (there is no scripts/event-sources/
+// directory; that was the original plan and it never happened):
 //
-//   scripts/event-sources/eventbrite.ts
-//   scripts/event-sources/ticketmaster.ts
-//   scripts/event-sources/skiddle.ts
-//   scripts/event-sources/dice.ts
+//   fetchEventbrite    - live, needs EVENTBRITE_PRIVATE_TOKEN
+//   fetchTicketmaster  - live, needs TICKETMASTER_API_KEY
+//   fetchSkiddle       - stub, returns []
+//   fetchDice          - stub, returns [] (DICE has no public API)
+//
+// This script does NOT call the Google Places API.
 //
 // Required env (none for the dry-run skeleton; added per-adapter):
 //   EVENTBRITE_PRIVATE_TOKEN
