@@ -97,6 +97,42 @@ Five of the seven workflows fail without their own secrets, set separately in
 `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_PUBLIC_BASE`,
 `R2_BACKUP_BUCKET`).
 
+### Database backups: the one that silently never ran
+
+`R2_BACKUP_BUCKET` was missing for weeks and nobody noticed, because
+`backup-db.yml` fails on a schedule where nothing is watching. There were **no
+database backups at all** during that window. The only signal was an
+auto-opened `cron-failure` issue.
+
+`scripts/backup-db.ts` refuses to run without it, and also refuses if it equals
+`R2_BUCKET`, because the photos bucket is world-readable via `img.funldn.com`
+and a backup there would be an enumerable PII leak. Both refusals are correct.
+Set it up properly:
+
+1. **Cloudflare dashboard → R2 → Create bucket.** Name it something like
+   `fun-london-backups`. Keep the location default.
+2. **Leave public access DISABLED.** Do not connect a custom domain. This
+   bucket holds user rows: profiles, saved venues, bookings, feedback, plans.
+3. The existing `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` already cover it,
+   as long as that API token's permission is **Object Read & Write** across
+   your account rather than scoped to the photos bucket. If it is scoped,
+   widen it or issue a second token.
+4. **GitHub → Settings → Secrets and variables → Actions → New secret**:
+   `R2_BACKUP_BUCKET` = the bucket name.
+5. **Actions → backup-db → Run workflow** to trigger it immediately instead of
+   waiting for Sunday.
+6. **Confirm an object actually landed in the bucket.** A green tick is not
+   proof; open R2 and look. Then close the `cron-failure` issue.
+
+Retention is 12 weeks, pruned by the script. Restore procedure is in
+[docs/RESTORE.md](./docs/RESTORE.md).
+
+⚠️ Known limitation, written down so it is not a surprise during an incident:
+this exports the `public` schema only. `auth.users` (the login accounts) lives
+in the `auth` schema and is not reachable through PostgREST, so **it is not
+captured**. Restoring gives you the data but not the accounts. See
+`docs/RESTORE.md` for the `pg_dump` route to a genuinely full backup.
+
 ⚠️ **The Places API is metered.** Google retired the $200 monthly Maps credit in March
 2025. Cap it at Console → Google Maps Platform → Quotas → Places API → requests per day.
 A billing **alert** does not stop spend; only a **quota** does.
