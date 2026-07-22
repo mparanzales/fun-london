@@ -45,7 +45,11 @@ import {
   fallbackCanonicalTags,
   TAG_VERSION,
 } from "@/lib/tag-vocabulary";
-import type { BookingLink, BookingPlatform } from "@/lib/types";
+import type { BookingLink } from "@/lib/types";
+import {
+  detectBookingLinks,
+  hasMajorBookingPlatform,
+} from "./booking-platform";
 import { areaFromPostcode } from "@/lib/postcode-areas";
 import { embedAndUpsertVenue } from "./venue-embedding";
 import { mapGoogleReviews, fetchPlaceReviews } from "./google-reviews";
@@ -206,39 +210,8 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
 
 // ── Booking platform detection ───────────────────────────────────────────────
 
-const PLATFORM_PATTERNS: { platform: BookingPlatform; pattern: RegExp }[] = [
-  { platform: "opentable", pattern: /opentable\.(com|co\.uk)/i },
-  { platform: "resy", pattern: /resy\.com/i },
-  { platform: "sevenrooms", pattern: /sevenrooms\.com/i },
-  { platform: "thefork", pattern: /thefork\.(com|co\.uk)/i },
-  { platform: "quandoo", pattern: /quandoo\.(com|co\.uk)/i },
-  { platform: "tablein", pattern: /tablein\.com/i },
-];
-
-const MAJOR_PLATFORMS: BookingPlatform[] = [
-  "opentable",
-  "resy",
-  "sevenrooms",
-  "thefork",
-  "quandoo",
-  "tablein",
-];
-
-function detectBookingLinks(websiteUri?: string): BookingLink[] {
-  if (!websiteUri) return [];
-  for (const { platform, pattern } of PLATFORM_PATTERNS) {
-    if (pattern.test(websiteUri)) {
-      return [{ platform, url: websiteUri, priority: 1 }];
-    }
-  }
-  return [{ platform: "website", url: websiteUri, priority: 99 }];
-}
-
-function hasMajorBookingPlatform(links: BookingLink[]): boolean {
-  return links.some((l) =>
-    (MAJOR_PLATFORMS as readonly BookingPlatform[]).includes(l.platform),
-  );
-}
+// Detection lives in ./booking-platform.ts, shared with ingest-venues.ts
+// and covered by scripts/__tests__/booking-platform.test.ts.
 
 // ── Slug ─────────────────────────────────────────────────────────────────────
 
