@@ -23,11 +23,14 @@ export async function fetchOgImage(pageUrl: string): Promise<string | null> {
       const m = html.match(re);
       if (m && m[1]) {
         // og:image content is HTML-escaped (&amp; etc.) — decode to a valid URL.
+        // Decode the numeric ampersand entities BEFORE the named &amp;. Doing it
+        // the other way round lets `&amp;#38;` decode to `&#38;` and then to `&`,
+        // a double-unescape. Ampersand last means each entity is decoded once.
         let url = m[1]
           .trim()
-          .replace(/&amp;/g, "&")
           .replace(/&#38;/g, "&")
-          .replace(/&#x26;/gi, "&");
+          .replace(/&#x26;/gi, "&")
+          .replace(/&amp;/g, "&");
         if (url.startsWith("//")) url = "https:" + url;
         else if (url.startsWith("/")) url = new URL(pageUrl).origin + url;
         // Cloudflare image-resizing wraps (sometimes doubly) the real asset:

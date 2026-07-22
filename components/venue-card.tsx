@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Heart, X } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
 import { recordSignal, type SignalSurface } from "@/lib/signals";
-import { sizedImageUrl } from "@/lib/img";
+import { sizedImageUrl, isGooglePlacesUrl } from "@/lib/img";
 import type { Venue } from "@/lib/types";
 
 type Props = {
@@ -138,7 +138,7 @@ export function VenueCard({
             // Google Places photo URLs 302-redirect with a per-request
             // API key; bypass Vercel's optimizer for those so we don't
             // burn the optimization quota on rerenderable proxies.
-            unoptimized={venue.imgUrl.includes("googleapis.com")}
+            unoptimized={isGooglePlacesUrl(venue.imgUrl)}
             priority={priority}
             className="object-cover group-hover:scale-105 transition-transform duration-500"
           />

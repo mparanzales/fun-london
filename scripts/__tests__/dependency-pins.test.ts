@@ -29,9 +29,17 @@ const LOCK = readFileSync(
   "utf8",
 );
 
+// Escape every regex metacharacter, not just a hand-picked few. The package
+// names below are hardcoded and metacharacter-free, so this is not a live
+// hole, but a partial escape is a bug waiting for the first scoped name with a
+// "." or "+" in it.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+}
+
 // Every version of `name` that appears as a resolved package in the lockfile.
 function lockedVersions(name: string): string[] {
-  const re = new RegExp(`^\\s{2}${name.replace(/[/@]/g, "\\$&")}@([^:\\s(]+)`, "gm");
+  const re = new RegExp(`^\\s{2}${escapeRegExp(name)}@([^:\\s(]+)`, "gm");
   const out = new Set<string>();
   for (const m of LOCK.matchAll(re)) out.add(m[1]);
   return [...out];

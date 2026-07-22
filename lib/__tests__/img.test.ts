@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sizedImageUrl } from "@/lib/img";
+import { sizedImageUrl, isGooglePlacesUrl } from "@/lib/img";
 
 describe("sizedImageUrl", () => {
   describe("Google user content (=w suffix)", () => {
@@ -135,5 +135,37 @@ describe("sizedImageUrl", () => {
       const url = "https://s1.ticketm.net/x?ref=googleusercontent.com";
       expect(sizedImageUrl(url, 320)).toBe(url);
     });
+  });
+});
+
+describe("isGooglePlacesUrl", () => {
+  it("matches a real Places media URL", () => {
+    expect(
+      isGooglePlacesUrl(
+        "https://places.googleapis.com/v1/places/ABC/photos/XYZ/media?key=AIza",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects decoys that a substring check would accept", () => {
+    expect(
+      isGooglePlacesUrl("https://places.googleapis.com.evil.example/x"),
+    ).toBe(false);
+    expect(
+      isGooglePlacesUrl("https://evil.example/places.googleapis.com/x"),
+    ).toBe(false);
+    expect(
+      isGooglePlacesUrl("https://evil.example/?u=places.googleapis.com"),
+    ).toBe(false);
+  });
+
+  it("rejects other hosts and non-URLs", () => {
+    expect(isGooglePlacesUrl("https://img.funldn.com/a.webp")).toBe(false);
+    expect(isGooglePlacesUrl("https://lh3.googleusercontent.com/x")).toBe(
+      false,
+    );
+    expect(isGooglePlacesUrl("not a url")).toBe(false);
+    expect(isGooglePlacesUrl(null)).toBe(false);
+    expect(isGooglePlacesUrl(undefined)).toBe(false);
   });
 });

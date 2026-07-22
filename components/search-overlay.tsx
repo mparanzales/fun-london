@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { isGooglePlacesUrl } from "@/lib/img";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { track } from "@/lib/analytics";
@@ -264,7 +265,7 @@ function ResultRow({
               sizes="48px"
               // Google Places photo URLs 302-redirect with an API key;
               // bypass the optimizer for those (same as venue detail).
-              unoptimized={imgUrl.includes("googleapis.com")}
+              unoptimized={isGooglePlacesUrl(imgUrl)}
               className="object-cover"
             />
           )}
