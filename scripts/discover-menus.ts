@@ -43,6 +43,24 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Food-serving types where a menu makes sense.
 const FOOD_TYPES = ["Restaurant", "Cafe", "Wine Bar", "Pub", "Listening Bar"];
 
+// A venue whose "website" is just a social page has no menu to scrape. Match on
+// the HOSTNAME, not a substring: the old /instagram\.com|facebook\.com/ test
+// also excluded a real venue site that merely mentioned instagram.com in a
+// path or query. A non-absolute or unparseable URL is treated as not-social
+// (let it through; the scraper decides).
+const SOCIAL_ONLY_HOSTS = ["instagram.com", "facebook.com", "fb.com"];
+
+function isSocialOnlySite(url: string | null | undefined): boolean {
+  if (typeof url !== "string") return false;
+  let host: string;
+  try {
+    host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return false;
+  }
+  return SOCIAL_ONLY_HOSTS.some((d) => host === d || host.endsWith(`.${d}`));
+}
+
 async function fetchPage(
   url: string,
 ): Promise<{ html: string; finalUrl: string } | null> {
@@ -95,7 +113,7 @@ async function main(): Promise<void> {
     if (batch.length < PAGE) break;
   }
   const work = rows
-    .filter((r) => !/instagram\.com|facebook\.com/i.test(r.website_url))
+    .filter((r) => !isSocialOnlySite(r.website_url))
     .slice(0, MAX);
   console.log(`Scanning ${work.length} food venues with a website...\n`);
 
