@@ -41,7 +41,13 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Open `http://localhost:3000` → you should be redirected to `/sign-in`. Submit your email, click the magic link in your inbox, and you should land on `/onboarding` then `/explore` with seeded places.
+Open `http://localhost:3000`. The splash screen routes to **`/explore`** after about
+1.7 seconds. There is no login wall and no onboarding flow: anonymous visitors get a
+bounded preview of the catalogue, and signing in unlocks the rest.
+
+⚠️ `supabase/seed.sql` is a **demo** seed: 11 venues, **no photos**, **zero events**. It
+also begins with `delete from public.events; delete from public.venues;`, which cascades
+to saved venues and bookings. Never run it against a database that has real data.
 
 ---
 
@@ -65,11 +71,35 @@ gh repo create fun-london --public --source=. --remote=origin --push
 1. Go to **https://vercel.com/new**, click **Import Git Repository**, pick the repo.
 2. **Framework preset**: Next.js (auto-detected).
 3. **Root directory**: leave as default if `fun-london-app` is the repo root, otherwise set it to `fun-london-app`.
-4. Add **Environment Variables**:
+4. Add **Environment Variables**. These three boot the app:
    - `NEXT_PUBLIC_SUPABASE_URL` = `https://YOUR-PROJECT.supabase.co`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = `eyJ…`
-   - `NEXT_PUBLIC_SITE_URL` = `https://fun-london.vercel.app` (use the URL Vercel will give you; you can set this after first deploy and redeploy)
+   - `NEXT_PUBLIC_SITE_URL` = your production origin (production is `https://www.funldn.com`)
+
+   These are needed for full behaviour, and each fails **silently** if missing:
+
+   | Variable | Missing means |
+   |---|---|
+   | `SUPABASE_SERVICE_ROLE_KEY` | Account deletion and `/admin/*` break |
+   | `FL_ADMIN_EMAILS` | `/admin/*` is fail-closed and inaccessible to everyone |
+   | `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | No analytics |
+   | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Search rate limiting falls back to a per-instance in-memory limiter, which is ineffective on serverless. Watch for trailing newlines when pasting the token |
+   | `NEXT_PUBLIC_AFFILIATE_*` (5) | Booking links lose attribution |
+
 5. Click **Deploy**.
+
+### GitHub Actions secrets
+
+Five of the seven workflows fail without their own secrets, set separately in
+**Settings → Secrets and variables → Actions**: `SUPABASE_SERVICE_ROLE_KEY`,
+`GOOGLE_PLACES_API_KEY`, `TICKETMASTER_API_KEY`, `EVENTBRITE_PRIVATE_TOKEN`,
+`RESEND_API_KEY`, `EMAIL_FROM`, and the R2 set (`R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET`, `R2_PUBLIC_BASE`,
+`R2_BACKUP_BUCKET`).
+
+⚠️ **The Places API is metered.** Google retired the $200 monthly Maps credit in March
+2025. Cap it at Console → Google Maps Platform → Quotas → Places API → requests per day.
+A billing **alert** does not stop spend; only a **quota** does.
 
 ---
 
@@ -87,29 +117,54 @@ gh repo create fun-london --public --source=. --remote=origin --push
 
 Open the live URL on **mobile** and on **desktop**:
 
-- [ ] `/` redirects to `/sign-in`
-- [ ] Submitting an email shows the "Check your email" screen
-- [ ] Magic link in email opens `/explore` (after onboarding the first time)
-- [ ] **Onboarding** runs once on first sign-in; "Skip" works
-- [ ] **Explore** shows 3 rails of seeded places with images
-- [ ] Tapping the heart on a place card flips the icon (saves to DB)
-- [ ] **Events** shows seeded events grouped by date label
+Signed out first, then signed in. Both states matter.
+
+**Signed out**
+- [ ] `/` routes to `/explore`
+- [ ] Explore shows a bounded preview per category, then a sign-up wall
+- [ ] A venue page renders with a short teaser and tags, and the full description is gated
+- [ ] The map on a venue page is blurred or greyed, not fully revealed
+- [ ] Cookie consent banner appears; declining keeps analytics off
+- [ ] Legal pages load at `/privacy`, `/cookies`, `/terms`
+
+**Signed in**
+- [ ] Google OAuth works, and the magic link opens `/explore`
+- [ ] Tapping the heart on a place card flips the icon and persists to the DB
+- [ ] **What's on** lists events grouped by date label
 - [ ] **Saved** shows the places you hearted
-- [ ] **Plan**: pick mood + budget + area → "Generate" → see 3-step plan → "Save plan" works
-- [ ] **Profile** shows your email, save count, plan count, preferences
-- [ ] **Sign out** returns to `/sign-in`
-- [ ] On a phone, the bottom nav doesn't overlap content; layout is comfortable
-- [ ] Theme switches to night between 18:00–06:00 (or change device clock to test)
-- [ ] Reload during any flow doesn't crash (error boundary catches anything weird)
+- [ ] **Plan**: mood + budget + area → Generate → a 3-stop plan with a walking route map → Save
+- [ ] **Plan Together**: open a room on one device, join with the code on a second, and confirm both build the same plan
+- [ ] **You** shows email, save count, plan count, preferences
+- [ ] Sign out, then sign in as a different user, and confirm the first user's saves are gone
+
+**Both**
+- [ ] Bottom nav doesn't overlap content on a phone; desktop shows the wider shell
+- [ ] Theme switches to night between 18:00 and 06:00, and the manual toggle persists
+- [ ] Reload mid-flow doesn't crash
+- [ ] `/admin/candidates` is inaccessible unless your email is in `FL_ADMIN_EMAILS`
+
+⚠️ **Verify on production, not only on a PR preview.** Preview deploys point at a stale
+dev Supabase project with missing columns and OAuth disabled, so a preview-only pass
+produces false greens.
 
 ---
 
-## 7 · What's intentionally not included in v1
+## 7 · Not built yet
 
-- **Plan Together** (group flow) — designed but deferred.
-- **Place detail pages** — `PlaceCard` links to `/explore/[slug]` but the page isn't built. Add when you have real photo/description data.
-- **Real London data** — replace seeded mocks via the Supabase Table Editor.
-- **Push notifications, calendar export, social** — out of scope.
+Plan Together, venue and event detail pages, calendar export and sharing have all
+shipped. What is still absent:
+
+- **Push notifications.**
+- **Skiddle and DICE event adapters** — both return an empty array today. Eventbrite and
+  Ticketmaster are live.
+- **Editorial press discovery** (`scripts/scout-candidates.ts`) — all six publication
+  adapters are stubs. The only live discovery is the weekly Google Places sweep.
+- **Host migration in Plan Together** — if the host leaves a room, veto majorities stop
+  applying.
+- **Automated publication** — `pnpm ingest:from-pending` is run by hand after a human
+  approves candidates at `/admin/candidates`.
+- **A migrations directory** — the schema is one idempotent `supabase/schema.sql` applied
+  by hand.
 
 ---
 
@@ -119,4 +174,7 @@ Open the live URL on **mobile** and on **desktop**:
 - **Build fails on Vercel with `next: not found`**: confirm Vercel **Root Directory** is set to `fun-london-app` if your repo has the app inside a subfolder.
 - **`Cannot find module '@supabase/ssr'`**: run `pnpm install` locally and recommit `pnpm-lock.yaml`.
 - **RLS errors saving a place**: confirm you ran the *whole* `schema.sql` — the `saved self write` policy must exist.
-- **Images don't load**: `next.config.js` already allows `images.unsplash.com`. If you swap to another host, add it to `remotePatterns`.
+- **Images don't load**: check the host is in `remotePatterns` in `next.config.js`. Allowed today: `img.funldn.com` (Cloudflare R2, primary), `places.googleapis.com`, `lh3.googleusercontent.com`, `*.supabase.co`, `*.ticketm.net`, `images.universe.com`, `img.evbuc.com`. Unsplash is **not** allowed and is filtered out of every feed query, so an Unsplash venue silently never appears. Note `images.unoptimized: true` is deliberate: the Vercel Hobby image optimizer returns 402 over quota, which broke every photo on the site.
+- **A venue was added but never shows up**: it is probably missing `google_place_id`, canonical tags or an embedding, or its `img_url` host is not allowed. Add venues through `scripts/venues-seed.ts` + `pnpm ingest`, not the Table Editor.
+- **`/admin/*` returns not-found for you**: `FL_ADMIN_EMAILS` is unset or does not contain your address. It is fail-closed by design.
+- **Crons are green but nothing is ingested**: the workflow's API secret is missing. Check the Actions secrets list in step 4.
