@@ -22,15 +22,12 @@ export async function fetchOgImage(pageUrl: string): Promise<string | null> {
     for (const re of patterns) {
       const m = html.match(re);
       if (m && m[1]) {
-        // og:image content is HTML-escaped (&amp; etc.) — decode to a valid URL.
-        // Decode the numeric ampersand entities BEFORE the named &amp;. Doing it
-        // the other way round lets `&amp;#38;` decode to `&#38;` and then to `&`,
-        // a double-unescape. Ampersand last means each entity is decoded once.
-        let url = m[1]
-          .trim()
-          .replace(/&#38;/g, "&")
-          .replace(/&#x26;/gi, "&")
-          .replace(/&amp;/g, "&");
+        // og:image content is HTML-escapes the ampersand (&amp; / &#38; /
+        // &#x26;) — decode it to a valid URL. Done in a SINGLE pass with one
+        // regex: chaining several .replace() unescapes is the "double escaping"
+        // anti-pattern (an earlier decode's output can feed the next), and a
+        // single pass never re-scans what it already replaced.
+        let url = m[1].trim().replace(/&(?:amp|#0*38|#x0*26);/gi, "&");
         if (url.startsWith("//")) url = "https:" + url;
         else if (url.startsWith("/")) url = new URL(pageUrl).origin + url;
         // Cloudflare image-resizing wraps (sometimes doubly) the real asset:

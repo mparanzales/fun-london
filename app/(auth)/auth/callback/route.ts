@@ -33,15 +33,20 @@ export async function GET(request: NextRequest) {
   const providerErrorCode = searchParams.get("error_code");
   const providerErrorDesc = searchParams.get("error_description");
   if (providerError) {
-    // These come straight off the query string, so strip CR/LF and cap the
-    // length before logging. Otherwise a crafted callback URL can inject fake
-    // lines into the log and make the auth trail unreadable during an incident.
-    const safe = (v: string | null) =>
-      v ? v.replace(/[\r\n]+/g, " ").slice(0, 200) : v;
+    // These come straight off the query string. Log them via JSON.stringify,
+    // which encodes newlines and control chars to their \u escapes — so a
+    // crafted callback URL cannot inject fake log lines. (A hand-rolled
+    // newline-strip is not recognised as a barrier by static analysis and
+    // still flagged as log injection; JSON.stringify is.) Values are also
+    // capped so a huge description cannot flood the log.
+    const cap = (v: string | null) => (v ? v.slice(0, 200) : v);
     console.error(
-      `[callback] provider error: ${safe(providerError)}` +
-        (providerErrorCode ? ` (${safe(providerErrorCode)})` : "") +
-        (providerErrorDesc ? `, ${safe(providerErrorDesc)}` : ""),
+      "[callback] provider error:",
+      JSON.stringify({
+        error: cap(providerError),
+        code: cap(providerErrorCode),
+        description: cap(providerErrorDesc),
+      }),
     );
     return NextResponse.redirect(`${origin}/sign-in?error=oauth_failed`);
   }
