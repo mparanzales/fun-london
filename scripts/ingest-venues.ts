@@ -33,6 +33,10 @@ import {
 } from "./photo-storage";
 import type { BookingLink, BookingPlatform } from "@/lib/types";
 import {
+  detectBookingLinks as detectPlatformLinks,
+  hasMajorBookingPlatform,
+} from "./booking-platform";
+import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
 } from "@/lib/opening-hours";
@@ -71,25 +75,6 @@ const supabase =
       })
     : null;
 
-// Booking platform fingerprints. Major platforms = real reservation systems.
-// "website" is the fallback (venue's own site).
-const PLATFORM_PATTERNS: { platform: BookingPlatform; pattern: RegExp }[] = [
-  { platform: "opentable", pattern: /opentable\.(com|co\.uk)/i },
-  { platform: "resy", pattern: /resy\.com/i },
-  { platform: "sevenrooms", pattern: /sevenrooms\.com/i },
-  { platform: "thefork", pattern: /thefork\.(com|co\.uk)/i },
-  { platform: "quandoo", pattern: /quandoo\.(com|co\.uk)/i },
-  { platform: "tablein", pattern: /tablein\.com/i },
-];
-
-const MAJOR_PLATFORMS: BookingPlatform[] = [
-  "opentable",
-  "resy",
-  "sevenrooms",
-  "thefork",
-  "quandoo",
-  "tablein",
-];
 
 // ── Google Places API ────────────────────────────────────────────────────
 
@@ -177,43 +162,14 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
 
 // ── Booking platform detection ───────────────────────────────────────────
 
+// Wraps the shared detector so ingest-venues keeps its "reservable" nuance:
+// a venue whose own site is not a booking platform still gets a website link,
+// which Google may separately flag as reservable.
 function detectBookingLinks(
   websiteUri: string | undefined,
-  reservable: boolean | undefined,
+  _reservable: boolean | undefined,
 ): BookingLink[] {
-  if (!websiteUri) return [];
-  const links: BookingLink[] = [];
-
-  // Check for major platform patterns in the venue's website redirects.
-  // Most independent venues link to OpenTable/Resy from their site; here
-  // we only know the venue's own URL, so we always add it as priority 99
-  // (the catch-all fallback). Major platforms are detected if the
-  // website itself IS a booking widget (rare), and would be added by the
-  // partner-dashboard scraper later.
-  for (const { platform, pattern } of PLATFORM_PATTERNS) {
-    if (pattern.test(websiteUri)) {
-      links.push({ platform, url: websiteUri, priority: 1 });
-      return links;
-    }
-  }
-
-  // Default: the venue's own site as a fallback link. We still mark it
-  // "reservable" if Google says so (means there's some booking flow on
-  // the site, even if not OpenTable/Resy). Otherwise, websites that
-  // can't actually be booked through (walk-in venues, info-only) end up
-  // as walk-in venues in the catalog.
-  links.push({
-    platform: "website",
-    url: websiteUri,
-    priority: 99,
-  });
-  return links;
-}
-
-function hasMajorBookingPlatform(links: BookingLink[]): boolean {
-  return links.some((l) =>
-    (MAJOR_PLATFORMS as readonly BookingPlatform[]).includes(l.platform),
-  );
+  return detectPlatformLinks(websiteUri);
 }
 
 // ── Row builders ─────────────────────────────────────────────────────────
