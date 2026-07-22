@@ -84,3 +84,15 @@ function hostOf(url: string): string {
     return "";
   }
 }
+
+// True when `url` is served by Google's Places photo endpoint. These URLs
+// carry a per-request API key and 302-redirect, so callers bypass the image
+// optimizer for them and refuse to STORE them (see scripts/photo-storage.ts).
+//
+// Matches on the HOSTNAME, not a substring: `url.includes("googleapis.com")`
+// also matches evil.com/googleapis.com and googleapis.com.evil.com. Same bug
+// class as the booking-platform substring match fixed in #156.
+export function isGooglePlacesUrl(url: string | null | undefined): boolean {
+  if (typeof url !== "string") return false;
+  return hostOf(url) === "places.googleapis.com";
+}

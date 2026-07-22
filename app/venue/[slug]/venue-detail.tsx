@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { isGooglePlacesUrl } from "@/lib/img";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -278,7 +279,7 @@ export function VenueDetail({
                 sizes="(max-width: 1023px) 100vw, 520px"
                 // Keyless Storage URLs optimize fine; only a legacy keyed
                 // Google URL (pre-mirror) needs the optimizer bypass.
-                unoptimized={src.includes("googleapis.com")}
+                unoptimized={isGooglePlacesUrl(src)}
                 className="object-cover"
               />
             </div>

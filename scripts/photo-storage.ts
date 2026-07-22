@@ -77,8 +77,18 @@ export function photoStorageEnabled(): boolean {
 // True if a URL points at Google's Places media endpoint, which embeds the API
 // key as a query param. Such URLs are safe to FETCH server-side but must NEVER
 // be stored in venues.img_url. Used to detect and self-heal stale keyed rows.
+//
+// Matches on the HOSTNAME, not a substring. `url.includes("places.googleapis
+// .com")` also flags a decoy like `places.googleapis.com.evil.example` and,
+// worse, could MISS a real keyed URL that carried the domain only in a query
+// param. This is a safety gate for a leak of the Places key, so it parses.
 export function isKeyedPhotoUrl(url: string | null | undefined): boolean {
-  return typeof url === "string" && url.includes("places.googleapis.com");
+  if (typeof url !== "string") return false;
+  try {
+    return new URL(url).hostname.toLowerCase() === "places.googleapis.com";
+  } catch {
+    return false;
+  }
 }
 
 const MIRROR_ATTEMPTS = 3;

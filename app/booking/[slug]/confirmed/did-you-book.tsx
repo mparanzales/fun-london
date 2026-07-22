@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { isGooglePlacesUrl } from "@/lib/img";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check } from "lucide-react";
@@ -100,7 +101,7 @@ export function DidYouBook({
             alt={venue.name}
             fill
             sizes="64px"
-            unoptimized={venue.imgUrl.includes("googleapis.com")}
+            unoptimized={isGooglePlacesUrl(venue.imgUrl)}
             className="object-cover"
           />
         </div>
