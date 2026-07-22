@@ -18,8 +18,18 @@ pnpm install    # corepack auto-switches to pnpm 9.0.0 per package.json
 pnpm dev        # http://localhost:3000
 ```
 
-No `.env.local` is required for current development. Supabase middleware
-is in bypass mode.
+`.env.local` **is** required. There is no bypass mode: `middleware.ts` calls
+`updateSession()` on every request and `lib/supabase/client.ts` asserts the
+Supabase URL and anon key are present, so the app will not render without
+them. Copy `.env.example` to `.env.local` and fill in at minimum:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SITE_URL` (leave it unset and OG/canonical URLs point at prod)
+
+Note the Node split: `.nvmrc` pins 20.16 for local work, but every CI
+workflow runs Node 22 (vitest and vite are ESM-only). A green local
+`pnpm check` on 20.16 is not a guarantee of a green CI run.
 
 ---
 
@@ -28,15 +38,22 @@ is in bypass mode.
 | Command | What it does |
 |---|---|
 | `pnpm dev` | Next.js dev server (hot reload) |
-| `pnpm build` | Production build — must pass before merging |
+| `pnpm build` | Production build. Not run by CI, so check it locally before a risky merge |
 | `pnpm typecheck` | `tsc --noEmit` — strict TypeScript |
 | `pnpm lint` | `next lint` — `next/core-web-vitals` (strict) |
 | `pnpm format` | Prettier — write canonical formatting to all files |
 | `pnpm format:check` | Prettier — verify no diffs |
-| **`pnpm check`** | **typecheck + lint + format:check — run this before pushing** |
+| `pnpm test` | vitest — unit tests in `lib/__tests__/` and `scripts/__tests__/` |
+| `pnpm check:copy` | Copy linter — no em dashes, en dashes or spaced `--` in user-facing text |
+| **`pnpm check`** | **typecheck + lint + format:check + check:copy + test — run this before pushing** |
 | `pnpm clean` | Remove `.next`, `.turbo`, Node cache (use when dev gets weird) |
 
 If `pnpm check` fails, fix locally before opening a PR. CI will gate on it.
+
+There are ~67 scripts in `package.json` beyond these: ingestion, discovery,
+photo migration, embeddings, verification harnesses and ops. **Every mutating
+script has a `:dry` twin** (`pnpm ingest:dry`, `pnpm refresh-venues:dry`).
+Run the dry version first, always.
 
 ---
 
@@ -87,23 +104,44 @@ A page is a server component unless it uses:
 If you need state in a server-rendered page, factor the interactive
 piece into a separate client component (`"use client"`).
 
-### 4. Mock data is the single source of truth
+### 4. All catalogue reads go through `lib/queries.ts`
 
-All UI reads from `lib/mock-data.ts` accessors (`getVenues`,
-`getCurrentUser`, etc.). **Don't inline mock arrays in components.**
-When Supabase ships, only `lib/mock-data.ts` needs to change.
+`lib/queries.ts` is server-only and is the single choke point for venue and
+event data. **Never `select(*)` on a path an anonymous visitor can reach** —
+it typechecks perfectly and then either 500s in production (`permission
+denied`, because the `anon` role has column-level grants) or leaks moat
+fields. Anonymous payloads go through `mapVenuePreview`, which blanks every
+detail field; the leak-guard test pins that shape.
 
-### 5. Routes are mobile-first; consumer shell sits under `(main)`
+`lib/mock-data.ts` is vestigial (41 lines, one live import, no venue data).
+Do not add to it. The catalogue has been DB-only since Phase 1.
+
+Two more invariants worth knowing before you touch them:
+
+- **The root layout must stay cookie-free.** Adding `cookies()` or
+  `getAuthUser()` to `app/layout.tsx` forces every route into dynamic
+  rendering and silently disables ISR on the `/anon` twins, with no error.
+- **Every catalogue read keeps `.is("hidden_at", null)`.** A branch that
+  predates the column resurrects hidden junk venues when merged.
+
+### 5. Routes: mobile-first and desktop-complete; consumer shell under `(main)`
 
 | Path | Purpose |
 |---|---|
-| `app/page.tsx` | Splash — outside any group, no nav chrome |
-| `app/(auth)/onboarding/*` | Auth-adjacent flows |
-| `app/(main)/*` | Bottom-nav consumer shell (Explore, Events, Plan, Saved, Profile) |
-| `app/venue/[slug]/*` | Immersive venue detail — outside `(main)` so the bottom nav is hidden |
-| `app/booking/[slug]/confirmed/*` | Booking confirmation — same pattern |
+| `app/page.tsx` | Splash — outside any group, no nav chrome. Always routes to `/explore` |
+| `app/(auth)/*` | Sign-in and the OAuth/magic-link callback |
+| `app/(main)/*` | Bottom-nav consumer shell (Explore, What's on, Plan, Saved, You) |
+| `app/venue/[slug]/*`, `app/event/[id]/*` | Immersive detail — outside `(main)` so the bottom nav is hidden |
+| `app/anon/venue/[slug]`, `app/anon/event/[id]` | **ISR twins.** Middleware rewrites cookie-less traffic here. Do not link to them directly |
+| `app/(legal)/*` | Privacy, cookies, terms |
+| `app/admin/*` | Candidate/prospect review, gated on `FL_ADMIN_EMAILS` (fail-closed) |
+| `app/booking/[slug]/confirmed/*` | Booking confirmation — same pattern as detail |
 
 If a page should hide the bottom nav, **put it outside `(main)`**.
+
+The shell is `max-w-md lg:max-w-6xl` with a `DesktopNav` at `lg`, and both
+detail pages have a two-column desktop spread. A new screen has to handle
+both widths, not just 375.
 
 ---
 
@@ -111,23 +149,31 @@ If a page should hide the bottom nav, **put it outside `(main)`**.
 
 Venues live in Supabase (`public.venues`), not in code. Two paths:
 
-**One-off, via Dashboard:**
-1. Open the Supabase Dashboard → Table Editor → `venues`.
-2. Click **Insert row**, fill every field. All non-nullable columns
-   are required — see `supabase/schema.sql` for the full list.
-3. `slug` must be URL-safe and unique; `img_url` should point at
-   `images.unsplash.com` (configured in `next.config.js`).
-4. The app picks it up on the next page load — no deploy needed.
+**The real path: `scripts/venues-seed.ts` → `pnpm ingest`.**
+1. Append an entry to `VENUE_SEEDS` (49 curated entries today). These are
+   editorial overrides layered on top of Google Places data.
+2. Run `pnpm ingest:dry` to see what would change, then `pnpm ingest`.
+3. Places supplies the facts and the photo; your entry supplies the voice.
 
-**Batch / version-controlled, via seed:**
-1. Edit `supabase/seed.sql` — add a `(...)` row to the `insert into
-   public.venues ...` block.
-2. Paste the file into the Supabase SQL Editor → Run.
-3. Commit the updated `seed.sql` so the seed stays the canonical
-   source of truth for the demo dataset.
+**Discovered venues** arrive weekly via `discover-venues` into
+`public.pending_candidates` and are published only after a human approves
+them at `/admin/candidates`, followed by `pnpm ingest:from-pending`.
+Nothing auto-publishes.
 
-Avoid putting venues back into `lib/mock-data.ts` — the catalog is
-DB-only since Phase 1.
+⚠️ **Do not hand-insert rows in the Supabase Table Editor.** Several writers
+feed `public.venues`, so a manual row without `google_place_id`, canonical
+tags or an embedding is either skipped by the feed queries or undone by a
+cron. Fix the writers, not the row.
+
+⚠️ **`img_url` must be on an allowed host** in `next.config.js`:
+`img.funldn.com` (Cloudflare R2, the primary), `places.googleapis.com`,
+`lh3.googleusercontent.com`, `*.supabase.co`, or the event CDNs. Unsplash is
+**not** allowed and is actively filtered out of every feed query in
+`lib/queries.ts`, so an Unsplash venue silently never appears.
+
+⚠️ **`supabase/seed.sql` is a demo seed, not a content path.** It opens with
+`delete from public.events; delete from public.venues;`, which cascades to
+saves and bookings. Never run it against a populated database.
 
 ---
 
