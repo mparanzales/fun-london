@@ -1,8 +1,8 @@
 name: discover-venues
 
-# Tier 2 candidate discovery (all-Google, free, human-gated).
+# Tier 2 candidate discovery (all-Google, METERED, human-gated).
 #
-# Runs scripts/discover-venues.ts every 4 hours. Each run loops a rotating
+# Runs scripts/discover-venues.ts weekly. Each run loops a rotating
 # slice of the London grid (neighbourhood x category) on Google Places and
 # queues up to 3 candidates that pass every numeric gate:
 #   - operational, rating >= 4.4, >= 400 reviews, has website, food/drink
@@ -13,20 +13,38 @@ name: discover-venues
 # model is involved: the numeric gates plus human approval are the quality
 # bar. Approved candidates are published by scripts/ingest-from-pending.ts.
 #
-# All-Google + free: Google Places only. No Gemini, no Custom Search, no
-# third party.
+# All-Google: Google Places only. No Gemini, no Custom Search, no third
+# party.
+#
+# ⚠️ NOT FREE. This header said "free" until 2026-07-22; that was true
+# under the old $200/month Maps credit, which Google retired in March
+# 2025. Places now bills per SKU after a small monthly allowance (~5,000
+# Pro events). At the old 4-hourly cadence this workflow alone burned
+# 6 runs x MAX_SCAN_PER_RUN (60) = up to 360 Places calls/day (~11k/month)
+# — it exhausted the whole account's monthly allowance around the 12th,
+# after which EVERY cron (maintenance's refresh-venues, refresh-reviews)
+# billed at ~£1.21/day. July 2026 cost £10.30, 100% Places API.
+#
+# Weekly keeps candidate discovery alive at ~500 calls/month, leaving the
+# allowance for Tier 1 freshness (refresh-venues, 80/day = ~2.5k/month)
+# and the occasional manual backfill. Discovery is also the LEAST urgent
+# tier: the catalogue is ~2,100 auto-discovered vs ~46 curated, so the
+# bottleneck is curation, not more candidates.
+#
+# Before raising this cadence, check Billing -> Reports (group by SKU).
 #
 # Distinct from:
 #   - maintenance.yml (Tier 1) keeps EXISTING venues fresh (daily).
 #   - events-ingest.yml (Tier 3) keeps the Events tab fresh (4-hourly).
+#     Tier 3 does NOT call Places — leave its cadence alone.
 #
-# Schedule offset to :15 past the odd-4h hours so it never queues with the
-# events cron (:30) or the daily maintenance cron (03:00).
+# Schedule offset to :15 so it never queues with the events cron (:30) or
+# the daily maintenance cron (03:00).
 
 on:
   schedule:
-    # https://crontab.guru/#15_1,5,9,13,17,21_*_*_*
-    - cron: "15 1,5,9,13,17,21 * * *"
+    # Weekly, Monday 01:15 UTC. https://crontab.guru/#15_1_*_*_1
+    - cron: "15 1 * * 1"
   workflow_dispatch:
 
 jobs:
