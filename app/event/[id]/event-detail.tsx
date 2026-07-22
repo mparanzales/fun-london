@@ -418,20 +418,38 @@ export function EventDetail({
 }
 
 // Map an outbound ticket URL to a human provider name.
+//
+// This label lends the destination credibility ("Ticketmaster"), so it matches
+// on the registrable DOMAIN, not a substring. host.includes("ticketmaster")
+// also labels ticketmaster.evil.com and notticketmaster.com, which on an
+// outbound link is a small phishing assist. An unrecognised host returns null
+// (no label) rather than a wrong one.
+const PROVIDERS: { name: string; domains: string[] }[] = [
+  {
+    name: "Ticketmaster",
+    domains: ["ticketmaster.com", "ticketmaster.co.uk", "ticketm.net"],
+  },
+  {
+    name: "Eventbrite",
+    domains: ["eventbrite.com", "eventbrite.co.uk", "evbuc.com"],
+  },
+  { name: "Skiddle", domains: ["skiddle.com"] },
+  { name: "DICE", domains: ["dice.fm"] },
+  { name: "Universe", domains: ["universe.com"] },
+];
+
 function providerFromUrl(url: string | null): string | null {
   if (!url) return null;
+  let host: string;
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
-    if (host.includes("ticketmaster") || host.endsWith("ticketm.net"))
-      return "Ticketmaster";
-    if (host.includes("eventbrite")) return "Eventbrite";
-    if (host.includes("skiddle")) return "Skiddle";
-    if (host.includes("dice.fm")) return "DICE";
-    if (host.includes("universe")) return "Universe";
-    return null;
+    host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return null;
   }
+  for (const { name, domains } of PROVIDERS) {
+    if (domains.some((d) => host === d || host.endsWith(`.${d}`))) return name;
+  }
+  return null;
 }
 
 function formatLongDate(iso: string): string {
