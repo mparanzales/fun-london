@@ -30,29 +30,22 @@ import {
 } from "@/lib/theme";
 import type { UserPreferences } from "@/lib/types";
 
-// Two states:
-//   • Anonymous (authUserId === null): hero avatar with "?" + "Sign in"
-//     CTA. No preferences shown, no action rows.
-//   • Signed in: existing profile UI. displayName + preferences come
-//     from public.profiles (Phase 3.5). displayName falls back to the
-//     email prefix when null; preferences render "Not set" when null.
+// Signed-in only. Anonymous visitors are handled in profile/page.tsx (teaser
+// behind the sign-up wall) and never reach here. displayName + preferences come
+// from public.profiles (Phase 3.5); displayName falls back to the email prefix
+// when null; preferences render "Not set" when null.
 
 export function ProfileBody({
-  authUserId,
   authUserEmail,
   displayName,
   preferences,
   emailOptIn,
 }: {
-  authUserId: string | null;
   authUserEmail: string | null;
   displayName: string | null;
   preferences: UserPreferences | null;
   emailOptIn: boolean;
 }) {
-  if (!authUserId) {
-    return <AnonProfile />;
-  }
   return (
     <SignedInProfile
       authUserEmail={authUserEmail}
@@ -60,57 +53,6 @@ export function ProfileBody({
       preferences={preferences}
       emailOptIn={emailOptIn}
     />
-  );
-}
-
-function AnonProfile() {
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  return (
-    <div className="pt-4 pb-6">
-      <header className="px-5 pb-5 flex flex-col items-center text-center">
-        <div className="w-20 h-20 rounded-full bg-muted text-muted-fg flex items-center justify-center text-[32px] font-extrabold">
-          ?
-        </div>
-        <h1 className="text-[28px] font-extrabold tracking-tight text-primary mt-3.5">
-          You
-        </h1>
-        <p className="text-xs text-muted-fg mt-1 max-w-[260px]">
-          Sign in to save your spots and keep your bookings across devices.
-        </p>
-      </header>
-      <div className="px-5 flex flex-col gap-2.5">
-        <Link
-          href="/sign-in?return=/profile"
-          className="flex items-center justify-center w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)] no-underline"
-          style={{
-            background:
-              "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
-          }}
-        >
-          Sign in
-        </Link>
-
-        <button
-          type="button"
-          onClick={() => setFeedbackOpen(true)}
-          className="w-full bg-card border border-border rounded-2xl px-4 py-3.5 flex justify-between items-center text-fg text-[13px] font-bold"
-        >
-          <span className="flex gap-2.5 items-center">
-            <span>
-              <MessageCircle
-                className="w-4 h-4 inline-block align-[-3px]"
-                strokeWidth={1.75}
-                aria-hidden
-              />
-            </span>
-            <span>Give Feedback</span>
-          </span>
-          <span className="text-muted-fg">›</span>
-        </button>
-      </div>
-
-      {feedbackOpen && <FeedbackSheet onClose={() => setFeedbackOpen(false)} />}
-    </div>
   );
 }
 
