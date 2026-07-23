@@ -42,6 +42,40 @@ const nextConfig = {
       { protocol: "https", hostname: "img.evbuc.com" },
     ],
   },
+
+  // Security response headers. Vercel already sends HSTS (max-age 2y); these
+  // are the rest of the standard set. Deliberately NOT including a
+  // Content-Security-Policy: the root layout ships an inline anti-flash theme
+  // script, and PostHog / Leaflet load at runtime, so a CSP needs nonces and
+  // real testing rather than being bolted on blind. Tracked as a follow-up.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // Stop the browser second-guessing Content-Type (MIME sniffing).
+          { key: "X-Content-Type-Options", value: "nosniff" },
+
+          // Clickjacking: nothing should be embedding this app in a frame.
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+
+          // The app links OUT constantly (booking sites, ticket providers).
+          // Without this the full path — e.g. /venue/some-venue-slug — is sent
+          // to those third parties in the Referer header. Send only the origin
+          // cross-site, keep the full URL for same-origin navigation.
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+
+          // geolocation stays SELF: "Near you" and the plan flow call
+          // navigator.geolocation. `geolocation=()` would break them. The rest
+          // the app never uses, so deny them outright.
+          {
+            key: "Permissions-Policy",
+            value: "geolocation=(self), camera=(), microphone=(), payment=()",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;
