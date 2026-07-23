@@ -33,6 +33,8 @@ import {
   FEED_SNAPSHOT_KEY,
   PREVIEW_COUNT,
   ANON_BROWSE_MAX,
+  ANON_INITIAL_DESKTOP,
+  REWALL_MS,
 } from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
@@ -97,12 +99,8 @@ function getEyebrow(): "today in" | "tonight in" {
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
 
-// Anon "Just looking" browse: how many cards the initial preview shows before
-// the sign-up wall (mobile = PREVIEW_COUNT; desktop ≈ 4 rows), and how long
-// after dismissing the wall it re-surfaces. Same cadence as the detail pages'
-// DetailAuthWall so the whole app pushes sign-up on one rhythm.
-const ANON_INITIAL_DESKTOP = 16; // ~4 rows at the lg/xl grid widths
-const REWALL_MS = 3 * 60_000;
+// ANON_INITIAL_DESKTOP + REWALL_MS now live in @/lib/feed-constants (shared
+// with the events feed so both "Just looking" flows behave identically).
 
 // ── Back-navigation restore ──────────────────────────────────────────────────
 // Tapping into a venue unmounts this component, so the chip, refine filters,
@@ -959,9 +957,15 @@ export function ExploreFeed({
       )}
 
       {displayItems.length === 0 ? (
-        <div className="px-5 pt-10 text-center text-sm text-muted-fg">
-          Nothing here yet. Check back soon.
-        </div>
+        <>
+          <div className="px-5 pt-10 text-center text-sm text-muted-fg">
+            Nothing here yet. Check back soon.
+          </div>
+          {/* Anon: never a dead-end — an empty filtered view still keeps the
+              sign-up push. No "Just looking" here (revealing more can't fill an
+              empty filter), just the end-cap wall. */}
+          {!signedIn && <SignupWall returnTo="/explore" />}
+        </>
       ) : (
         <>
           <div className="px-5 lg:px-6 pt-5 grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">

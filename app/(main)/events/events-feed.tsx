@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Sparkles,
   Music,
@@ -26,7 +26,12 @@ import { searchCatalog } from "@/lib/search-action";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
 import { regionOf } from "@/lib/regions";
-import { PREVIEW_COUNT } from "@/lib/feed-constants";
+import {
+  PREVIEW_COUNT,
+  ANON_BROWSE_MAX,
+  ANON_INITIAL_DESKTOP,
+  REWALL_MS,
+} from "@/lib/feed-constants";
 import type { Event, EventCategory } from "@/lib/types";
 
 // PREVIEW_COUNT lives in @/lib/feed-constants (a neutral module) — exporting
@@ -136,6 +141,29 @@ export function EventsFeed({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const { regions, sort } = filters;
   const refineCount = eventFilterCount(filters);
+
+  // Anon "Just looking" bounded browse — identical machinery to the Explore
+  // feed: justLooking reveals the bounded ANON_BROWSE_MAX set, a soft AuthWall
+  // re-surfaces every REWALL_MS with "Keep browsing", and anonDesktop widens
+  // the initial preview to ~4 rows on a laptop.
+  const [justLooking, setJustLooking] = useState(false);
+  const [reWalled, setReWalled] = useState(false);
+  const [anonDesktop, setAnonDesktop] = useState(false);
+
+  useEffect(() => {
+    if (signedIn) return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const update = () => setAnonDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, [signedIn]);
+
+  useEffect(() => {
+    if (signedIn || !justLooking || reWalled) return;
+    const t = setTimeout(() => setReWalled(true), REWALL_MS);
+    return () => clearTimeout(t);
+  }, [signedIn, justLooking, reWalled]);
 
   const filtered = useMemo(() => {
     const now = new Date();
@@ -352,7 +380,17 @@ export function EventsFeed({
 
       {/* Event list — metered preview for signed-out visitors (like Explore). */}
       <div className="px-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {(signedIn ? filtered : filtered.slice(0, PREVIEW_COUNT)).map((e) => (
+        {(signedIn
+          ? filtered
+          : filtered.slice(
+              0,
+              justLooking
+                ? ANON_BROWSE_MAX
+                : anonDesktop
+                  ? ANON_INITIAL_DESKTOP
+                  : PREVIEW_COUNT,
+            )
+        ).map((e) => (
           <EventCard key={e.id} event={e} />
         ))}
         {filtered.length === 0 && (
@@ -369,7 +407,15 @@ export function EventsFeed({
           </div>
         )}
       </div>
-      {!signedIn && filtered.length > 0 && <SignupWall returnTo="/events" />}
+      {/* Always the end-cap for anon (never a dead end, never the whole
+          catalogue). Offers "Just looking" until dismissed, then it's the
+          "See all of London" cap under the bounded set. */}
+      {!signedIn && (
+        <SignupWall
+          returnTo="/events"
+          onJustLooking={justLooking ? undefined : () => setJustLooking(true)}
+        />
+      )}
 
       {searchOpen && (
         <SearchOverlay
@@ -397,14 +443,26 @@ export function EventsFeed({
         />
       )}
 
-      {/* Anon soft wall: search / date / category tap blurs the preview and
-          puts sign-in on top, with a "Keep browsing" back out. */}
+      {/* Anon soft wall: a date-pill or Filters tap blurs the preview and puts
+          sign-in on top, with a "Keep browsing" back out. (Search opens the
+          overlay for everyone; category chips just filter — neither walls.) */}
       {!signedIn && wallFor && (
         <AuthWall
           signedIn={false}
           mainShell
           title={eventsWallTitle()}
           onBack={() => setWallFor(null)}
+        />
+      )}
+
+      {/* Anon "Just looking" re-surface: after REWALL_MS of browsing the wall
+          comes back; "Keep browsing" dismisses it and re-arms the timer. */}
+      {!signedIn && justLooking && reWalled && (
+        <AuthWall
+          signedIn={false}
+          mainShell
+          title="Seen something you like? Sign up to see all of London."
+          onBack={() => setReWalled(false)}
         />
       )}
     </div>

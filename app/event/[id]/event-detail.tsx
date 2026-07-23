@@ -11,6 +11,7 @@ import {
   Star,
   Globe,
   Phone,
+  Lock,
 } from "lucide-react";
 import { EventActions } from "@/components/event-actions";
 import { MapTilePlaceholder } from "@/components/map-tile-placeholder";
@@ -120,6 +121,22 @@ export function EventDetail({
     </div>
   );
 
+  // Anon holds no sourceUrl (moat), so `ticketCta` would render the FALSE "No
+  // ticket link yet". The honest anon action is sign-in — used in the mobile
+  // sticky bar (the desktop masthead has its own inline version).
+  const signInTicketCta = (
+    <Link
+      href={signInHref}
+      className="block w-full h-[52px] rounded-2xl text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)] flex items-center justify-center gap-2"
+      style={{
+        background:
+          "linear-gradient(135deg, var(--fl-primary), var(--fl-accent))",
+      }}
+    >
+      Sign in to see ticket options
+    </Link>
+  );
+
   return (
     // Mobile: the max-w-md phone shell, unchanged. Desktop (lg+): the same
     // two-column editorial spread as /venue — sticky clamped hero left,
@@ -210,12 +227,13 @@ export function EventDetail({
           </p>
         )}
 
-        {/* Anon desktop: the server-capped teaser of the description (which is
-            a moat field, so event.description above is null for anon). Typeset
-            like the real blurb; sign-up pull only when text was truncated.
-            Desktop-only — mobile's hard wall blurs everything anyway. */}
+        {/* Anon: the server-capped teaser of the description (a moat field, so
+            event.description above is null for anon). Typeset like the real
+            blurb; sign-up pull only when text was truncated. Rendered on EVERY
+            viewport — the mobile DetailAuthWall now dismisses ("Just looking"),
+            so this is the one real line of copy a phone anon sees. */}
         {!signedIn && anonTeaser && (
-          <div className="hidden lg:block mt-5">
+          <div className="mt-5">
             <p className="text-[15px] text-fg/90 leading-relaxed">
               {anonTeaser}
             </p>
@@ -232,6 +250,28 @@ export function EventDetail({
 
         {/* Add to calendar (.ics) + share */}
         <EventActions event={event} />
+
+        {/* Anon: honest unlock card on EVERY viewport (mirrors /venue). The
+            venue block below is gated on `place` (moat/null for anon), so
+            without this a phone anon who dismisses the wall would get zero
+            signal that reviews/details/tickets exist behind sign-up. */}
+        {!signedIn && (
+          <div className="flex items-center gap-3 border border-fg/15 rounded-2xl px-4 py-4 mt-6">
+            <Lock className="w-4 h-4 shrink-0 text-muted-fg" strokeWidth={2} />
+            {/* The venue's Places data (rating, reviews, map) and the ticket
+                link ARE moat-gated for anon, so this claim is always true. */}
+            <p className="text-[13px] text-muted-fg leading-snug">
+              Venue details, reviews and ticket links unlock with a free
+              account.
+            </p>
+            <Link
+              href={signInHref}
+              className="ml-auto shrink-0 text-sm font-bold text-primary rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Sign up free
+            </Link>
+          </div>
+        )}
 
         {/* ── The venue ── clearly separated venue context (rating, blurb, map,
             address, links, reviews). All from Google Places, facts only. */}
@@ -411,7 +451,9 @@ export function EventDetail({
             "linear-gradient(to top, var(--fl-bg) 65%, transparent 100%)",
         }}
       >
-        <div className="max-w-md mx-auto pointer-events-auto">{ticketCta}</div>
+        <div className="max-w-md mx-auto pointer-events-auto">
+          {signedIn ? ticketCta : signInTicketCta}
+        </div>
       </div>
     </div>
   );
