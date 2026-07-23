@@ -205,7 +205,7 @@ export function VenueDetail({
   // tags (real, curated) are shown. (Real walk times return inside Plan
   // My Night, computed step-to-step from venue coordinates.)
   //
-  // We store the full tag set on the venue (onezone imports can carry 20+),
+  // We store the full tag set on the venue (bulk imports can carry 20+),
   // but only surface the top 6 here so the card stays readable. The rest
   // stay in venue.vibeTags for search and the personalisation engine.
   const PILL_LIMIT = 6;

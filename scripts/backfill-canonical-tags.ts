@@ -10,7 +10,7 @@
 // stamped with an older TAG_VERSION, or whose stored canonical_tags no longer
 // match what the current vocabulary produces. So a routine run after the map
 // changes is cheap and self-correcting. Pass --all to scan every row (needed
-// when the OneZone map changed without a TAG_VERSION bump and you want a full
+// when the import tag map changed without a TAG_VERSION bump and you want a full
 // re-check rather than relying on the version stamp).
 //
 // Run:

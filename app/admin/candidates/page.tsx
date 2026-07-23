@@ -2,7 +2,7 @@
 //
 // Two tabs:
 //  • Pending — Tier 2 candidate scout queue (publication-sourced candidates).
-//  • Needs review — onezone imports the ingest quality-gate held back (a weak or
+//  • Needs review — bulk imports the ingest quality-gate held back (a weak or
 //    wrong Google match: no rating / not operational / too few reviews). Shows
 //    what Google matched each one to so an admin can reject the junk or re-queue.
 //
@@ -237,7 +237,7 @@ function EmptyReview() {
   );
 }
 
-// ── Needs-review card (onezone imports held by the ingest quality gate) ──────
+// ── Needs-review card (bulk imports held by the ingest quality gate) ──────
 function ReviewCard({ it }: { it: ReviewItem }) {
   const fr = it.filter_results ?? {};
   return (

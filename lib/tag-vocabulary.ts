@@ -1,6 +1,6 @@
 // Fun London — fixed tag vocabulary for the personalisation engine.
 //
-// Derived from OneZone's curated lists (Cuisines / Occasions / Vibes) plus
+// Derived from the bulk import's curated lists (Cuisines / Occasions / Vibes) plus
 // Fun London's existing mood/vibe enums. This is the canonical tag space
 // used to build experience vectors and user taste vectors.
 //
@@ -163,11 +163,11 @@ export const TAG_INDEX: Readonly<Record<Tag, number>> = Object.fromEntries(
   UNIQUE_TAGS.map((t, i) => [t, i]),
 ) as Readonly<Record<Tag, number>>;
 
-// ── OneZone tag → canonical tag mapping ──────────────────────────────────────
-// Maps raw OneZone list labels and free-form tags to our canonical vocabulary.
+// ── Import tag → canonical tag mapping ──────────────────────────────────────
+// Maps raw import list labels and free-form tags to our canonical vocabulary.
 // Used during import and backfill to populate experience vectors.
 
-export const ONEZONE_TAG_MAP: Record<string, Tag[]> = {
+export const IMPORT_TAG_MAP: Record<string, Tag[]> = {
   // Cuisine lists
   "amazing asian": ["asian"],
   "awesome australian": ["australian"],
@@ -405,7 +405,7 @@ export const ONEZONE_TAG_MAP: Record<string, Tag[]> = {
   contemporary: ["minimalist"],
 
   // Seed / editorial tags — the hand-curated venues use a more bespoke
-  // vocabulary than OneZone (the first canonical backfill showed many coming
+  // vocabulary than the import source (the first canonical backfill showed many coming
   // out empty). Map the common, clearly-canonical ones; truly bespoke labels
   // ("Since 1959", neighbourhood names) stay unmapped by design.
   chill: ["low-key", "casual"],
@@ -509,15 +509,15 @@ export function normalise(vec: number[]): number[] {
 }
 
 /**
- * Map a raw OneZone tag string (or free-form venue tag) to canonical Tag[].
+ * Map a raw import tag string (or free-form venue tag) to canonical Tag[].
  * Returns empty array if no mapping is found.
  */
 export function mapRawTag(raw: string): Tag[] {
-  return ONEZONE_TAG_MAP[raw.toLowerCase().trim()] ?? [];
+  return IMPORT_TAG_MAP[raw.toLowerCase().trim()] ?? [];
 }
 
 /**
- * Convert a list of raw OneZone tags to a deduplicated canonical tag set.
+ * Convert a list of raw import tags to a deduplicated canonical tag set.
  */
 export function rawTagsToCanonical(rawTags: string[]): Tag[] {
   const seen = new Set<Tag>();
