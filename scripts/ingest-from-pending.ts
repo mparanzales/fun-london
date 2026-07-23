@@ -108,7 +108,7 @@ type Candidate = {
   vibe_tags_draft: string[] | null;
   // Claim-free templated drafts written by scripts/discover-venues.ts. These
   // are what the reviewer approved, so publishing prefers them; legacy
-  // (onezone/scout) candidates have them null and keep the old behaviour.
+  // (bulk-import/scout) candidates have them null and keep the old behaviour.
   vibe_draft: string | null;
   long_description_draft: string | null;
   real_talk_drafts: { label: string; body: string }[] | null;
@@ -246,9 +246,9 @@ function mapPriceLevel(level?: string): string {
 // Map Google place types to Fun London VenueType
 function mapVenueType(candidate: Candidate, googleTypes?: string[]): string {
   const typeGuess = candidate.type_guess?.toLowerCase() ?? "";
-  const onezoneSource = candidate.sources.find((s) => s.source === "onezone");
-  const cuisine = onezoneSource?.cuisine_type?.toLowerCase() ?? "";
-  const venueLists = onezoneSource?.vibe_lists ?? [];
+  const importSource = candidate.sources.find((s) => s.source === "bulk-import");
+  const cuisine = importSource?.cuisine_type?.toLowerCase() ?? "";
+  const venueLists = importSource?.vibe_lists ?? [];
 
   if (
     typeGuess === "pub" ||
@@ -313,14 +313,14 @@ function mapVenueType(candidate: Candidate, googleTypes?: string[]): string {
 // Derive mood tags. Discover-venues candidates carry their discovery
 // category's moods verbatim (a gallery is ["culture"], a park ["activity"],
 // a cafe []), so use those as-is: forcing "dinner" onto a park is wrong.
-// OneZone candidates keep the keyword derivation below.
+// Import candidates keep the keyword derivation below.
 function deriveMoodTags(candidate: Candidate): string[] {
   const discover = candidate.sources.find(
     (s) => s.source === "discover-venues",
   );
   if (discover?.moods) return discover.moods;
 
-  const source = candidate.sources.find((s) => s.source === "onezone");
+  const source = candidate.sources.find((s) => s.source === "bulk-import");
   if (!source) return ["dinner"];
 
   const moods = new Set<string>();
@@ -380,12 +380,12 @@ function dedupeTags(raw: string[]): string[] {
   return out;
 }
 
-// Carry the FULL onezone tag set onto the venue, deduped. vibe_tags_draft holds
+// Carry the FULL import tag set onto the venue, deduped. vibe_tags_draft holds
 // the rich raw "Tags" column (Date Night, Cosy, Tasting Menu, ...) plus the
 // Vibes lists; `source` carries the remaining curated lists. We insert ALL of
 // them — the card decides how many chips to render.
 function deriveVibeTags(candidate: Candidate): string[] {
-  const source = candidate.sources.find((s) => s.source === "onezone");
+  const source = candidate.sources.find((s) => s.source === "bulk-import");
 
   return dedupeTags([
     ...(candidate.vibe_tags_draft ?? []),
@@ -418,7 +418,7 @@ function buildVenueRow(
   photoUrls: string[],
 ) {
   const bookingLinks = detectBookingLinks(details.websiteUri);
-  const source = candidate.sources.find((s) => s.source === "onezone");
+  const source = candidate.sources.find((s) => s.source === "bulk-import");
   const discover = candidate.sources.find(
     (s) => s.source === "discover-venues",
   );
@@ -482,11 +482,11 @@ function buildVenueRow(
 }
 
 // Honest provenance label for the BD pipeline: derived from the candidate's
-// actual source, never hardcoded (a discover-venues prospect labelled "OneZone
+// actual source, never hardcoded (a discover-venues prospect labelled "Bulk
 // import" is fabricated provenance, the exact failure the audit flagged).
 function sourceLabel(candidate: Candidate): string {
   const src = candidate.sources[0]?.source;
-  if (src === "onezone") return "OneZone import";
+  if (src === "bulk-import") return "Bulk import";
   if (src === "discover-venues") return "venue discovery (Google Places)";
   return src ? `${src} import` : "unknown source";
 }
@@ -555,7 +555,7 @@ async function drainCandidate(
 }
 
 // ── Quality gate ──────────────────────────────────────────────────────────────
-// onezone restaurant names that are also street addresses ("64 Goodge Street")
+// import restaurant names that are also street addresses ("64 Goodge Street")
 // frequently match a junk Google listing with no rating. Only AUTO-PUBLISH
 // high-confidence matches: operational, with a real rating and enough reviews.
 // Everything else is quarantined (status="needs_review") for a human to judge —
@@ -593,7 +593,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     `  found: ${searchResult.displayName.text} · ${searchResult.formattedAddress}`,
   );
 
-  // Already in venues? Don't re-publish — but reconcile first. The onezone
+  // Already in venues? Don't re-publish — but reconcile first. The bulk-import
   // candidate may carry tags this venue was imported without (e.g. venues
   // ingested before the all-tags fix, or matched by a different candidate).
   // Union the candidate's full tag set into the existing venue so nothing the
@@ -607,7 +607,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
       .maybeSingle();
     if (existing) {
       // Only enrich DISCOVERED venues. Curated venues carry hand-picked
-      // editorial chips — never overwrite those with raw onezone labels.
+      // editorial chips — never overwrite those with raw import labels.
       let added = 0;
       if (existing.curation_tier === "discovered") {
         const existingTags = (existing.vibe_tags ?? []) as string[];
@@ -647,7 +647,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
         );
       }
       // No google_place_id stamp: it is UNIQUE on pending_candidates and many
-      // onezone candidates map to one venue, so only the published ("ingested")
+      // import candidates map to one venue, so only the published ("ingested")
       // candidate holds the link. The matched venue slug goes in reviewed_notes.
       await drainCandidate(candidate.id, {
         status: "skipped",
@@ -673,7 +673,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
         reviewed_at: new Date().toISOString(),
         reviewed_notes: `Auto-gate: ${gate.reason}`,
         // Do NOT stamp google_place_id here: pending_candidates.google_place_id
-        // is UNIQUE, and several onezone candidates can resolve to the same
+        // is UNIQUE, and several import candidates can resolve to the same
         // Google place. Only the candidate that actually publishes (the
         // "ingested" path) holds the 1:1 link. The match is preserved in
         // filter_results below for the reviewer.

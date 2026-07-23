@@ -1,7 +1,7 @@
 // Fun London — re-validate venue LOCATION against Google (source of truth).
 //
 // The catalogue accumulated bad location data from several sources (AI
-// discovery hallucinations, the OneZone import, wrong Google matches): venues
+// discovery hallucinations, the bulk import, wrong Google matches): venues
 // in the wrong city (Chelsea Market = NYC), wrong neighbourhoods (Regent's Park
 // labelled "Spitalfields"), and junk matches ("London, UK" with no real
 // address). Neighbourhood was copied from the import and never checked against
