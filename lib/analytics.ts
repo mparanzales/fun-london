@@ -153,3 +153,49 @@ export function track(event: AnalyticsEvent, props?: Props): void {
     // ditto
   }
 }
+
+// Where an error boundary fired. A closed union for the same reason
+// AnalyticsEvent is one: a typo becomes a compile error, and the set of places
+// we can break is legible in one spot.
+export type ErrorSurface =
+  | "global" // app/global-error.tsx — the root layout itself threw
+  | "main-shell" // explore / events / saved / plan / profile
+  | "venue" // /venue/[slug] (and its /anon ISR twin, which re-exports it)
+  | "event" // /event/[id] (ditto)
+  | "booking" // /booking/[slug]
+  | "component"; // the <ErrorBoundary> class, wrapping a subtree
+
+// Report a caught error to PostHog.
+//
+// WHY: every boundary in this app catches, renders a friendly fallback, and
+// then console.errors into a browser nobody is watching. Vercel only sees
+// SERVER function errors, so client-side crashes — most of what actually
+// breaks in a Next app — were completely invisible.
+//
+// Same guarantees as track(): no-ops on the server, before PostHog inits, with
+// no key configured, and when the visitor declined in the consent banner.
+// Because consent-gated, coverage is partial by design: enough to learn THAT
+// something breaks and where, not a complete incident log.
+export function reportError(
+  error: unknown,
+  surface: ErrorSurface,
+  extra?: Props,
+): void {
+  if (!analyticsAllowed() || !posthogReady) return;
+  try {
+    const err = error instanceof Error ? error : new Error(String(error));
+    // Next puts a `digest` on server-thrown errors; it is the only handle that
+    // ties a client-side report back to the server log line.
+    const digest = (error as { digest?: unknown } | null)?.digest;
+    posthog.captureException(err, {
+      surface,
+      ...(typeof digest === "string" ? { digest } : {}),
+      ...extra,
+    });
+  } catch {
+    // Never let analytics throw into product code — least of all here. This
+    // runs INSIDE an error boundary, so throwing again would replace the
+    // fallback UI with a hard crash: the one place a reporting bug could make
+    // things strictly worse than no reporting at all.
+  }
+}

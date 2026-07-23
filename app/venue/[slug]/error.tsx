@@ -4,6 +4,7 @@
 
 import { useEffect } from "react";
 import { ErrorFallback } from "@/components/error-fallback";
+import { reportError } from "@/lib/analytics";
 
 export default function Error({
   error,
@@ -14,6 +15,7 @@ export default function Error({
 }) {
   useEffect(() => {
     console.error("[Fun London] venue route error:", error);
+    reportError(error, "venue");
   }, [error]);
   return <ErrorFallback reset={reset} />;
 }
