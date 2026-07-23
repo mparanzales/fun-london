@@ -2,19 +2,16 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { Pin, Heart } from "lucide-react";
+import { Heart } from "lucide-react";
 import { VenueCard } from "@/components/venue-card";
 import { useSaved } from "@/components/saved-context";
 import { useBookings } from "@/components/bookings-context";
 import type { Venue } from "@/lib/types";
 
-export function SavedList({
-  allVenues,
-  isAnon = false,
-}: {
-  allVenues: Venue[];
-  isAnon?: boolean;
-}) {
+// Anon never renders here — /saved gates anonymous visitors behind the wall
+// (see saved/page.tsx). SavedList always has a signed-in user and the
+// card-level catalogue.
+export function SavedList({ allVenues }: { allVenues: Venue[] }) {
   const { savedSet } = useSaved();
   const { bookings } = useBookings();
   const saved = allVenues.filter((v) => savedSet.has(v.slug));
@@ -22,6 +19,9 @@ export function SavedList({
   // "Coming up" should only list reminders that haven't passed. Compare against
   // the start of today (so something earlier today still counts), and show the
   // soonest first. Past reminders drop off rather than lingering as "upcoming".
+  // Resolve each reminder to its venue card HERE so the header count and the
+  // rendered rows come from the same list — a booking whose venue has since
+  // dropped out of the catalogue must not inflate "N planned" with no card.
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const upcoming = bookings
@@ -29,8 +29,13 @@ export function SavedList({
       const d = new Date(b.startsAt);
       return !Number.isNaN(d.getTime()) && d >= startOfToday;
     })
+    .map((b) => ({ b, venue: allVenues.find((v) => v.slug === b.venueSlug) }))
+    .filter((x): x is { b: (typeof bookings)[number]; venue: Venue } =>
+      Boolean(x.venue),
+    )
     .sort(
-      (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+      (a, b) =>
+        new Date(a.b.startsAt).getTime() - new Date(b.b.startsAt).getTime(),
     );
 
   // Past reminders → a "Been there" history (most recent first). Foundation for
@@ -40,16 +45,20 @@ export function SavedList({
       const d = new Date(b.startsAt);
       return !Number.isNaN(d.getTime()) && d < startOfToday;
     })
+    .map((b) => ({ b, venue: allVenues.find((v) => v.slug === b.venueSlug) }))
+    .filter((x): x is { b: (typeof bookings)[number]; venue: Venue } =>
+      Boolean(x.venue),
+    )
     .sort(
-      (a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
+      (a, b) =>
+        new Date(b.b.startsAt).getTime() - new Date(a.b.startsAt).getTime(),
     );
 
   const hasBookings = upcoming.length > 0;
   const hasSaved = saved.length > 0;
   const hasPast = past.length > 0;
   const hasAnything = hasBookings || hasSaved || hasPast;
-  // Warn anonymous users that anything here lives only in this browser.
-  const showAnonWarning = isAnon && hasAnything;
+  const summaryLabel = summary(upcoming.length, saved.length);
 
   return (
     <div className="pt-4 pb-6">
@@ -57,41 +66,10 @@ export function SavedList({
         <h1 className="text-[28px] font-extrabold tracking-tight text-primary">
           Your spots
         </h1>
-        {hasAnything && (
-          <div className="text-xs text-muted-fg mt-0.5">
-            {summary(upcoming.length, saved.length)}
-          </div>
+        {summaryLabel && (
+          <div className="text-xs text-muted-fg mt-0.5">{summaryLabel}</div>
         )}
       </header>
-
-      {showAnonWarning && (
-        <div className="px-5 pb-4">
-          <div className="rounded-2xl border border-accent/40 bg-accent/10 px-4 py-3.5 flex items-start gap-3">
-            <span className="text-lg leading-none mt-0.5">
-              <Pin
-                className="w-4 h-4 inline-block align-[-3px]"
-                strokeWidth={1.75}
-                aria-hidden
-              />
-            </span>
-            <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-extrabold text-heading">
-                Saved on this device only
-              </div>
-              <p className="text-[12px] text-muted-fg mt-0.5 leading-relaxed">
-                Sign in to keep your spots safe and reach them from any device.
-                Clearing your browser would lose them.
-              </p>
-              <Link
-                href="/sign-in?return=/saved"
-                className="inline-block mt-2 text-[12px] font-extrabold text-primary no-underline"
-              >
-                Sign in to save them →
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
 
       {hasBookings && (
         <section className="px-5 pb-6">
@@ -99,9 +77,7 @@ export function SavedList({
             Coming up
           </h2>
           <div className="flex flex-col gap-2">
-            {upcoming.map((b) => {
-              const venue = allVenues.find((v) => v.slug === b.venueSlug);
-              if (!venue) return null;
+            {upcoming.map(({ b, venue }) => {
               return (
                 <Link
                   key={b.id}
@@ -156,9 +132,7 @@ export function SavedList({
             Been there
           </h2>
           <div className="flex flex-col gap-2">
-            {past.map((b) => {
-              const venue = allVenues.find((v) => v.slug === b.venueSlug);
-              if (!venue) return null;
+            {past.map(({ b, venue }) => {
               return (
                 <Link
                   key={b.id}
