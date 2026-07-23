@@ -371,18 +371,29 @@ create policy "events admin update popups" on public.events for update
 drop policy if exists "saved self read"   on public.saved_venues;
 drop policy if exists "saved self write"  on public.saved_venues;
 drop policy if exists "saved self delete" on public.saved_venues;
+drop policy if exists "saved_venues self update" on public.saved_venues;
 create policy "saved self read"   on public.saved_venues for select using ((select auth.uid()) = user_id);
 create policy "saved self write"  on public.saved_venues for insert with check ((select auth.uid()) = user_id);
 create policy "saved self delete" on public.saved_venues for delete using ((select auth.uid()) = user_id);
+-- UPDATE existed in prod but was missing here, so a fresh deploy from this file
+-- would have had NO update policy and (RLS being enabled) silently denied every
+-- write. Restored, matching prod's name and `to authenticated`.
+create policy "saved_venues self update" on public.saved_venues for update to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 -- Bookings: users only see/modify their own (partner-side will use a
 -- service-role connection for venue-scoped reads — handled separately).
 drop policy if exists "bookings self read"   on public.bookings;
 drop policy if exists "bookings self write"  on public.bookings;
 drop policy if exists "bookings self update" on public.bookings;
+drop policy if exists "bookings self delete" on public.bookings;
 create policy "bookings self read"   on public.bookings for select using ((select auth.uid()) = user_id);
 create policy "bookings self write"  on public.bookings for insert with check ((select auth.uid()) = user_id);
 create policy "bookings self update" on public.bookings for update using ((select auth.uid()) = user_id);
+-- Same drift as saved_venues: DELETE existed in prod, not here. Without it a
+-- fresh deploy could not cancel a booking.
+create policy "bookings self delete" on public.bookings for delete to authenticated
+  using ((select auth.uid()) = user_id);
 
 -- Plans: users only see/modify their own
 drop policy if exists "plans self read"   on public.plans;
