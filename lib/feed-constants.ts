@@ -22,6 +22,13 @@ export const PREVIEW_COUNT = 4;
 // this many per category, not all ~2,100).
 export const ANON_BROWSE_MAX = 24;
 
+// Initial anon preview widths, shared by BOTH feeds (explore + events) so the
+// "Just looking" bounded browse behaves identically. Mobile opens at
+// PREVIEW_COUNT; desktop opens wider (~4 rows), then "Just looking" reveals up
+// to ANON_BROWSE_MAX and a soft wall re-surfaces every REWALL_MS.
+export const ANON_INITIAL_DESKTOP = 16;
+export const REWALL_MS = 3 * 60_000;
+
 // sessionStorage key for the explore feed's back-navigation snapshot (see
 // ExploreFeed). Lives here so the sign-out handler can clear it without
 // importing the feed component.

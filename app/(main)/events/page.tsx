@@ -1,7 +1,7 @@
 import { fetchEvents, fetchEventCategoryPreview } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
 import { EventsFeed } from "./events-feed";
-import { PREVIEW_COUNT } from "@/lib/feed-constants";
+import { ANON_BROWSE_MAX } from "@/lib/feed-constants";
 
 // Force dynamic so the header date stays fresh across midnight, and because the
 // signed-in vs anonymous payloads differ. fetchEvents() reads cookies (the
@@ -27,7 +27,7 @@ export default async function EventsPage() {
   // events catalogue in the RSC payload (mirrors /explore).
   const events = authUser
     ? await fetchEvents()
-    : await fetchEventCategoryPreview(PREVIEW_COUNT);
+    : await fetchEventCategoryPreview(ANON_BROWSE_MAX);
   return (
     <EventsFeed
       events={events}

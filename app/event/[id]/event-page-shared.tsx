@@ -118,8 +118,10 @@ export async function EventPageBody({
         anonTeaser={anonTeaser?.text ?? null}
         anonTeaserTruncated={anonTeaser?.truncated ?? false}
       />
-      {/* Mobile: hard wall unchanged. Desktop: dismissable ("Just looking")
-          and re-surfaces every few minutes — same DetailAuthWall as /venue. */}
+      {/* Dismissable ("Just looking") on EVERY viewport, re-surfaces every few
+          minutes — same DetailAuthWall as /venue. The anon teaser + honest
+          unlock card in event-detail render on all viewports, so the mobile
+          reveal shows real content, never a blank page. */}
       <DetailAuthWall
         signedIn={signedIn}
         title={`Sign up to see ${event.name}`}
