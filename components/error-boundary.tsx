@@ -1,6 +1,7 @@
 "use client";
 import { Component, ReactNode } from "react";
 import { CloudOff } from "lucide-react";
+import { reportError } from "@/lib/analytics";
 
 type State = { hasError: boolean; error?: Error };
 
@@ -14,6 +15,7 @@ export class ErrorBoundary extends Component<
   }
   componentDidCatch(error: Error) {
     console.error("[Fun London] caught:", error);
+    reportError(error, "component");
   }
   render() {
     if (this.state.hasError) {

@@ -5,6 +5,7 @@
 // theme CSS or components being available — everything here is inline.
 
 import { useEffect } from "react";
+import { reportError } from "@/lib/analytics";
 
 export default function GlobalError({
   error,
@@ -15,6 +16,9 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("[Fun London] global error:", error);
+    // Usually a no-op: if the ROOT layout threw, PostHog never initialised.
+    // Still wired for the case where init already happened.
+    reportError(error, "global");
   }, [error]);
 
   // The app's theme CSS isn't guaranteed here (the root layout threw), so we
