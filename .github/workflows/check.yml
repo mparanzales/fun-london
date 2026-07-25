@@ -37,3 +37,42 @@ jobs:
 
       - name: pnpm check (typecheck + lint + format:check)
         run: pnpm check
+
+  build:
+    # WHY THIS EXISTS: `pnpm check` is typecheck + lint + format + copy-lint +
+    # tests — it does NOT run `next build`, so Next's own build-time rules are
+    # invisible to it. Precedent (commit 10f1731): a "use server" file may only
+    # export async functions; exporting a plain const array (BD_STATUSES) passed
+    # `pnpm check`/tsc cleanly and then ERRORED the Vercel production build
+    # ("can only export async functions, found object"). CI said green, prod
+    # said no.
+    #
+    # Kept as a SEPARATE job (not folded into `pnpm check`) for two reasons:
+    #   1. `check` stays the fast required status check for branch protection;
+    #   2. this runs in parallel, so it costs wall-clock, not developer time.
+    #
+    # Needs NO secrets: verified 2026-07-25 that `next build` completes with the
+    # env removed entirely (all Supabase reads are request-time, not build-time).
+    # That also means fork PRs can run this gate.
+    name: next build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Match the `check` job; Vercel builds on its own Node.
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm build
+        run: pnpm build
