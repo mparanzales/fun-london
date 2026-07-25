@@ -329,6 +329,25 @@ async function main() {
     await sleep(120); // stay well under Resend's rate limit
   }
   console.log(`\nSent ${sent}/${list.length} digests.`);
+
+  // FAIL LOUDLY when nothing got through.
+  //
+  // This script sent 0 emails every week from 2026-06-11 to 2026-07-23 — every
+  // recipient 422'd ("The domain is invalid", because funldn.com was never
+  // verified as a Resend sending domain) — and still exited 0. So the workflow
+  // reported `conclusion: success` 10 weeks running and the Alert-on-failure
+  // step never fired. A digest that delivers nothing is a FAILURE, not a quiet
+  // Thursday: with recipients on the list, zero sends must be non-zero exit.
+  //
+  // A genuinely empty list (nobody opted in) is NOT an error and exits 0.
+  if (list.length > 0 && sent === 0) {
+    console.error(
+      `\nFAILED: 0 of ${list.length} digests were delivered. ` +
+        `Every send was rejected — check the per-recipient errors above ` +
+        `(a 422 "domain is invalid" means the EMAIL_FROM domain is not verified in Resend).`,
+    );
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {
