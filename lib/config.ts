@@ -15,6 +15,8 @@ export const TAGLINE = "plan the night, not the place.";
 // Absolute base URL of the production site. Used for canonical/OG URLs,
 // sitemap and robots. Reads NEXT_PUBLIC_SITE_URL (set on Vercel + in
 // .env.local) and falls back to the live domain.
+// `||` not `??`: a blank env var must fall back too, or every canonical URL in
+// the sitemap goes relative. See scripts/__tests__/ci-env-fallbacks.test.ts.
 export const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.funldn.com"
+  process.env.NEXT_PUBLIC_SITE_URL || "https://www.funldn.com"
 ).replace(/\/$/, "");
