@@ -24,10 +24,18 @@ const PREVIEW = process.argv.includes("--preview");
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
+// 🧨 These use `||`, NOT `??`, and that is load bearing.
+// A workflow that maps `env: X: ${{ secrets.X }}` sets X to an EMPTY STRING
+// when the secret does not exist, and `??` only falls back on null/undefined.
+// Neither EMAIL_FROM nor NEXT_PUBLIC_SITE_URL is a repo secret, so with `??`
+// both silently became "" in CI: every digest posted `from: ""` and Resend
+// rejected all of them with 422 "The domain is invalid" for 9 weeks, while
+// every link in the body would have been relative and broken. Nothing was
+// ever wrong with the Resend domain or the API key.
 const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.funldn.com"
+  process.env.NEXT_PUBLIC_SITE_URL || "https://www.funldn.com"
 ).replace(/\/$/, "");
-const EMAIL_FROM = process.env.EMAIL_FROM ?? "Fun London <hello@funldn.com>";
+const EMAIL_FROM = process.env.EMAIL_FROM || "Fun London <hello@funldn.com>";
 
 const NEW_VENUE_DAYS = 7;
 const MAX_VENUES = 6;
@@ -45,6 +53,21 @@ if (!RESEND_API_KEY && !DRY_RUN && !PREVIEW) {
       "is added as a GitHub Actions secret). Run with --dry to build anyway.",
   );
   process.exit(0);
+}
+// Belt and braces for the bug above: refuse to post a malformed sender to
+// Resend rather than burning a whole weekly run discovering it recipient by
+// recipient. Accepts "you@example.com" or "Name <you@example.com>".
+const FROM_ADDRESS = EMAIL_FROM.includes("<")
+  ? EMAIL_FROM.slice(EMAIL_FROM.indexOf("<") + 1, EMAIL_FROM.lastIndexOf(">"))
+  : EMAIL_FROM;
+if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(FROM_ADDRESS.trim())) {
+  console.error(
+    `EMAIL_FROM is not a usable sender: ${JSON.stringify(EMAIL_FROM)}. ` +
+      'Resend rejects this with 422 "The domain is invalid". Expected ' +
+      '"Name <you@yourdomain.com>" or "you@yourdomain.com". An empty value ' +
+      "usually means a workflow maps a secret that does not exist.",
+  );
+  process.exit(1);
 }
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
