@@ -60,7 +60,10 @@ function lt(a: string, b: string): boolean {
 const PINS: { name: string; floor: string; note: string }[] = [
   { name: "sharp", floor: "0.35.0", note: "libvips CVE-2026-33327/-33328/-35590/-35591 (HIGH)" },
   { name: "dompurify", floor: "3.4.12", note: "CUSTOM_ELEMENT_HANDLING bypass (LOW)" },
-  { name: "js-yaml", floor: "5.2.1", note: "quadratic-complexity DoS via !!omap (MODERATE)" },
+  // 5.2.1 was the floor for the !!omap advisory. GHSA-pm4m-ph32-ghv5 (2026-07)
+  // then covered <=5.2.1 as well, so the old floor had become a vulnerable
+  // version in its own right. Raised, not removed.
+  { name: "js-yaml", floor: "5.2.2", note: "exponential parsing time in flow collections, DoS (HIGH), GHSA-pm4m-ph32-ghv5" },
 ];
 
 describe("CVE pins survive into the lockfile", () => {
