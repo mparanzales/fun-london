@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getAuthUser } from "@/lib/auth";
 import { safeReturnPath } from "@/lib/safe-redirect";
 import { Logo } from "@/components/logo";
+import { LegalLinks } from "@/components/legal-links";
 import { SignInForm } from "./sign-in-form";
 
 // Maps the `?error=…` tag set by /auth/callback into a user-readable
@@ -65,15 +66,38 @@ export default async function SignInPage(props: {
         initialError={initialErrorFor(searchParams.error)}
       />
 
-      {/* "Skip" → the always-on /explore preview (a few cards, then the
-          sign-up wall in the feed). Browsing is free; doing anything —
-          tapping a place, saving, planning — requires an account. */}
+      {/* "Skip" → back to browsing. Browsing is free; doing anything —
+          tapping a place, saving, planning — requires an account.
+          It returns the user to the venue/event they were actually deciding
+          on rather than dumping them at the top of the feed: a hesitant anon
+          three taps into a specific place used to get teleported to /explore,
+          which reads as "the app forgot what I was doing" and re-walls them.
+          Allowlisted to /venue/ and /event/ ONLY — those are the two surfaces
+          that render real anon content. Deliberately NOT the middleware's
+          isPublicPath, which also allows /saved, /profile and /plan and would
+          bounce the user straight into another wall. /explore and /events
+          already return to themselves. */}
       <Link
-        href="/explore"
-        className="mt-6 self-center text-[13px] font-medium text-muted-fg/70 hover:text-fg lowercase tracking-tight transition-colors"
+        href={
+          searchParams.return?.startsWith("/venue/") ||
+          searchParams.return?.startsWith("/event/")
+            ? safeReturnPath(searchParams.return)
+            : "/explore"
+        }
+        className="mt-8 self-center text-[13px] font-medium text-muted-fg hover:text-fg lowercase tracking-tight transition-colors"
       >
         take a peek →
       </Link>
+
+      {/* Legal disclosure lives HERE because this is the moment of contract:
+          every anonymous sign-up in the app funnels through /sign-in?return=…
+          — from SignupWall (the feed end-cap), from AuthWall, from the profile
+          wall, and from the middleware redirect. Coverage is therefore 100% by
+          construction. Putting it only on AuthWall was not enough: the two
+          feeds end in SignupWall, so the commonest path (splash → /explore →
+          scroll → sign up) met no legal links at all. Opens in a new tab so
+          reading the terms never destroys the ?return= the user came in with. */}
+      <LegalLinks newTab className="mt-5 self-center justify-center" />
     </div>
   );
 }

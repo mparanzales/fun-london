@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { MapPin, X, type LucideIcon } from "lucide-react";
+import { LegalLinks } from "@/components/legal-links";
 import { createClient } from "@/lib/supabase/client";
 import { storeUserGeo } from "@/lib/geo";
 
@@ -140,6 +141,18 @@ export function WelcomeSheet({ signedIn }: { signedIn: boolean }) {
         >
           Not now, just browse
         </button>
+
+        {/* 🧨 This sheet calls supabase.auth.signInWithOAuth DIRECTLY (see
+            handleGoogle above) — it never routes through /sign-in, where the
+            legal disclosure lives. Nothing imports this component today, so
+            it is dead code and not a live gap; but it is the highest-traffic
+            signup surface in the app the moment first-run onboarding is
+            re-enabled (every new device, shown BEFORE any wall or browsing),
+            and it would silently reopen the hole where a user could create an
+            account having never seen a legal link. Carrying the row here so
+            re-enabling it cannot regress that. If this sheet is instead
+            deleted, nothing is lost. */}
+        <LegalLinks newTab className="mt-4 justify-center" />
       </div>
     </div>,
     document.body,

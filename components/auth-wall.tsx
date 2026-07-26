@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Users, ArrowLeft } from "lucide-react";
+import { LegalLinks } from "@/components/legal-links";
 
 export function AuthWall({
   signedIn,
@@ -169,22 +170,16 @@ export function AuthWall({
           Already have an account? Log in
         </Link>
 
-        <div className="mt-5">
-          <Link
-            href="/privacy"
-            className="text-[11px] text-muted-fg/70 underline underline-offset-2"
-          >
-            Privacy Policy
-          </Link>
-        </div>
-
-        {/* Escape hatch — never a no-exit trap. Subordinate to the sign-up CTA. */}
+        {/* Escape hatch — never a no-exit trap. Subordinate to the sign-up CTA,
+            but it MUST stay above the legal fine print: "not yet" is a real
+            answer to this card, and burying the only exit under three grey
+            links makes the wall read as a hard gate. */}
         {(onBack || backHref) &&
           (onBack ? (
             <button
               type="button"
               onClick={onBack}
-              className="mt-4 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+              className="mt-5 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               {backLabel}
@@ -192,12 +187,17 @@ export function AuthWall({
           ) : (
             <Link
               href={backHref!}
-              className="mt-4 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+              className="mt-5 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               {backLabel}
             </Link>
           ))}
+
+        {/* Full disclosure lives on /sign-in (every signup routes through it).
+            This is the secondary copy for reassurance before the tap; new tab
+            so it never discards the returnTo this wall just computed. */}
+        <LegalLinks newTab className="mt-6 justify-center" />
       </div>
     </div>,
     document.body,
