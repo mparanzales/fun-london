@@ -4,19 +4,43 @@ const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
-      colors: {
-        bg: "var(--fl-bg)",
-        fg: "var(--fl-fg)",
-        muted: "var(--fl-muted)",
-        "muted-fg": "var(--fl-muted-fg)",
-        card: "var(--fl-card)",
-        border: "var(--fl-border)",
-        primary: "var(--fl-primary)",
-        "primary-fg": "var(--fl-primary-fg)",
-        accent: "var(--fl-accent)",
-        "accent-fg": "var(--fl-accent-fg)",
-        heading: "var(--fl-heading)",
-      },
+      // 🧨 Each colour is wrapped in color-mix so the `/opacity` modifier
+      // actually works. A bare `var(--fl-x)` CANNOT carry one: Tailwind v3
+      // parses the colour to inject an alpha channel, parseColor() returns
+      // null for a `var()`, and the utility is then dropped SILENTLY — no
+      // warning, no error, no CSS. Every `bg-primary/10`, `border-fg/15`,
+      // `text-muted-fg/70` in this codebase (98 of them across 27 files) was
+      // emitting nothing at all, so those tints, hairlines and muted greys
+      // simply did not render. Proven in the built CSS with a positive
+      // control: `.text-muted-fg` was emitted, `.text-muted-fg\/70` was not.
+      //
+      // color-mix keeps `--fl-*` as real colour values, so the 18 places that
+      // use `var(--fl-…)` directly (gradients, the auth-wall backdrop, the
+      // body colour) are untouched — unlike a channel-triplet migration,
+      // which would have broken every one of them.
+      //
+      // Tailwind substitutes `1` for `<alpha-value>` when no modifier is
+      // used, so `calc(1 * 100%)` = 100% and the plain utility is unchanged.
+      // Do NOT "simplify" these back to bare `var()`; dependency-pins-style
+      // guard: scripts/__tests__/color-tokens.test.ts.
+      colors: Object.fromEntries(
+        [
+          ["bg", "--fl-bg"],
+          ["fg", "--fl-fg"],
+          ["muted", "--fl-muted"],
+          ["muted-fg", "--fl-muted-fg"],
+          ["card", "--fl-card"],
+          ["border", "--fl-border"],
+          ["primary", "--fl-primary"],
+          ["primary-fg", "--fl-primary-fg"],
+          ["accent", "--fl-accent"],
+          ["accent-fg", "--fl-accent-fg"],
+          ["heading", "--fl-heading"],
+        ].map(([name, cssVar]) => [
+          name,
+          `color-mix(in srgb, var(${cssVar}) calc(<alpha-value> * 100%), transparent)`,
+        ]),
+      ),
       fontFamily: {
         sans: ["var(--font-jakarta)", "system-ui", "sans-serif"],
       },
