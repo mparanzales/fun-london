@@ -169,12 +169,31 @@ export function AuthWall({
           Already have an account? Log in
         </Link>
 
-        <div className="mt-5">
+        {/* All three legal pages, not just Privacy. This wall is the ONLY
+            live path a signed-out visitor has to them: the matching row in
+            the profile lives in ProfileBody, which anon never reaches (it
+            gets ProfileTeaser + this wall instead), and ProfileTeaser is
+            aria-hidden decoration behind the overlay, so links there would
+            be dead UI. Before this, /terms was unreachable signed-out from
+            anywhere in the app. */}
+        <div className="mt-5 flex flex-wrap justify-center gap-4">
           <Link
             href="/privacy"
             className="text-[11px] text-muted-fg/70 underline underline-offset-2"
           >
-            Privacy Policy
+            Privacy
+          </Link>
+          <Link
+            href="/terms"
+            className="text-[11px] text-muted-fg/70 underline underline-offset-2"
+          >
+            Terms
+          </Link>
+          <Link
+            href="/cookies"
+            className="text-[11px] text-muted-fg/70 underline underline-offset-2"
+          >
+            Cookies
           </Link>
         </div>
 
