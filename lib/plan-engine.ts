@@ -115,7 +115,15 @@ function roleMatches(v: Venue, role: PlanRole): boolean {
     case "Then":
       return DRINK_TYPES.includes(v.type);
     case "Finish":
-      return FINISH_TYPES.includes(v.type) || v.timeOfDay === "Night";
+      // The Night flag admits late venues the type list misses (a Night
+      // cafe = a late dessert spot, fine) — but NEVER a Restaurant: a
+      // "Night" restaurant is late-night DINING, and slotting it last
+      // builds drinks -> drinks -> dinner-at-10pm. Real shipped symptom
+      // (Wine Bar -> Cigar Merchants -> Claridge's, 2026-07-27).
+      return (
+        FINISH_TYPES.includes(v.type) ||
+        (v.timeOfDay === "Night" && !EAT_TYPES.includes(v.type))
+      );
   }
 }
 
@@ -278,6 +286,12 @@ function buildSoloCluster(
   when: Date | undefined,
   enforceOpen: boolean,
   radiusLadder: number[],
+  // Which venue types the ROLE-RELAXED rung may draw from at all. The rung
+  // exists to fill a thin slot with "something nearby" — but "anything
+  // nearby" put a Cafe and a MARKET into an evening night (Luna Omakase ->
+  // Beigel Bake -> Brick Lane Market, 2026-07-27). Relaxed picks must still
+  // be plausible for the daypart.
+  relaxedOk: (v: Venue) => boolean,
 ): ClusterStop[] {
   const addMins = (t: Date, mins: number) =>
     new Date(t.getTime() + mins * 60_000);
@@ -304,14 +318,19 @@ function buildSoloCluster(
       const cands = pool.filter(
         (v) =>
           !used.has(v.id) &&
-          (!requireRole || matchRole(v, role)) &&
+          (requireRole ? matchRole(v, role) : relaxedOk(v)) &&
           openOK(v) &&
           (maxKm == null || minKmToChosen(v, chosenVenues) <= maxKm),
       );
       const fresh = cands.filter((v) => !usedTypes.has(v.type));
-      const ranked = (fresh.length > 0 ? fresh : cands).sort(
-        (a, b) => scoreOf(b) - scoreOf(a),
-      );
+      // Role-matched picks may repeat a type when nothing fresh remains (two
+      // bars beats one stop). The ROLE-RELAXED rung may not: it exists to
+      // fill a thin slot with "something nearby", and letting it repeat a
+      // type is how a night got a SECOND restaurant as its finale (dinner
+      // again at 10pm — real shipped symptom, 2026-07-27). Relaxed picks
+      // must bring a fresh type or leave the slot honestly unfilled.
+      const eligible = requireRole ? (fresh.length > 0 ? fresh : cands) : fresh;
+      const ranked = eligible.slice().sort((a, b) => scoreOf(b) - scoreOf(a));
       return ranked[0] ?? null;
     };
     // Stay within a WALKABLE radius of the cluster: prefer a role-match nearby,
@@ -385,6 +404,13 @@ export function computePlan(
     (when && isDaytimeHour(when.getHours()) ? "day" : "evening");
   const matchRole = (v: Venue, role: PlanRole) =>
     roleMatchesForDaypart(v, role, daypart);
+  // Evening relaxed fills come from drinks/night types ONLY — food's place
+  // in an evening is Start, via its own rules; a cafe or market mid-night
+  // reads as a broken plan. Day plans relax across the day templates.
+  const relaxedOk = (v: Venue) =>
+    daypart === "evening"
+      ? DRINK_TYPES.includes(v.type) || FINISH_TYPES.includes(v.type)
+      : DAY_THEN_TYPES.includes(v.type) || DAY_FINISH_TYPES.includes(v.type);
   // Blended desirability: tonight's vibe/quality + the user's personal taste
   // (Stage 4.1). No taste (anon / no signals) → pure vibe, unchanged behaviour.
   const scoreOf = (v: Venue) =>
@@ -424,7 +450,18 @@ export function computePlan(
   // an isolated top venue and strand a one-stop night. `offset` cycles the
   // distinct clusters for "Try another".
   const buildClusters = (enforceOpen: boolean) => {
-    const seedMatches = pool.filter((v) => matchRole(v, "Start"));
+    // Start = dinner. EAT_FALLBACK (Cafe/Wine Bar) exists so a thin pool can
+    // still open the night, but at equal rank a high-scoring wine bar
+    // outseeded actual restaurants and the night became drinks -> drinks ->
+    // dinner-last (real shipped symptom, 2026-07-27). The fallback is now a
+    // WIDENING RUNG: seed from true eat types when any exist, fall back only
+    // when none do. Day plans keep their own template untouched.
+    const allStart = pool.filter((v) => matchRole(v, "Start"));
+    const primaryStart =
+      daypart === "evening"
+        ? allStart.filter((v) => EAT_TYPES.includes(v.type))
+        : allStart;
+    const seedMatches = primaryStart.length > 0 ? primaryStart : allStart;
     const seeds = (seedMatches.length > 0 ? seedMatches : pool)
       .slice()
       .sort((a, b) => scoreOf(b) - scoreOf(a))
@@ -439,6 +476,7 @@ export function computePlan(
         when,
         enforceOpen,
         radiusLadder,
+        relaxedOk,
       );
       const quality = chosen.reduce((s, c) => s + scoreOf(c.venue), 0);
       let totalWalk = 0;

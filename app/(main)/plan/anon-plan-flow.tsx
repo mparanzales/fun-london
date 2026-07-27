@@ -110,6 +110,11 @@ export function AnonPlanFlow({
   const [minDate, setMinDate] = useState("");
   useEffect(() => setMinDate(toISODate(new Date())), []);
 
+  // The result is its OWN SCREEN, never rendered under the questions —
+  // "the plan rendering is in the same place as the questions. I hate it.
+  // It needs to be on a new page" (Maria, 2026-07-27). Same setup -> result
+  // swap the signed-in PlanFlow uses.
+  const [step, setStep] = useState<"setup" | "result">("setup");
   const [building, setBuilding] = useState(false);
   const [result, setResult] = useState<AnonPlanPayload | null>(null);
   const [failure, setFailure] = useState<"limited" | "soft" | null>(null);
@@ -135,6 +140,8 @@ export function AnonPlanFlow({
     setBuilding(false);
     if (res.ok) {
       setResult(res);
+      setStep("result");
+      window.scrollTo({ top: 0 });
       track("plan_preview_built", {
         vibe,
         budget,
@@ -182,127 +189,141 @@ export function AnonPlanFlow({
 
   return (
     <div className="px-5">
-      {/* ── The brief ── */}
-      <section className="mt-2">
-        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-          When
-        </p>
-        <WhenPicker
-          choice={when}
-          dateStr={customDate}
-          timeStr={customTime}
-          minDate={minDate}
-          onChange={(next) => {
-            setWhen(next.choice);
-            setCustomDate(next.dateStr);
-            setCustomTime(next.timeStr);
-          }}
-        />
-      </section>
+      {/* ── The brief (setup screen) ── */}
+      {step === "setup" && (
+        <>
+          <section className="mt-2">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
+              When
+            </p>
+            <WhenPicker
+              choice={when}
+              dateStr={customDate}
+              timeStr={customTime}
+              minDate={minDate}
+              onChange={(next) => {
+                setWhen(next.choice);
+                setCustomDate(next.dateStr);
+                setCustomTime(next.timeStr);
+              }}
+            />
+          </section>
 
-      <section className="mt-5">
-        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-          Where
-        </p>
-        <AreaPicker
-          value={areaSel}
-          venues={[]}
-          neighbourhoods={neighbourhoods}
-          onChange={setAreaSel}
-        />
-      </section>
+          <section className="mt-5">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
+              Where
+            </p>
+            <AreaPicker
+              value={areaSel}
+              venues={[]}
+              neighbourhoods={neighbourhoods}
+              onChange={setAreaSel}
+            />
+          </section>
 
-      <section className="mt-5">
-        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-          Vibe
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          {VIBES.map((v) => {
-            const on = vibe === v.v;
-            return (
-              <button
-                key={v.v}
-                type="button"
-                onClick={() => setVibe(v.v)}
-                className={
-                  "px-3.5 py-3 rounded-[14px] border-[1.5px] text-left text-[13px] font-bold transition-colors " +
-                  (on
-                    ? "border-primary bg-primary/10 text-fg"
-                    : "border-border bg-card text-fg")
-                }
-              >
-                {v.v}
-                <span className="block text-[11px] font-normal text-muted-fg mt-0.5">
-                  {v.sub}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+          <section className="mt-5">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
+              Vibe
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {VIBES.map((v) => {
+                const on = vibe === v.v;
+                return (
+                  <button
+                    key={v.v}
+                    type="button"
+                    onClick={() => setVibe(v.v)}
+                    className={
+                      "px-3.5 py-3 rounded-[14px] border-[1.5px] text-left text-[13px] font-bold transition-colors " +
+                      (on
+                        ? "border-primary bg-primary/10 text-fg"
+                        : "border-border bg-card text-fg")
+                    }
+                  >
+                    {v.v}
+                    <span className="block text-[11px] font-normal text-muted-fg mt-0.5">
+                      {v.sub}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-      <section className="mt-5">
-        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-          Budget
-        </p>
-        <div className="grid grid-cols-3 gap-2">
-          {BUDGETS.map((b) => (
-            <button
-              key={b}
-              type="button"
-              onClick={() => setBudget(b)}
-              className={
-                "py-2.5 rounded-[14px] border-[1.5px] text-[13px] font-bold transition-colors " +
-                (budget === b
-                  ? "border-primary bg-primary/10 text-fg"
-                  : "border-border bg-card text-fg")
-              }
-            >
-              {b}
-            </button>
-          ))}
-        </div>
-      </section>
+          <section className="mt-5">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
+              Budget
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {BUDGETS.map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => setBudget(b)}
+                  className={
+                    "py-2.5 rounded-[14px] border-[1.5px] text-[13px] font-bold transition-colors " +
+                    (budget === b
+                      ? "border-primary bg-primary/10 text-fg"
+                      : "border-border bg-card text-fg")
+                  }
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+          </section>
 
-      <button
-        type="button"
-        onClick={() => {
-          setReshuffles(0);
-          void build(0);
-        }}
-        disabled={building}
-        className="mt-6 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold flex items-center justify-center gap-2 disabled:opacity-60"
-      >
-        <Sparkles className="w-4.5 h-4.5" size={18} />
-        {building ? "Building your night…" : "Build my night"}
-      </button>
-
-      {/* Rate-limited = a sign-up moment, never an error dead-end. */}
-      {failure === "limited" && (
-        <div className="mt-4 rounded-2xl border border-border bg-card p-4 text-center">
-          <p className="text-[13px] text-fg font-semibold m-0">
-            You&apos;ve built a lot of nights just now.
-          </p>
-          <p className="text-[12px] text-muted-fg mt-1 mb-3">
-            Sign up free to keep building, and to save the ones you like.
-          </p>
-          <Link
-            href={signInHref}
-            className="inline-flex h-10 px-5 items-center rounded-full bg-primary text-primary-fg text-[13px] font-extrabold"
+          <button
+            type="button"
+            onClick={() => {
+              setReshuffles(0);
+              void build(0);
+            }}
+            disabled={building}
+            className="mt-6 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold flex items-center justify-center gap-2 disabled:opacity-60"
           >
-            Sign up free
-          </Link>
-        </div>
-      )}
-      {failure === "soft" && (
-        <p className="mt-4 text-center text-[13px] text-muted-fg">
-          That didn&apos;t build. Try again in a moment.
-        </p>
+            <Sparkles className="w-4.5 h-4.5" size={18} />
+            {building ? "Building your night…" : "Build my night"}
+          </button>
+
+          {/* Rate-limited = a sign-up moment, never an error dead-end. */}
+          {failure === "limited" && (
+            <div className="mt-4 rounded-2xl border border-border bg-card p-4 text-center">
+              <p className="text-[13px] text-fg font-semibold m-0">
+                You&apos;ve built a lot of nights just now.
+              </p>
+              <p className="text-[12px] text-muted-fg mt-1 mb-3">
+                Sign up free to keep building, and to save the ones you like.
+              </p>
+              <Link
+                href={signInHref}
+                className="inline-flex h-10 px-5 items-center rounded-full bg-primary text-primary-fg text-[13px] font-extrabold"
+              >
+                Sign up free
+              </Link>
+            </div>
+          )}
+          {failure === "soft" && (
+            <p className="mt-4 text-center text-[13px] text-muted-fg">
+              That didn&apos;t build. Try again in a moment.
+            </p>
+          )}
+        </>
       )}
 
-      {/* ── The night ── */}
-      {result && (
-        <section className="mt-8">
+      {/* ── The night (result screen) ── */}
+      {step === "result" && result && (
+        <section className="mt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setStep("setup");
+              window.scrollTo({ top: 0 });
+            }}
+            className="mb-4 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+          >
+            ← Change the brief
+          </button>
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-1">
             Your {result.daypart === "day" ? "day out" : "night"} ·{" "}
             {hrs > 0 ? `${hrs}h ` : ""}
