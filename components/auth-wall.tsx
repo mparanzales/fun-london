@@ -174,25 +174,36 @@ export function AuthWall({
             but it MUST stay above the legal fine print: "not yet" is a real
             answer to this card, and burying the only exit under three grey
             links makes the wall read as a hard gate. */}
-        {(onBack || backHref) &&
-          (onBack ? (
-            <button
-              type="button"
-              onClick={onBack}
-              className="mt-5 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              {backLabel}
-            </button>
-          ) : (
-            <Link
-              href={backHref!}
-              className="mt-5 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              {backLabel}
-            </Link>
-          ))}
+        {/* 🧨 The block wrapper is load-bearing, do not remove it. The log-in
+            link above is `inline-block` and this control is `inline-flex`, so
+            with nothing block-level between them they SHARE A LINE wherever
+            the card is wide enough — "Already have an account? Log in ← Just
+            looking" collided on one row on desktop. It only looked fine on a
+            phone because 375px forced a wrap. Introduced when the escape hatch
+            was moved above the legal row (#175); the legal row used to be that
+            block separator by accident. */}
+        {(onBack || backHref) && (
+          <div className="mt-5">
+            {onBack ? (
+              <button
+                type="button"
+                onClick={onBack}
+                className="inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                {backLabel}
+              </button>
+            ) : (
+              <Link
+                href={backHref!}
+                className="inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                {backLabel}
+              </Link>
+            )}
+          </div>
+        )}
 
         {/* Full disclosure lives on /sign-in (every signup routes through it).
             This is the secondary copy for reassurance before the tap; new tab

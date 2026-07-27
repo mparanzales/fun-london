@@ -14,9 +14,12 @@
 
 import { useEffect, useState } from "react";
 import { AuthWall } from "@/components/auth-wall";
-
-// Re-surface cadence after each dismissal.
-const REWALL_MS = 3 * 60_000;
+// Re-surface cadence after each dismissal. Imported, NOT redeclared: this file
+// used to carry its own `const REWALL_MS = 3 * 60_000`, identical by
+// coincidence to the feeds' shared value. Two sources of truth meant retuning
+// the anon push in feed-constants would silently leave detail pages on the old
+// cadence — the same copy-drift that let the legal links lose /terms.
+import { REWALL_MS } from "@/lib/feed-constants";
 
 export function DetailAuthWall({
   signedIn,
