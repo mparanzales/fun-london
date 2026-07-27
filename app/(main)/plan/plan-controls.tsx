@@ -391,3 +391,22 @@ export function AreaPicker({
     </>
   );
 }
+
+// Section wrapper shared by the signed-in and anon plan setups — one source
+// so the eyebrow style (0.12em, extrabold) cannot drift between them.
+export function Group({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="px-5 pb-4">
+      <div className="text-[11px] font-extrabold text-muted-fg tracking-[0.12em] uppercase mb-2.5">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}

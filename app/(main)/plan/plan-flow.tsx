@@ -50,6 +50,7 @@ import {
   toPlanArea,
   type WhenChoice,
   type AreaSel,
+  Group,
 } from "./plan-controls";
 import type { Venue } from "@/lib/types";
 
@@ -978,19 +979,4 @@ export function PlanFlow({
   );
 }
 
-function Group({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="px-5 pb-4">
-      <div className="text-[11px] font-extrabold text-muted-fg tracking-[0.12em] uppercase mb-2.5">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
+// Group moved to ./plan-controls (shared with the anon setup).

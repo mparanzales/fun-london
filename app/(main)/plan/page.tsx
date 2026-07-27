@@ -28,19 +28,14 @@ export default async function PlanPage() {
     const neighbourhoods = [...counts]
       .map(([name, n]) => ({ name, n }))
       .sort((a, b) => b.n - a.n);
+    // AnonPlanFlow owns its per-step headers AND the Plan-with-friends card
+    // (setup step only): the server-rendered H1 used to stack above the
+    // result screen as a second, competing header, and the friends card
+    // under the result was a wall-bound door pasted onto the conversion
+    // moment (design + ux gates, 2026-07-28).
     return (
       <div className="pt-4 pb-6">
-        <div className="px-5 pt-4 pb-1">
-          <h1 className="text-[28px] font-extrabold tracking-tight text-heading m-0">
-            Plan your night
-          </h1>
-          <p className="text-[13px] text-muted-fg mt-1 mb-0">
-            Two or three spots, a short walk apart, in the order you&apos;d do
-            them. Try one, no account needed.
-          </p>
-        </div>
         <AnonPlanFlow neighbourhoods={neighbourhoods} />
-        <PlanTogetherCard />
       </div>
     );
   }

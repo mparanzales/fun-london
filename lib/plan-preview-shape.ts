@@ -16,6 +16,18 @@
 import type { Plan } from "@/lib/plan-engine";
 import { planRationale } from "@/lib/plan-engine";
 import { isOpenNow } from "@/lib/opening-hours";
+
+// "11:01 pm" — same formatter as the signed-in result (plan-flow fmtTime).
+function fmtArrive(d: Date): string {
+  return d
+    .toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Europe/London",
+    })
+    .toLowerCase();
+}
 import { mapVenuePreview } from "@/lib/queries";
 import type { VenueCardRow, VenuePlanRow } from "@/lib/queries";
 
@@ -33,6 +45,11 @@ export type AnonPlanStop = {
   dwellMins: number;
   walkToNextMins: number | null;
   isOpenNow: boolean;
+  // "7:45 pm" — estimated arrival, formatted SERVER-side. Moat judgement
+  // (ux gate, 2026-07-28): derived ONLY from the user's own chosen start +
+  // cumulative dwell + walk minutes — all data the anon client already
+  // holds — NEVER from opening_hours. Keep it that way.
+  arriveAtLabel: string | null;
 };
 
 export type AnonPlanPayload = {
@@ -69,6 +86,7 @@ export function toAnonPlanPayload(
       dwellMins: step.dwellMins,
       walkToNextMins: step.walkToNextMins,
       isOpenNow: isOpenNow(step.venue.openingHours, step.arriveAt ?? now),
+      arriveAtLabel: step.arriveAt ? fmtArrive(step.arriveAt) : null,
     });
   }
   if (stops.length === 0) return null;

@@ -11,45 +11,61 @@
 // that: the demo is free, the wall sits on KEEPING it (save) and on DEPTH
 // (2nd+ reshuffle).
 //
+// TWO SCREENS, setup -> result, each owning its own header (the server page
+// renders neither): the first cut stacked a static H1 above the result and
+// Maria killed it ("no hierarchy and not much design behind it"). The
+// design + ux gates (2026-07-28) rebuilt both screens in the PLAN's own
+// vocabulary — the signed-in setup header, the gradient result banner, the
+// number rail + role eyebrows + dashed walk connectors — instead of the
+// feed's card rows. The one .fl-grad moment per screen: setup spends it on
+// the wordmark text, result on the banner (grainy via .fl-grad — never the
+// inline-gradient shortcut, which skips the film grain).
+//
 // Moat: this file never sees the catalogue. The engine runs server-side
 // (lib/plan-preview.ts, service-role, server-only); what arrives here is 3
-// card-level stops — the same fields any anon venue page shows. This module
-// must NOT import lib/supabase/client, lib/signals, or lib/queries (pinned
-// by plan-preview-guard).
+// card-level stops — the same fields any anon venue page shows. Arrival
+// labels are server-formatted from the user's OWN chosen start + dwell +
+// walk, never from opening_hours. This module must NOT import
+// lib/supabase/client, lib/signals, or lib/queries (pinned by
+// plan-preview-guard).
 //
 // The built night SURVIVES sign-in: on result render it is stashed in
-// localStorage (localStorage, not sessionStorage — magic links open in a
-// new tab and sessionStorage dies with the old one), and PlanFlow hydrates
-// it through its openSaved path after the OAuth round-trip. Signing up to
-// save a night and landing on empty controls was the gate review's
-// number-one conversion killer.
+// localStorage (not sessionStorage — magic links open in a new tab), and
+// PlanFlow hydrates it through its openSaved path after the OAuth
+// round-trip.
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
   Sparkles,
+  Flame,
+  Gem,
+  Drama,
   Footprints,
   Star,
   RefreshCw,
   Heart,
   MapPin,
+  Clock,
 } from "lucide-react";
 import { AuthWall } from "@/components/auth-wall";
 import {
   WhenPicker,
   AreaPicker,
+  Group,
   toISODate,
   toPlanArea,
   type WhenChoice,
   type AreaSel,
 } from "./plan-controls";
+import { PlanTogetherCard } from "./plan-together-card";
 import { buildAnonPlan } from "@/lib/plan-preview-action";
 import type { AnonPlanPayload } from "@/lib/plan-preview-shape";
+import { ANYWHERE } from "@/lib/plan-engine";
 import { track } from "@/lib/analytics";
 
 export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
-const STASH_TTL_MS = 60 * 60 * 1000;
 
 // Mirrors plan-flow's resolveTiming (plan-flow.tsx:72) for the anon brief —
 // deliberately NOT imported from there: plan-flow drags in the supabase
@@ -88,11 +104,23 @@ function resolveAnonTiming(
   return { daypart: isDayNow ? "day" : "evening", whenISO: now.toISOString() };
 }
 
-const VIBES: { v: "Chill" | "Lively" | "Fancy" | "Unique"; sub: string }[] = [
-  { v: "Chill", sub: "easy pace, good corners" },
-  { v: "Lively", sub: "buzz, noise, people" },
-  { v: "Fancy", sub: "a proper occasion" },
-  { v: "Unique", sub: "only-in-London stuff" },
+// "3h 40m" from total minutes, no degenerate separators.
+function fmtHours(total: number): string {
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h <= 0) return `${m}m`;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+const VIBES: {
+  v: "Chill" | "Lively" | "Fancy" | "Unique";
+  sub: string;
+  Icon: typeof Sparkles;
+}[] = [
+  { v: "Chill", sub: "easy pace, good corners", Icon: Sparkles },
+  { v: "Lively", sub: "buzz, noise, people", Icon: Flame },
+  { v: "Fancy", sub: "a proper occasion", Icon: Gem },
+  { v: "Unique", sub: "only-in-London stuff", Icon: Drama },
 ];
 const BUDGETS: ("£" | "££" | "Any")[] = ["£", "££", "Any"];
 
@@ -108,20 +136,23 @@ export function AnonPlanFlow({
   const [vibe, setVibe] = useState<(typeof VIBES)[number]["v"]>("Chill");
   const [budget, setBudget] = useState<(typeof BUDGETS)[number]>("££");
   const [minDate, setMinDate] = useState("");
-  useEffect(() => setMinDate(toISODate(new Date())), []);
+  const [eyebrow, setEyebrow] = useState("tonight,");
+  useEffect(() => {
+    setMinDate(toISODate(new Date()));
+    const h = new Date().getHours();
+    setEyebrow(h >= 5 && h < 17 ? "today," : "tonight,");
+  }, []);
 
-  // The result is its OWN SCREEN, never rendered under the questions —
-  // "the plan rendering is in the same place as the questions. I hate it.
-  // It needs to be on a new page" (Maria, 2026-07-27). Same setup -> result
-  // swap the signed-in PlanFlow uses.
   const [step, setStep] = useState<"setup" | "result">("setup");
   const [building, setBuilding] = useState(false);
   const [result, setResult] = useState<AnonPlanPayload | null>(null);
+  const [startLabel, setStartLabel] = useState<string | null>(null);
   const [failure, setFailure] = useState<"limited" | "soft" | null>(null);
   // One free reshuffle (offset 1); the 2nd raises the wall. The engine is
   // deterministic per offset, so a walled FIRST reshuffle would protect
-  // nothing Build doesn't already expose — while forfeiting the "it has
-  // depth" proof (ux gate condition 2).
+  // nothing Build doesn't already expose. The free reshuffle is only
+  // CONSUMED when the rebuild SUCCEEDS — a failed build must never spend it
+  // and dead-end the next tap into the wall (ux gate blocker, 2026-07-28).
   const [reshuffles, setReshuffles] = useState(0);
   const [wallUp, setWallUp] = useState(false);
 
@@ -140,14 +171,19 @@ export function AnonPlanFlow({
     setBuilding(false);
     if (res.ok) {
       setResult(res);
+      if (offset === 1) setReshuffles(1);
+      setStartLabel(
+        new Date(t.whenISO)
+          .toLocaleTimeString("en-GB", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })
+          .toLowerCase(),
+      );
       setStep("result");
       window.scrollTo({ top: 0 });
-      track("plan_preview_built", {
-        vibe,
-        budget,
-        area: areaSel.kind,
-        offset,
-      });
+      track("plan_preview_built", { vibe, budget, area: areaSel.kind, offset });
     } else if (res.reason === "limited") {
       setFailure("limited");
     } else {
@@ -184,158 +220,100 @@ export function AnonPlanFlow({
   }, [result]);
 
   const signInHref = "/sign-in?return=%2Fplan";
-  const hrs = Math.floor((result?.totalMins ?? 0) / 60);
-  const mins = (result?.totalMins ?? 0) % 60;
 
-  return (
-    <div className="px-5">
-      {/* ── The brief (setup screen) ── */}
-      {step === "setup" && (
-        <>
-          <section className="mt-2">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-              When
-            </p>
-            <WhenPicker
-              choice={when}
-              dateStr={customDate}
-              timeStr={customTime}
-              minDate={minDate}
-              onChange={(next) => {
-                setWhen(next.choice);
-                setCustomDate(next.dateStr);
-                setCustomTime(next.timeStr);
-              }}
-            />
-          </section>
-
-          <section className="mt-5">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-              Where
-            </p>
-            <AreaPicker
-              value={areaSel}
-              venues={[]}
-              neighbourhoods={neighbourhoods}
-              onChange={setAreaSel}
-            />
-          </section>
-
-          <section className="mt-5">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-              Vibe
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {VIBES.map((v) => {
-                const on = vibe === v.v;
-                return (
-                  <button
-                    key={v.v}
-                    type="button"
-                    onClick={() => setVibe(v.v)}
-                    className={
-                      "px-3.5 py-3 rounded-[14px] border-[1.5px] text-left text-[13px] font-bold transition-colors " +
-                      (on
-                        ? "border-primary bg-primary/10 text-fg"
-                        : "border-border bg-card text-fg")
-                    }
-                  >
-                    {v.v}
-                    <span className="block text-[11px] font-normal text-muted-fg mt-0.5">
-                      {v.sub}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="mt-5">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-2">
-              Budget
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {BUDGETS.map((b) => (
-                <button
-                  key={b}
-                  type="button"
-                  onClick={() => setBudget(b)}
-                  className={
-                    "py-2.5 rounded-[14px] border-[1.5px] text-[13px] font-bold transition-colors " +
-                    (budget === b
-                      ? "border-primary bg-primary/10 text-fg"
-                      : "border-border bg-card text-fg")
-                  }
-                >
-                  {b}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <button
-            type="button"
-            onClick={() => {
-              setReshuffles(0);
-              void build(0);
-            }}
-            disabled={building}
-            className="mt-6 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold flex items-center justify-center gap-2 disabled:opacity-60"
+  // Failure states render on BOTH screens (a reshuffle can fail too).
+  const failureBlock = (
+    <>
+      {failure === "limited" && (
+        <div className="mt-4 rounded-2xl border border-border bg-card p-4 text-center">
+          <p className="text-[13px] text-fg font-semibold m-0">
+            You&apos;ve built a lot of nights just now.
+          </p>
+          <p className="text-[12px] text-muted-fg mt-1 mb-3">
+            Sign up free to keep building, and to save the ones you like.
+          </p>
+          <Link
+            href={signInHref}
+            className="inline-flex h-10 px-5 items-center rounded-full bg-primary text-primary-fg text-[13px] font-extrabold"
           >
-            <Sparkles className="w-4.5 h-4.5" size={18} />
-            {building ? "Building your night…" : "Build my night"}
-          </button>
-
-          {/* Rate-limited = a sign-up moment, never an error dead-end. */}
-          {failure === "limited" && (
-            <div className="mt-4 rounded-2xl border border-border bg-card p-4 text-center">
-              <p className="text-[13px] text-fg font-semibold m-0">
-                You&apos;ve built a lot of nights just now.
-              </p>
-              <p className="text-[12px] text-muted-fg mt-1 mb-3">
-                Sign up free to keep building, and to save the ones you like.
-              </p>
-              <Link
-                href={signInHref}
-                className="inline-flex h-10 px-5 items-center rounded-full bg-primary text-primary-fg text-[13px] font-extrabold"
-              >
-                Sign up free
-              </Link>
-            </div>
-          )}
-          {failure === "soft" && (
-            <p className="mt-4 text-center text-[13px] text-muted-fg">
-              That didn&apos;t build. Try again in a moment.
-            </p>
-          )}
-        </>
+            Sign up free
+          </Link>
+        </div>
       )}
+      {failure === "soft" && (
+        <p className="mt-4 text-center text-[13px] text-muted-fg">
+          That didn&apos;t build. Try again in a moment.
+        </p>
+      )}
+    </>
+  );
 
-      {/* ── The night (result screen) ── */}
-      {step === "result" && result && (
-        <section className="mt-2">
+  // ── Result screen ──────────────────────────────────────────────────────
+  if (step === "result" && result) {
+    return (
+      <div className="lg:max-w-4xl lg:mx-auto lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-x-10 lg:items-start">
+        {/* The screen's ONE gradient moment — .fl-grad so it carries the
+            film grain (the inline-gradient shortcut skips it). */}
+        <div className="fl-grad px-5 pt-5 pb-5 text-white lg:col-span-2 lg:rounded-3xl lg:mx-0">
           <button
             type="button"
             onClick={() => {
               setStep("setup");
               window.scrollTo({ top: 0 });
             }}
-            className="mb-4 inline-flex items-center gap-1 text-[12px] font-semibold text-muted-fg hover:text-fg"
+            className="relative bg-white/15 text-white rounded-lg px-2.5 py-1 text-[11px] font-bold mb-2.5"
           >
-            ← Change the brief
+            ← Edit
           </button>
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-fg mb-1">
-            Your {result.daypart === "day" ? "day out" : "night"} ·{" "}
-            {hrs > 0 ? `${hrs}h ` : ""}
-            {mins > 0 ? `${mins}m` : hrs > 0 ? "" : "·"}
-          </p>
-          <p className="text-[13px] text-muted-fg mt-0 mb-4">
+          <h2 className="relative text-[22px] font-extrabold m-0">
+            {result.daypart === "day"
+              ? "Today, the plan:"
+              : "Tonight, the plan:"}
+          </h2>
+          <div className="relative text-xs opacity-90 mt-1.5">
+            <MapPin
+              className="w-3.5 h-3.5 inline-block align-[-3px]"
+              strokeWidth={1.75}
+              aria-hidden
+            />{" "}
+            {result.area === ANYWHERE
+              ? "Across London"
+              : `Around ${result.area}`}{" "}
+            ·{" "}
+            <Clock
+              className="w-3.5 h-3.5 inline-block align-[-3px]"
+              strokeWidth={1.75}
+              aria-hidden
+            />{" "}
+            {fmtHours(result.totalMins)}
+            {startLabel ? ` · from ${startLabel}` : ""}
+          </div>
+        </div>
+
+        <div className="px-5 lg:px-0">
+          <p className="text-[13px] text-muted-fg mt-3 mb-4">
             {result.rationale}
           </p>
 
-          <ol className="list-none m-0 p-0">
+          <ol className="list-none m-0 p-0 fl-stagger">
             {result.stops.map((s, i) => (
               <li key={s.slug}>
+                <div className="flex items-center gap-3 mb-1.5">
+                  <div className="w-[26px] h-[26px] rounded-full border-2 border-accent text-accent grid place-items-center text-xs font-extrabold">
+                    {i + 1}
+                  </div>
+                  <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase">
+                    {s.role}
+                  </div>
+                  {s.arriveAtLabel && (
+                    <div className="ml-auto text-[11px] text-muted-fg">
+                      arrive{" "}
+                      <span className="font-bold text-fg">
+                        ~{s.arriveAtLabel}
+                      </span>
+                    </div>
+                  )}
+                </div>
                 <Link
                   href={`/venue/${s.slug}`}
                   onClick={() => track("plan_stop_opened", { i })}
@@ -354,19 +332,23 @@ export function AnonPlanFlow({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] font-extrabold text-heading truncate">
-                      {i + 1}. {s.name}
+                      {s.name}
                     </span>
                     <span className="block text-[12px] text-muted-fg truncate">
                       {s.neighbourhood} · {s.type} · {s.price}
                     </span>
                     <span className="flex items-center gap-2 text-[11px] text-muted-fg mt-0.5">
                       <span className="inline-flex items-center gap-0.5">
-                        <Star size={11} className="text-primary" />
+                        <Star
+                          size={11}
+                          className="text-accent"
+                          fill="currentColor"
+                        />
                         {s.rating.toFixed(1)}
                       </span>
                       ~{s.dwellMins} min here
                       {s.isOpenNow && (
-                        <span className="text-primary font-semibold">
+                        <span className="text-accent font-semibold">
                           Open at arrival
                         </span>
                       )}
@@ -374,19 +356,25 @@ export function AnonPlanFlow({
                   </span>
                 </Link>
                 {s.walkToNextMins != null && (
-                  <div className="flex items-center gap-2 pl-8 py-1.5 text-[11px] text-muted-fg">
-                    <Footprints size={12} />
+                  <div className="ml-3 pl-3 py-1.5 border-l-2 border-dashed border-border text-[11px] text-muted-fg">
+                    <Footprints
+                      className="w-3.5 h-3.5 inline-block align-[-3px]"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    />{" "}
                     {s.walkToNextMins} min walk
                   </div>
                 )}
               </li>
             ))}
           </ol>
+        </div>
 
-          <div className="mt-4 flex gap-2">
+        <div className="px-5 lg:px-0 lg:sticky lg:top-24">
+          <div className="mt-4 lg:mt-3 flex gap-2 lg:flex-col">
             <Link
               href={signInHref}
-              className="flex-1 h-[46px] rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold inline-flex items-center justify-center gap-1.5 no-underline"
+              className="flex-1 h-[46px] rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold inline-flex items-center justify-center gap-1.5 no-underline shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
             >
               <Heart size={15} />
               Save this night
@@ -396,36 +384,169 @@ export function AnonPlanFlow({
               disabled={building}
               onClick={() => {
                 if (reshuffles === 0) {
-                  setReshuffles(1);
                   void build(1);
                 } else {
                   setWallUp(true);
                 }
               }}
-              className="h-[46px] px-4 rounded-2xl border-[1.5px] border-border bg-card text-fg text-[14px] font-bold inline-flex items-center justify-center gap-1.5"
+              className="h-[46px] px-4 rounded-2xl border-[1.5px] border-border bg-card text-fg text-[14px] font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
             >
-              <RefreshCw size={15} />
-              Reshuffle
+              <RefreshCw
+                size={15}
+                className={building ? "animate-spin" : undefined}
+              />
+              {building ? "Rebuilding…" : "Reshuffle"}
             </button>
           </div>
-
+          {failureBlock}
           <p className="mt-3 mb-0 text-center text-[12px] text-muted-fg">
             <MapPin size={11} className="inline -mt-0.5" /> Sign up free to save
             this night, see it on a map, and book the stops.
           </p>
-        </section>
-      )}
+        </div>
 
-      {wallUp && (
-        <AuthWall
-          signedIn={false}
-          title="Sign up for more nights"
-          body="You've seen two takes on your brief. A free account gets you endless reshuffles, saved nights and booking."
-          onBack={() => setWallUp(false)}
-          backLabel="Keep this one"
-          returnTo="/plan"
+        {wallUp && (
+          <AuthWall
+            signedIn={false}
+            title="Sign up for more nights"
+            body="You've seen two takes on your brief. A free account gets you endless reshuffles, saved nights and booking."
+            onBack={() => setWallUp(false)}
+            backLabel="Keep this one"
+            returnTo="/plan"
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ── Setup screen ───────────────────────────────────────────────────────
+  return (
+    <div className="lg:max-w-xl lg:mx-auto">
+      {/* The plan's own header — same language as the signed-in setup. */}
+      <div className="px-5 pt-4 pb-5">
+        <h1 className="flex items-baseline gap-2.5 m-0 leading-none">
+          <span
+            className="text-xl italic font-medium text-muted-fg lowercase"
+            suppressHydrationWarning
+          >
+            {eyebrow}
+          </span>
+          <span className="text-[32px] font-extrabold fl-grad-text lowercase tracking-tight">
+            the plan
+          </span>
+        </h1>
+        <div className="text-[13px] text-muted-fg mt-2">
+          Two or three spots, a short walk apart, in the order you&apos;d do
+          them. Try one, no account needed.
+        </div>
+        {result && (
+          <button
+            type="button"
+            onClick={() => {
+              setStep("result");
+              window.scrollTo({ top: 0 });
+            }}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full border-[1.5px] border-accent text-accent px-3.5 py-1.5 text-[12px] font-bold"
+          >
+            Back to your night →
+          </button>
+        )}
+      </div>
+
+      <Group label="When">
+        <WhenPicker
+          choice={when}
+          dateStr={customDate}
+          timeStr={customTime}
+          minDate={minDate}
+          onChange={(next) => {
+            setWhen(next.choice);
+            setCustomDate(next.dateStr);
+            setCustomTime(next.timeStr);
+          }}
         />
-      )}
+      </Group>
+
+      <Group label="Where">
+        <AreaPicker
+          value={areaSel}
+          venues={[]}
+          neighbourhoods={neighbourhoods}
+          onChange={setAreaSel}
+        />
+      </Group>
+
+      <Group label="Vibe">
+        <div className="grid grid-cols-2 gap-2">
+          {VIBES.map(({ v, sub, Icon }) => {
+            const on = vibe === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setVibe(v)}
+                className={
+                  "px-3.5 py-3 rounded-[14px] border-[1.5px] text-left text-[13px] font-bold transition-colors " +
+                  (on
+                    ? "border-accent bg-accent/10 text-fg"
+                    : "border-border bg-card text-fg")
+                }
+              >
+                <span className="flex items-center gap-2">
+                  <Icon
+                    className="w-5 h-5 text-accent flex-shrink-0"
+                    strokeWidth={1.75}
+                  />
+                  {v}
+                </span>
+                <span className="block text-[11px] font-normal text-muted-fg mt-0.5">
+                  {sub}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Group>
+
+      <Group label="Budget">
+        <div className="grid grid-cols-3 gap-2">
+          {BUDGETS.map((b) => (
+            <button
+              key={b}
+              type="button"
+              onClick={() => setBudget(b)}
+              className={
+                "h-11 rounded-xl border-[1.5px] text-[13px] font-bold transition-colors " +
+                (budget === b
+                  ? "border-accent bg-accent/10 text-fg"
+                  : "border-border bg-card text-fg")
+              }
+            >
+              {b}
+            </button>
+          ))}
+        </div>
+      </Group>
+
+      <div className="px-5">
+        <button
+          type="button"
+          onClick={() => {
+            setReshuffles(0);
+            void build(0);
+          }}
+          disabled={building}
+          className="mt-2 w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold flex items-center justify-center gap-2 disabled:opacity-60 shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
+        >
+          <Sparkles size={18} />
+          {building ? "Building your night…" : "Build my night"}
+        </button>
+        {failureBlock}
+      </div>
+
+      <div className="mt-6">
+        <PlanTogetherCard />
+      </div>
     </div>
   );
 }
