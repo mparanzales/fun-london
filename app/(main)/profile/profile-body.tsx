@@ -4,6 +4,7 @@ import { resetAnalyticsIdentity } from "@/lib/analytics";
 import { FEED_SNAPSHOT_KEY } from "@/lib/feed-constants";
 
 import Link from "next/link";
+import { LegalLinks } from "@/components/legal-links";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -348,17 +349,7 @@ function SignedInProfile({
         </button>
       </div>
 
-      <nav className="px-5 mt-6 flex justify-center gap-4 text-[11px] text-muted-fg">
-        <Link href="/privacy" className="underline underline-offset-2">
-          Privacy
-        </Link>
-        <Link href="/terms" className="underline underline-offset-2">
-          Terms
-        </Link>
-        <Link href="/cookies" className="underline underline-offset-2">
-          Cookies
-        </Link>
-      </nav>
+      <LegalLinks className="px-5 mt-6 justify-center" />
 
       <div className="px-5 mt-5 flex flex-col items-center">
         {!confirmingDelete ? (

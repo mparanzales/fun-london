@@ -47,6 +47,11 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/privacy") ||
     pathname.startsWith("/terms") ||
     pathname.startsWith("/cookies") ||
+    // /about is for booking-platform partnerships teams, investors and press,
+    // who arrive by direct link and have no account. Gating it would bounce
+    // exactly its intended audience to a sign-up form — and since it is in
+    // the sitemap, Google would index the redirect instead of the page.
+    pathname.startsWith("/about") ||
     pathname.startsWith("/api/email/unsubscribe")
   );
 }
