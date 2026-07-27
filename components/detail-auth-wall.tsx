@@ -1,25 +1,27 @@
 "use client";
 
-// Dismissable wrapper around AuthWall for detail pages (/venue/[slug]).
+// Dismissable wrapper around AuthWall for detail pages (/venue/[slug],
+// /event/[id]).
 //
 // The content behind the wall is a MOAT-SAFE card-level preview + a capped
 // teaser (see venue-page-shared: anon `venue` = mapVenuePreview), so "Just
 // looking" can reveal it on EVERY viewport — phone and laptop alike — plus
-// AuthWall's built-in Esc and click-the-blur. The wall then re-surfaces every
-// few minutes so the push to sign up keeps coming back.
+// AuthWall's built-in Esc and click-the-blur.
+//
+// A dismissal holds for THIS page's lifetime. The 3-minute re-surface timer
+// was deleted (2026-07-27 gate review): it evicted exactly the engaged
+// slow reader — three minutes of dwell on one venue is your most interested
+// anon — and it seized scroll and focus mid-read. The push survives without
+// it: the NEXT venue or event page re-walls on mount anyway, so "the sign-up
+// ask keeps coming back" is now per-venue, not per-clock.
 //
 // History: desktop-only dismiss after #121/#122 (mobile kept the old hard
-// wall); extended to mobile 2026-07-15 because a blank blur on a phone read as
-// "nothing here / I'm lost" (Maria). Original laptop-browsing call: 2026-07-10.
+// wall); extended to mobile 2026-07-15 because a blank blur on a phone read
+// as "nothing here / I'm lost" (Maria). Original laptop call: 2026-07-10.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AuthWall } from "@/components/auth-wall";
-// Re-surface cadence after each dismissal. Imported, NOT redeclared: this file
-// used to carry its own `const REWALL_MS = 3 * 60_000`, identical by
-// coincidence to the feeds' shared value. Two sources of truth meant retuning
-// the anon push in feed-constants would silently leave detail pages on the old
-// cadence — the same copy-drift that let the legal links lose /terms.
-import { REWALL_MS } from "@/lib/feed-constants";
+import { track } from "@/lib/analytics";
 
 export function DetailAuthWall({
   signedIn,
@@ -27,30 +29,24 @@ export function DetailAuthWall({
 }: {
   signedIn: boolean;
   title: string;
-  // Kept for call-site compatibility. The wall now dismisses IN PLACE on every
+  // Kept for call-site compatibility. The wall dismisses IN PLACE on every
   // viewport instead of navigating back on mobile, so it's no longer read.
   backHref?: string;
 }) {
   const [dismissed, setDismissed] = useState(false);
 
-  // After each dismissal the wall re-surfaces, so the push to sign up keeps
-  // coming back (same cadence on phone and laptop).
-  useEffect(() => {
-    if (!dismissed) return;
-    const t = setTimeout(() => setDismissed(false), REWALL_MS);
-    return () => clearTimeout(t);
-  }, [dismissed]);
-
   if (signedIn || dismissed) return null;
 
-  // "Just looking" reveals the moat-safe card-level preview + capped teaser on
-  // EVERY viewport. (Was desktop-only after #121/#122; a phone got a blank blur
-  // that read as "nothing here / I'm lost" — Maria, 2026-07-15.)
   return (
     <AuthWall
       signedIn={false}
       title={title}
-      onBack={() => setDismissed(true)}
+      onBack={() => {
+        // Arms the deferred wall-on-arrival decision with data: dismiss rate
+        // here vs. plan_stop_opened taps (2026-07-27 gate, ux condition 5).
+        track("detail_wall_dismissed");
+        setDismissed(true);
+      }}
       backLabel="Just looking"
     />
   );

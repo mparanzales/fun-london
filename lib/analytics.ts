@@ -39,7 +39,15 @@ export type AnalyticsEvent =
   | "together_swipe"
   | "share" // Web Share / clipboard from any surface
   | "search_query"
-  | "sign_in_complete";
+  | "sign_in_complete"
+  // Anon-first plan gate (2026-07-27). plan_preview_built is THE number the
+  // anon /plan ships to move; detail_wall_dismissed + plan_stop_opened arm
+  // the deferred detail-wall-on-arrival decision with data instead of
+  // opinion (ux gate condition 5).
+  | "plan_preview_built"
+  | "plan_stop_opened"
+  | "plan_stash_restored"
+  | "detail_wall_dismissed";
 
 type Props = Record<string, string | number | boolean | null | undefined>;
 

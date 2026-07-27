@@ -683,3 +683,110 @@ describe("computeWalkablePlan · group taste (Stage 5)", () => {
     expect(b).toEqual(a);
   });
 });
+
+// ── The night reads like a night (2026-07-27) ────────────────────────────
+// Real shipped symptom: "Wine Bar Mayfair → The Connaught Cigar Merchants →
+// Claridge's" — drinks, drinks, dinner at 10pm. Two engine holes: Start's
+// eat-FALLBACK (Wine Bar) outseeded real restaurants at equal rank, and
+// Finish admitted any `timeOfDay: "Night"` venue INCLUDING restaurants.
+describe("evening arc ordering", () => {
+  const soho = { neighbourhood: "Soho", lat: 51.5134, lng: -0.1329 };
+  const evening = new Date(2026, 5, 10, 19, 0);
+
+  it("Start is a real restaurant when one exists, even against a higher-vibe wine bar", () => {
+    const venues = [
+      makeVenue({
+        ...soho,
+        id: "wb",
+        slug: "wb",
+        type: "Wine Bar",
+        rating: 4.9,
+        vibe: "candlelit corner",
+      }),
+      makeVenue({
+        ...soho,
+        id: "rest",
+        slug: "rest",
+        type: "Restaurant",
+        rating: 4.2,
+      }),
+      makeVenue({ ...soho, id: "bar", slug: "bar", type: "Bar", rating: 4.5 }),
+      makeVenue({
+        ...soho,
+        id: "jazz",
+        slug: "jazz",
+        type: "Live Music",
+        rating: 4.6,
+      }),
+    ];
+    const plan = computePlan(venues, {
+      area: { kind: "neighbourhood", name: "Soho" },
+      vibe: "Chill",
+      budget: "Any",
+      when: evening,
+      daypart: "evening",
+    });
+    expect(plan.steps.length).toBeGreaterThanOrEqual(2);
+    expect(plan.steps[0].venue.type).toBe("Restaurant");
+  });
+
+  it("Finish is never a Restaurant in the evening, whatever its Night flag says", () => {
+    // Deterministic pin via FILL-FIRST scoring: the ONLY way to build a
+    // 3-stop night from this pool is Finish = the Night-restaurant. The old
+    // rule always took that deal (r1 -> b1 -> late-rest, dinner again at
+    // 10pm); the fixed rule refuses and ships the honest 2-stop night.
+    const venues = [
+      makeVenue({
+        ...soho,
+        id: "r1",
+        slug: "r1",
+        type: "Restaurant",
+        rating: 5.0,
+      }),
+      makeVenue({ ...soho, id: "b1", slug: "b1", type: "Bar" }),
+      makeVenue({
+        ...soho,
+        id: "late-rest",
+        slug: "late-rest",
+        type: "Restaurant",
+        timeOfDay: "Night",
+        rating: 4.8,
+      }),
+    ];
+    const plan = computePlan(venues, {
+      area: { kind: "neighbourhood", name: "Soho" },
+      vibe: "Lively",
+      budget: "Any",
+      when: evening,
+      daypart: "evening",
+    });
+    const finish = plan.steps[plan.steps.length - 1];
+    expect(finish.venue.type).not.toBe("Restaurant");
+  });
+});
+
+it("a thin evening pool never relax-fills with daytime types (cafe, market)", () => {
+  const soho = { neighbourhood: "Soho", lat: 51.5134, lng: -0.1329 };
+  const evening = new Date(2026, 5, 10, 19, 0);
+  // Only one drink venue exists; the relaxed rung used to complete the
+  // night with whatever was nearby (a cafe, a market). Now it must either
+  // pick evening-plausible types or leave slots honestly unfilled.
+  const venues = [
+    makeVenue({ ...soho, id: "r1", slug: "r1", type: "Restaurant" }),
+    makeVenue({ ...soho, id: "cafe", slug: "cafe", type: "Cafe", rating: 5.0 }),
+    makeVenue({ ...soho, id: "mkt", slug: "mkt", type: "Market", rating: 5.0 }),
+    makeVenue({ ...soho, id: "b1", slug: "b1", type: "Bar" }),
+  ];
+  const plan = computePlan(venues, {
+    area: { kind: "neighbourhood", name: "Soho" },
+    vibe: "Chill",
+    budget: "Any",
+    when: evening,
+    daypart: "evening",
+  });
+  for (const s of plan.steps.slice(1)) {
+    expect(["Cafe", "Market", "Culture", "Outdoors"]).not.toContain(
+      s.venue.type,
+    );
+  }
+});

@@ -349,7 +349,7 @@ function SignedInProfile({
         </button>
       </div>
 
-      <LegalLinks className="px-5 mt-6 justify-center" />
+      <LegalLinks showAbout className="px-5 mt-6 justify-center" />
 
       <div className="px-5 mt-5 flex flex-col items-center">
         {!confirmingDelete ? (

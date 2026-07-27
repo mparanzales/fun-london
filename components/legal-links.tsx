@@ -20,11 +20,19 @@ import Link from "next/link";
 // or from /sign-in discards the computed ?return= — and on a Plan Together
 // invite (/plan/together?room=ABCD) that silently drops the room code and
 // loses the invitee. Opening in a new tab keeps the funnel intact.
+// `showAbout` is a named variant (per the rule above). It adds the company
+// page at exactly two sites — the profile settings row and the legal-page
+// footer — and stays OFF on the auth walls and /sign-in: those are
+// disclosure/decision moments, the wall is already at its 6-element ceiling,
+// and About is marketing, not disclosure. /about was orphaned from #175
+// until this: zero in-app links, only the sitemap knew it existed.
 export function LegalLinks({
   newTab = false,
+  showAbout = false,
   className = "",
 }: {
   newTab?: boolean;
+  showAbout?: boolean;
   className?: string;
 }) {
   const ext = newTab
@@ -34,6 +42,11 @@ export function LegalLinks({
     <nav
       className={`flex flex-wrap gap-4 text-[11px] text-muted-fg ${className}`}
     >
+      {showAbout && (
+        <Link href="/about" {...ext} className="underline underline-offset-2">
+          About
+        </Link>
+      )}
       <Link href="/privacy" {...ext} className="underline underline-offset-2">
         Privacy
       </Link>

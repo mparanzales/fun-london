@@ -41,6 +41,7 @@ import { track } from "@/lib/analytics";
 import { recordSignal } from "@/lib/signals";
 import { googleMapsWalkingUrl } from "@/lib/plan-maps";
 import { PlanRouteMapLive } from "./plan-route-map-live";
+import { ANON_PLAN_STASH_KEY } from "./anon-plan-flow";
 import { SwipeStop } from "./swipe-stop";
 import {
   WhenPicker,
@@ -49,6 +50,7 @@ import {
   toPlanArea,
   type WhenChoice,
   type AreaSel,
+  Group,
 } from "./plan-controls";
 import type { Venue } from "@/lib/types";
 
@@ -378,6 +380,73 @@ export function PlanFlow({
     });
     setStep("result");
   };
+
+  // Hydrate a night built while signed OUT. The anon /plan flow stashes its
+  // result in localStorage before the sign-in round-trip (three navigations
+  // through /auth/callback destroy all client state); without this, a user
+  // who signs up specifically to SAVE the night they just built lands back
+  // on empty setup controls — the gate review's single worst conversion
+  // moment (ux condition 1, 2026-07-27). Same resolution path as openSaved:
+  // slugs → this catalogue → a DisplayPlan, then straight to the result.
+  useEffect(() => {
+    if (!authUserId) return;
+    let raw: string | null = null;
+    try {
+      raw = window.localStorage.getItem(ANON_PLAN_STASH_KEY);
+      if (raw) window.localStorage.removeItem(ANON_PLAN_STASH_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      const stash = JSON.parse(raw) as {
+        stops?: {
+          slug: string;
+          role: string;
+          dwellMins: number;
+          walkToNextMins: number | null;
+        }[];
+        area?: string;
+        daypart?: string;
+        savedAt?: number;
+      };
+      if (!stash?.savedAt || Date.now() - stash.savedAt > 60 * 60 * 1000)
+        return;
+      const bySlug = new Map(venues.map((v) => [v.slug, v]));
+      const steps = (stash.stops ?? [])
+        .map((s) => {
+          const venue = bySlug.get(s.slug);
+          return venue
+            ? {
+                venue,
+                role: s.role as PlanRole,
+                dwellMins: s.dwellMins,
+                walkToNextMins: s.walkToNextMins,
+              }
+            : null;
+        })
+        .filter((s): s is DisplayPlan["steps"][number] => s !== null);
+      if (steps.length === 0) return;
+      const totalMins = steps.reduce(
+        (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+        0,
+      );
+      const daypart = stash.daypart === "day" ? "day" : "evening";
+      setOpenedSaved({
+        title: `${stash.area || "London"} ${daypart === "day" ? "Day Out" : "Night"}`,
+        area: stash.area || "London",
+        daypart,
+        totalMins,
+        steps,
+      });
+      setStep("result");
+      track("plan_stash_restored", { stops: steps.length });
+    } catch {
+      /* corrupt stash — ignore */
+    }
+    // Run once per signed-in mount; venues is stable for the page's life.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUserId]);
 
   // Editing any input invalidates a re-opened saved plan, the saved flag, and
   // any per-stop swaps (the base plan is about to change).
@@ -910,19 +979,4 @@ export function PlanFlow({
   );
 }
 
-function Group({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="px-5 pb-4">
-      <div className="text-[11px] font-extrabold text-muted-fg tracking-[0.12em] uppercase mb-2.5">
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
+// Group moved to ./plan-controls (shared with the anon setup).

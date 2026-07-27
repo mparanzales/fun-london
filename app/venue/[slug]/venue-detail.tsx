@@ -1041,26 +1041,19 @@ function VenueActions({
         </a>
       ) : isReservable && !signedIn ? (
         // Anon can't hold a booking channel (booking links are moat
-        // fields). On mobile the grey status pill stays; on desktop —
-        // where the wall isn't the only conversion surface — offer the
-        // honest action instead of a dead pill.
-        <>
-          <div
-            role="status"
-            className="flex-1 flex items-center justify-center px-5 py-3 rounded-full bg-muted text-muted-fg text-sm font-medium lg:hidden"
-          >
-            Booking via the venue
-          </div>
-          <Link
-            href={signInHref}
-            className="flex-1 hidden lg:inline-flex items-center justify-center px-5 py-3 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            {/* "options", not "book": anon can't know a booking channel
-                exists — signed-in may honestly land on "Booking via the
-                venue". Never promise an action we can't deliver. */}
-            Sign in to see booking options
-          </Link>
-        </>
+        // fields). ONE working link on every viewport. This used to be a
+        // non-interactive grey pill on mobile — the highest-intent pixel
+        // on the page, dead, on exactly the viewport where DM'd links are
+        // opened (2026-07-27 gate review). "options", not "book": anon
+        // can't know a channel exists — signed-in may honestly land on
+        // "Booking via the venue". Never promise an action we can't
+        // deliver.
+        <Link
+          href={signInHref}
+          className="flex-1 inline-flex items-center justify-center px-5 py-3 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          Sign in to see booking options
+        </Link>
       ) : isReservable ? (
         // Signed in, reservable type, but we hold no booking channel.
         // Show an honest status instead of a fake confirmation flow.

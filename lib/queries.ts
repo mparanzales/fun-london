@@ -215,10 +215,10 @@ function mapEvent(r: EventRow): Event {
 // detail/moat column on purpose (reviews, long_description, editorial_sources,
 // creator_coverage, critical_flags, map_url, photo_urls, mood_tags, address,
 // booking_links, website_url, phone, instagram_handle, menu_url).
-const VENUE_PLAN_COLUMNS =
+export const VENUE_PLAN_COLUMNS =
   "id, slug, name, type, vibe, vibe_tags, neighbourhood, price, time_of_day, rating, review_count, lat, lng, opening_hours, plan_note, img_url, curation_tier, created_at";
 
-type VenuePlanRow = Pick<
+export type VenuePlanRow = Pick<
   VenueRow,
   | "id"
   | "slug"
@@ -244,7 +244,7 @@ type VenuePlanRow = Pick<
 // (incl. vibe_tags, opening_hours, plan_note) and blanks the detail/moat
 // fields that aren't selected — same discipline as mapVenuePreview, just a
 // slightly wider keep-set.
-function mapVenuePlan(r: VenuePlanRow): Venue {
+export function mapVenuePlan(r: VenuePlanRow): Venue {
   return {
     id: r.id,
     slug: r.slug,
@@ -329,7 +329,7 @@ export async function fetchPlanVenues(): Promise<Venue[]> {
 const VENUE_CARD_COLUMNS =
   "id, slug, name, type, vibe, neighbourhood, price, time_of_day, rating, review_count, img_url, lat, lng, curation_tier, created_at";
 
-type VenueCardRow = Pick<
+export type VenueCardRow = Pick<
   VenueRow,
   | "id"
   | "slug"
@@ -861,6 +861,32 @@ export const fetchVenuePreviewBySlug = reactCache(
     return data ? mapVenuePreview(data as VenueCardRow) : null;
   },
 );
+
+// Card-level venues for a list of slugs — the anon /saved grid. Runs on the
+// STATIC ANON CLIENT specifically: as the `anon` Postgres role, selecting any
+// ungranted column fails the whole query loudly (42501), so a future widened
+// select cannot leak silently — column-safe BY CONSTRUCTION, but only for
+// this client (the cookie client becomes `authenticated` for signed-in
+// callers and dissolves that guarantee). Same visibility gates as every
+// preview fetcher: without them a hidden/delisted venue is resurrectable by
+// slug, because the anon RLS row policy is `using (true)`.
+export async function fetchVenueCardsBySlugs(
+  slugs: string[],
+): Promise<Venue[]> {
+  if (slugs.length === 0) return [];
+  const supabase = createStaticAnonClient();
+  const { data, error } = await supabase
+    .from("venues")
+    .select(VENUE_CARD_COLUMNS)
+    .in("slug", slugs)
+    .not("google_place_id", "is", null)
+    .is("hidden_at", null)
+    .not("img_url", "ilike", "%unsplash%")
+    .neq("img_url", "")
+    .limit(slugs.length);
+  if (error) throw new Error(`fetchVenueCardsBySlugs: ${error.message}`);
+  return ((data ?? []) as VenueCardRow[]).map(mapVenuePreview);
+}
 
 // By-id variant — used for the linked venue card on the event detail page so a
 // signed-out visitor never receives that venue's moat fields either.
