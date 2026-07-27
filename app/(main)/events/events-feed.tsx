@@ -30,7 +30,6 @@ import {
   PREVIEW_COUNT,
   ANON_BROWSE_MAX,
   ANON_INITIAL_DESKTOP,
-  REWALL_MS,
 } from "@/lib/feed-constants";
 import type { Event, EventCategory } from "@/lib/types";
 
@@ -144,7 +143,7 @@ export function EventsFeed({
 
   // Anon "Just looking" bounded browse — identical machinery to the Explore
   // feed: justLooking reveals the bounded ANON_BROWSE_MAX set, a soft AuthWall
-  // re-surfaces every REWALL_MS with "Keep browsing", and anonDesktop widens
+  // used to re-surface on a timer (deleted — see below), and anonDesktop widens
   // the initial preview to ~4 rows on a laptop.
   const [justLooking, setJustLooking] = useState(false);
   const [reWalled, setReWalled] = useState(false);
@@ -159,11 +158,13 @@ export function EventsFeed({
     return () => mq.removeEventListener("change", update);
   }, [signedIn]);
 
-  useEffect(() => {
-    if (signedIn || !justLooking || reWalled) return;
-    const t = setTimeout(() => setReWalled(true), REWALL_MS);
-    return () => clearTimeout(t);
-  }, [signedIn, justLooking, reWalled]);
+  // The 3-minute re-wall timer was DELETED here (2026-07-27 gate review): it
+  // fired at the most engaged anon still browsing and seized scroll
+  // mid-flick. The explore feed's replacement trigger (3rd anon heart) has no
+  // equivalent on events — events aren't saveable — so events now has NO
+  // re-wall. Accepted regression: the end-cap SignupWall below and the
+  // per-event detail walls still carry the push. `reWalled` stays wired so a
+  // future intent trigger can re-arm it without re-plumbing.
 
   const filtered = useMemo(() => {
     const now = new Date();
@@ -455,7 +456,7 @@ export function EventsFeed({
         />
       )}
 
-      {/* Anon "Just looking" re-surface: after REWALL_MS of browsing the wall
+      {/* Anon "Just looking" re-surface (currently never re-armed — see the
           comes back; "Keep browsing" dismisses it and re-arms the timer. */}
       {!signedIn && justLooking && reWalled && (
         <AuthWall

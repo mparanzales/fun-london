@@ -39,6 +39,12 @@ type SavedContextValue = {
   isSaved: (venueSlug: string) => boolean;
   toggleSaved: (venueSlug: string, surface?: SignalSurface) => void;
   count: number;
+  // Session-scoped count of anon heart ADDS (never unsaves, never restored
+  // from storage). The feed's engagement-triggered sign-up wall keys on the
+  // TRANSITION this counter makes, not on savedSet.size — a returning anon
+  // with 3 persisted hearts must never be re-walled on arrival (2026-07-27
+  // gate review). Resets on full page load by design.
+  anonHeartAdds: number;
 };
 
 const SavedContext = createContext<SavedContextValue | null>(null);
@@ -58,6 +64,8 @@ export function SavedProvider({
   // empty initial state and overwrites localStorage BEFORE the hydrate effect
   // reads it — silently wiping an anonymous user's saved spots.
   const [hydrated, setHydrated] = useState(false);
+  // See SavedContextValue.anonHeartAdds — in-memory only, on purpose.
+  const [anonHeartAdds, setAnonHeartAdds] = useState(0);
   // slug → venue.id (uuid). Populated when authed; empty when anon.
   const slugToUuidRef = useRef<Map<string, string>>(new Map());
   // Mirror of the live set so toggleSaved can read current membership without
@@ -236,7 +244,12 @@ export function SavedProvider({
         venueId: slugToUuidRef.current.get(venueSlug) ?? null,
       });
 
-      if (!authUserId) return; // anon: localStorage persist effect handles it
+      if (!authUserId) {
+        // Anon: the localStorage persist effect handles storage; count the
+        // ADD (not unsave) for the engagement-triggered wall.
+        if (!wasSaved) setAnonHeartAdds((n) => n + 1);
+        return;
+      }
 
       const venueId = slugToUuidRef.current.get(venueSlug);
       if (!venueId) return;
@@ -272,8 +285,9 @@ export function SavedProvider({
       isSaved: (slug) => savedSet.has(slug),
       toggleSaved,
       count: savedSet.size,
+      anonHeartAdds,
     }),
-    [savedSet, toggleSaved],
+    [savedSet, toggleSaved, anonHeartAdds],
   );
 
   return (

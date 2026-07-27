@@ -34,7 +34,6 @@ import {
   PREVIEW_COUNT,
   ANON_BROWSE_MAX,
   ANON_INITIAL_DESKTOP,
-  REWALL_MS,
 } from "@/lib/feed-constants";
 import { SignupWall } from "@/components/signup-wall";
 import { AuthWall } from "@/components/auth-wall";
@@ -99,7 +98,7 @@ function getEyebrow(): "today in" | "tonight in" {
 // Shown-once flag for the signed-in "turn on location" nudge.
 const LOCATION_PROMPTED_KEY = "fl.loc.prompted.v1";
 
-// ANON_INITIAL_DESKTOP + REWALL_MS now live in @/lib/feed-constants (shared
+// ANON_INITIAL_DESKTOP now lives in @/lib/feed-constants (shared
 // with the events feed so both "Just looking" flows behave identically).
 
 // ── Back-navigation restore ──────────────────────────────────────────────────
@@ -122,6 +121,12 @@ type FeedSnapshot = {
   loaded: Venue[];
   feedHasMore: boolean;
   dismissed: string[];
+  // Anon only: whether "Just looking" had revealed the wide (24-card) set.
+  // Without this, back-nav from a venue collapsed the reveal to the 4-card
+  // teaser and forced a re-press after EVERY venue visit — the friction an
+  // anon hits most often (2026-07-27 gate review). Absent in old snapshots
+  // -> undefined -> falsy, which is the correct fallback.
+  justLooking?: boolean;
   scrollY: number;
   savedAt: number;
 };
@@ -180,7 +185,7 @@ export function ExploreFeed({
   const [selectedFilter, setSelectedFilter] = useState<FilterKey>("for-you");
   // Venues the user has already saved (slugs) — kept OUT of the taste-sorted
   // "For You" feed so it stays discovery, not a re-run of their own list.
-  const { savedSet } = useSaved();
+  const { savedSet, anonHeartAdds } = useSaved();
   const [searchOpen, setSearchOpen] = useState(false);
   const eyebrow = getEyebrow();
   // Anon: clicking a category chip, search, or "Near you" raises a soft blur
@@ -191,7 +196,7 @@ export function ExploreFeed({
 
   // Anon "Just looking": once the visitor dismisses the sign-up wall they can
   // browse the bounded card-level set (ANON_BROWSE_MAX/category); after
-  // REWALL_MS a soft "Keep browsing" wall re-surfaces (reWalled) so the push to
+  // the 3rd anon heart a soft "Keep browsing" wall re-surfaces (reWalled) so the push to
   // sign up keeps coming back. anonDesktop widens the INITIAL preview to ~4 rows
   // on a laptop while phones still open on PREVIEW_COUNT.
   const [justLooking, setJustLooking] = useState(false);
@@ -236,13 +241,27 @@ export function ExploreFeed({
     return () => mq.removeEventListener("change", update);
   }, [signedIn]);
 
-  // Anon only: after "Just looking", re-surface the wall every REWALL_MS. Each
-  // "Keep browsing" flips reWalled false, which re-arms this timer.
+  // Anon only: after "Just looking", re-surface the wall on ENGAGEMENT, not
+  // on a clock. The old 3-minute timer fired precisely at the most engaged
+  // anon still in the building, seized scroll mid-flick, and at z-70 landed
+  // on TOP of the z-50 search overlay/filter sheet, burying typed input
+  // (2026-07-27 gate review). Trigger: the session's 3rd anon heart-ADD —
+  // demonstrated value, and a natural pause. Edge-guarded by firedRef so a
+  // "Keep browsing" dismissal is honoured for the rest of the mount; derived
+  // on searchOpen/filtersOpen so a suppressed fire lands when the overlay
+  // CLOSES rather than vanishing. anonHeartAdds is session-scoped (never
+  // restored from storage), so a returning anon with 3 persisted hearts is
+  // never re-walled on arrival.
+  const heartWallFiredRef = useRef(false);
   useEffect(() => {
     if (signedIn || !justLooking || reWalled) return;
-    const t = setTimeout(() => setReWalled(true), REWALL_MS);
-    return () => clearTimeout(t);
-  }, [signedIn, justLooking, reWalled]);
+    if (searchOpen || filtersOpen) return;
+    if (heartWallFiredRef.current) return;
+    if (anonHeartAdds >= 3) {
+      heartWallFiredRef.current = true;
+      setReWalled(true);
+    }
+  }, [signedIn, justLooking, reWalled, searchOpen, filtersOpen, anonHeartAdds]);
 
   // One-time "turn on location" nudge for signed-in users. The old anonymous
   // welcome sheet used to ask for location; it's retired, so signed-in users
@@ -539,6 +558,9 @@ export function ExploreFeed({
     setSelectedFilter(snap.selectedFilter);
     setFilters(snap.filters);
     setDismissedIds(new Set(snap.dismissed));
+    // Restore the anon reveal BEFORE the scroll clamp runs, so the wide
+    // list's height exists when scrollY is re-applied.
+    if (!signedIn && snap.justLooking) setJustLooking(true);
     if (signedIn) {
       setLoaded(snap.loaded);
       setFeedHasMore(snap.feedHasMore);
@@ -628,6 +650,7 @@ export function ExploreFeed({
       loaded,
       feedHasMore,
       dismissed: [...dismissedIds],
+      justLooking,
     };
   });
   // The server-rendered page 0 — `loaded` still holding this exact reference
@@ -655,7 +678,11 @@ export function ExploreFeed({
         s.selectedFilter !== "for-you" ||
         s.filters !== EMPTY_FILTERS ||
         s.loaded !== initialVenuesRef.current ||
-        s.dismissed.length > 0;
+        s.dismissed.length > 0 ||
+        // Anon "Just looking" at scrollY 0 with an early card tap is the
+        // MOST COMMON leave state — anon `loaded` never changes, so
+        // without this line the reveal is never worth a snapshot.
+        s.justLooking === true;
       if (!meaningful) return;
       // Unmount = navigating away (venue detail, another tab). Persist the
       // view for the restore effect above. Quota/private-mode errors → skip.
@@ -1076,7 +1103,7 @@ export function ExploreFeed({
         />
       )}
 
-      {/* Anon "Just looking" re-surface: after REWALL_MS of browsing the wall
+      {/* Anon "Just looking" re-surface: after the 3rd heart the wall
           comes back; "Keep browsing" (AuthWall's default back-out) dismisses it
           and re-arms the timer. */}
       {!signedIn && justLooking && reWalled && (

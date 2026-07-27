@@ -161,11 +161,17 @@ function Chip({
 export function AreaPicker({
   value,
   venues,
+  neighbourhoods,
   onChange,
   nearYou,
 }: {
   value: AreaSel;
   venues: Venue[];
+  // Anon variant: the signed-in flow derives area options from the full plan
+  // catalogue, which an anon client never holds (the engine runs server-side
+  // for anon — moat). Pass precomputed { name, count } pairs instead;
+  // neighbourhood is a public card column, so this leaks nothing.
+  neighbourhoods?: { name: string; n: number }[];
   onChange: (next: AreaSel) => void;
   nearYou?: { state: "idle" | "pending" | "denied"; onPick: () => void };
 }) {
@@ -176,9 +182,16 @@ export function AreaPicker({
   // stocked first) for the drill-down — so a chip never points at an empty area.
   const { regionsWith, hoodsByRegion } = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const v of venues) {
-      const n = v.neighbourhood?.trim();
-      if (n) counts.set(n, (counts.get(n) ?? 0) + 1);
+    if (neighbourhoods) {
+      for (const { name, n } of neighbourhoods) {
+        const nm = name?.trim();
+        if (nm && n > 0) counts.set(nm, n);
+      }
+    } else {
+      for (const v of venues) {
+        const n = v.neighbourhood?.trim();
+        if (n) counts.set(n, (counts.get(n) ?? 0) + 1);
+      }
     }
     const byRegion = new Map<Region, { name: string; n: number }[]>();
     for (const [name, n] of counts) {
@@ -191,7 +204,7 @@ export function AreaPicker({
       regionsWith: REGIONS.filter((r) => byRegion.has(r)),
       hoodsByRegion: byRegion,
     };
-  }, [venues]);
+  }, [venues, neighbourhoods]);
 
   const activeRegion: Region | null =
     value.kind === "region"

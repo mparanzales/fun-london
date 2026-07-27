@@ -2,6 +2,7 @@ import { fetchAllVenueCards } from "@/lib/queries";
 import { getAuthUser } from "@/lib/auth";
 import { Heart } from "lucide-react";
 import { SavedList } from "./saved-list";
+import { AnonSaved } from "./anon-saved";
 import { AuthWall } from "@/components/auth-wall";
 
 // Server Component: fetches all venues from Supabase, hands them to the
@@ -12,24 +13,28 @@ import { AuthWall } from "@/components/auth-wall";
 export default async function SavedPage() {
   const authUser = await getAuthUser();
 
-  // Anonymous visitors never reach the real list. Their saves live only in
-  // localStorage and the catalogue is withheld for the moat, so SavedList would
-  // render empty scaffolding under the blur (a dead "N planned / no cards"
-  // state). Instead show a purpose-built teaser behind the wall — same pattern
-  // as /plan/together — so the anon page reads as intentional, not broken.
+  // Anonymous visitors WITH hearts now see their own list (2026-07-27 gate
+  // review: the app let you heart four venues and then told you you had
+  // none). AnonSaved is a client component because the anon saves live in
+  // localStorage, invisible to this Server Component; it renders the
+  // teaser+wall below untouched for the zero-saves case and pre-hydration.
   if (!authUser) {
     return (
-      <>
-        <SavedTeaser />
-        <AuthWall
-          signedIn={false}
-          title="Sign up to save your spots"
-          body="Tap the heart on any place and it lands here. Plus your bookings, on every device. Free."
-          mainShell
-          backHref="/explore"
-          backLabel="Browse London"
-        />
-      </>
+      <AnonSaved
+        teaser={
+          <>
+            <SavedTeaser />
+            <AuthWall
+              signedIn={false}
+              title="Sign up to save your spots"
+              body="Tap the heart on any place and it lands here. Plus your bookings, on every device. Free."
+              mainShell
+              backHref="/explore"
+              backLabel="Browse London"
+            />
+          </>
+        }
+      />
     );
   }
 

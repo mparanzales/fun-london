@@ -22,7 +22,7 @@ export default function LegalLayout({
       <article className="text-[14px] text-fg leading-relaxed [&_h1]:text-2xl [&_h1]:font-extrabold [&_h1]:text-heading [&_h1]:mb-1 [&_h2]:text-base [&_h2]:font-extrabold [&_h2]:text-heading [&_h2]:mt-6 [&_h2]:mb-1.5 [&_p]:mt-2 [&_ul]:mt-2 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mt-1 [&_a]:underline [&_a]:underline-offset-2">
         {children}
       </article>
-      <LegalLinks className="mt-10 pt-6 border-t border-border" />
+      <LegalLinks showAbout className="mt-10 pt-6 border-t border-border" />
     </div>
   );
 }
