@@ -13,9 +13,25 @@
 -- live broad policies were created through the Supabase dashboard, not a
 -- migration.
 --
--- APPLY VIA: the Supabase dashboard SQL editor (or another owner-level
--- mechanism), pasting the statements below verbatim. Then prove the result:
---   EXPECT_STAGE=<2|3> pnpm tsx scripts/verify-room-security.ts
+-- WHY THIS FILE IS NOT IN supabase/migrations/: it cannot be applied by the
+-- migration runner, so leaving it in the numbered chain would abort any
+-- `supabase db push` / `db reset` (including the bootstrap of a fresh staging
+-- project) partway through. Same precedent as supabase/realtime-policies.sql.
+--
+-- APPLY VIA (⚠️ UNVERIFIED REMEDY — prove it first): the Supabase dashboard SQL
+-- editor is the mechanism that created the current live policies, but that is
+-- project history, not a measurement of what that session can do today. Before
+-- the production window, run this inert ownership probe in the SQL editor:
+--     create policy "zz_probe_delete_me" on realtime.messages
+--       for select to authenticated using (false);
+--     drop policy "zz_probe_delete_me" on realtime.messages;
+--   A `using (false)` permissive policy grants nothing and removes nothing, so
+--   it is the safest possible ownership test. If it 42501s, STOP — the whole
+--   plan needs a different owner-level mechanism (e.g. Supabase support
+--   granting supabase_realtime_admin to postgres for one window, then revoking).
+--
+-- Then paste the statements below verbatim and prove the result:
+--   EXPECT_STAGE=3 pnpm verify-room-security
 -- The repository copy and the applied database state must stay identical; the
 -- verification script is what proves they are.
 --

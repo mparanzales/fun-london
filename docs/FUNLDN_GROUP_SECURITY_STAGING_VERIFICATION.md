@@ -56,28 +56,50 @@ pg_has_role(postgres, 'supabase_realtime_admin', 'MEMBER') = false
 
 All are implemented as executable checks rather than prose. `scripts/staging-room-security-suite.ts` (new, committed) creates three disposable accounts, signs them in for **real JWTs**, and exercises real PostgREST calls and real Realtime WebSocket subscriptions — no unit test stands in for a policy. The full matrix is in `funldn-group-security-staging-evidence/02-test-matrix.md`; every row is marked **NOT RUN**.
 
-**The harness's production guard is itself verified working**: pointed at the production ref it prints `REFUSING TO RUN: … is a known PRODUCTION project reference.` and exits 1. That was tested (no connection is made before the refusal).
+**The harness's production guard is itself verified working**: pointed at the production ref — in lower case *and* upper case — it refuses and exits 1 before any client is constructed. It now has four independent layers: a case-normalised ref denylist, a URL denylist, a ref/URL cross-check, and **the strongest one — the project ref decoded from the service key's own JWT payload**, so a custom domain or a mislabelled variable cannot hide which project the key belongs to. A key that names no project (opaque `sb_secret_…`) is refused rather than trusted. At runtime it also refuses to create anything if the target already holds ≥25 users, which is what a real cohort looks like and a fresh staging project does not.
 
-**Existing-socket-after-closure (X-4)** deserves its own note: it is a *measurement*, not a pass/fail, because Realtime authorises at join time. The harness closes a room while a member's socket is open, then probes every 5s for up to 60s and reports the last moment a broadcast was accepted. **Until that number exists, no copy or documentation may claim closure is instant.**
+**Existing-socket-after-closure (X-2)** deserves its own note: it is a *measurement*, not a pass/fail, because Realtime authorises at join time. The harness closes a room while a member's socket is open, then probes every 5s for up to 60s and reports the last moment a broadcast was **acknowledged by the server and observed coming back**. Both halves matter: `send()` alone resolves as soon as the message is queued locally and silently falls back to an HTTP POST when the socket is dead, so the first version of this test would have printed a confident number that measured nothing. **Until that number exists, no copy or documentation may claim closure is instant.**
 
-## 21–22. Review verdicts — **Carried forward, not re-earned on staging**
+## 21–22. Review verdicts — **both gates re-run on this delta; both found blockers; all fixed**
 
-The pre-staging gates on `9584e4e` are recorded in the implementation document (§5b): code-reviewer found 5 blockers, supabase-guardian returned SHIP WITH FIXES with 4 blockers + 3 highs; all were fixed and both were re-run. **Those verdicts describe the code, not a staging-validated system.** The final-state gates required by Phase 12 ran against this commit's changes (harness + banners) and are recorded in §21–22 of the implementation document.
+**Round 1 (commit `9584e4e`, the implementation)** — recorded in the implementation document §5b: code-reviewer 5 blockers, supabase-guardian SHIP WITH FIXES (4 blockers + 3 highs). All fixed.
+
+**Round 2 (this delta: the harness, the banners, the production sequence).** Neither reviewer returned clean, and the harness was rewritten as a result.
+
+- **code-reviewer: NOT READY** — 5 blockers, every one of the *false-pass* class, which is the worst defect available in something meant to prove a security fix: `send() === 'ok'` measured nothing (no ack, silent HTTP fallback); a re-subscribe to a topic the same client still held would have killed the measurement; `trySubscribe` scored any non-answer as a denial, so **if Realtime were simply unreachable, four denial checks would all have gone green**; `C-1`/`C-2` passed on any query failure including "table does not exist"; and the throttle test burned the same account the handoff test needed, making one check vacuous and another fail on a healthy database.
+- **supabase-guardian: DO NOT SHIP (as a runnable gate)** — the guard was defeatable by pressing Shift (case-sensitive denylist) or by using a custom domain; the suite could not pass against a correct database *and* could pass against an empty one; teardown could silently leave real auth users behind while asserting it had not; plus the production sequence deployed the client **before** anyone had proven the owner-level step was even possible, and never re-checked the "Allow public access to channels" toggle that does the real work.
+
+**Fixed in this commit** (all of the above): tri-state `allowed/denied/inconclusive` with denials gated on positive controls that run first; ack-plus-echo measurement with a channel-state guard; fresh clients for post-closure probes; error-shape assertions instead of "some error came back"; a fourth actor so the throttle test stops poisoning the handoff test; deterministic re-aged host for the stability check; per-actor teardown registration with verified user deletion; case-normalised **and key-derived** project identification; a populated-database refusal; SKIP records so a skipped block can never vanish from the evidence; scrubbed error output (a unique-violation quotes a live room code); and the two owner-level files **moved out of `supabase/migrations/`** into `supabase/manual/` so a `db push`/`db reset` cannot abort mid-chain on files the runner can never apply.
+
+**Still not staging-validated.** These verdicts describe code and documents. No reviewer has seen this system running against a database, because no database was available.
 
 ## 23. Remaining limitations and blockers
 
 1. **Remaining blocker — no isolated database.** Founder must choose: create a Supabase branch (~£7/mo, cost confirmation required), resume `fun-london-dev`, or install Docker + Supabase CLI for a free local stack. The last is the cheapest and the most isolated.
 2. **Remaining blocker — preview deployment implies public disclosure** of an unpatched live vulnerability (public repo). Patch production first, or use a private mirror.
-3. **Production prerequisite — owner-level SQL for stages 2 and 3** (§8).
-4. Everything already listed in the implementation document's *Remaining limitations* still stands, including member-to-member impersonation inside a real roster, best-effort `leaveRoom`, the unscheduled purge, and the client/DB host-rule difference.
+3. **Production prerequisite — owner-level SQL for stages 2 and 3** (§8), and the remedy itself (dashboard SQL editor) is **inferred from project history, not measured** — step 3a's inert probe is what turns it into a fact.
+4. **Production prerequisite — `exec_sql_readonly`** does not exist; every automated gate in §24 depends on it (§24 step 0a).
+5. **Production prerequisite — "Allow public access to channels" must be OFF**; if it is ON, every policy here is decorative and the verifier cannot detect it (§24 step 0b).
+6. Everything already listed in the implementation document's *Remaining limitations* still stands, including member-to-member impersonation inside a real roster, best-effort `leaveRoom`, the unscheduled purge, and the client/DB host-rule difference.
 
 ## 24. Production migration recommendation — **do not execute; run staging first**
 
 Recommended sequence, each step with its approver. **Maria approves every step; supabase-guardian re-reviews any SQL that changes.**
 
+0. **Prerequisites (must be true before step 1).**
+   a. **`exec_sql_readonly` exists**, or the verifier's catalog queries are run by hand. `scripts/verify-room-security.ts` depends on it and no migration creates it. If it is created: SECURITY INVOKER, `revoke all … from public, anon, authenticated`, `grant execute … to service_role` only — a SECURITY DEFINER SQL executor in `public` would hand `anon` arbitrary reads including `auth.users`. Narrow fixed-purpose functions are safer than a general executor.
+   b. **Project Settings → Realtime → "Allow public access to channels" = OFF.** Per `supabase/realtime-policies.sql`, this toggle is "the control doing the real work": flipped ON, RLS on `realtime.messages` is bypassed and every policy below is decorative. The verifier cannot see it (project setting, not catalog state) — check it by eye here and again at step 9.
+   c. **Whoever is on call for the 48-hour window has dashboard SQL-editor access**, with the rollback SQL from `0003`'s header pre-staged. Rollback is itself a `CREATE POLICY`, so it carries the same ownership constraint — without dashboard access, MTTR is however long it takes to wake someone.
 1. **Backup + snapshot.** Verified DB backup; save `pg_policies` for `realtime.messages` and the `public` room objects to a dated file. *(Approver: Maria.)*
 2. **Apply `0001`** via the normal migration path (it is `public`-only and additive; the migration role owns these objects). *(Maria.)*
 3. **Verify:** `EXPECT_STAGE=1 pnpm tsx scripts/verify-room-security.ts` → tables, RLS, definer functions, grants (`purge` not executable by anon/authenticated), no client write policies. *(Automated gate.)*
+3a. **PROVE OWNERSHIP BEFORE DEPLOYING ANYTHING ELSE.** In the dashboard SQL editor run the inert probe (it grants nothing and removes nothing, because a permissive `using (false)` policy adds no access):
+    ```sql
+    create policy "zz_probe_delete_me" on realtime.messages
+      for select to authenticated using (false);
+    drop policy "zz_probe_delete_me" on realtime.messages;
+    ```
+    **If this 42501s, STOP.** Do not proceed to step 4 — otherwise production ends up running the new client, filling `plan_room_members`, with the **broad policies still live and the exposure still open**, and no way to close it. The fallback is Supabase support granting `supabase_realtime_admin` to `postgres` for one window (then revoking it). *(Maria, manually.)*
 4. **Deploy the client** to production only after 0001 is in place, so membership rows begin to exist. Watch for room create/join errors. *(Maria merges; Vercel auto-deploys from main.)*
 5. **Apply `0002` through the dashboard SQL editor** (owner-level; the CLI cannot). Dual-run: nothing is removed, so live rooms cannot break. *(Maria, manually.)*
 6. **Verify:** `EXPECT_STAGE=2 …` → membership-scoped policies present *alongside* the broad ones.

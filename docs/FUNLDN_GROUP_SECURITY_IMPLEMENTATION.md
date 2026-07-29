@@ -36,7 +36,7 @@ Verified against production during the foundation audit (2026-07-29):
 
 `realtime.messages` is owned by **`supabase_realtime_admin`**; the migration role is **`postgres`**, which is **not a member** of that role (`pg_has_role(...)` = false, verified read-only against the live project). `CREATE POLICY` and `DROP POLICY` require table ownership, so:
 
-**Migrations `0002` and `0003` CANNOT be applied by `supabase db push`, the MCP migration tool, or any CI migration step.** They fail with `42501: must be owner of table messages`. Both files now open with a banner stating this, the evidence, and the supported path: paste them verbatim into the **Supabase dashboard SQL editor** (the same mechanism that created the current live policies), then prove the applied state with `EXPECT_STAGE=<2|3> pnpm tsx scripts/verify-room-security.ts`. `0001` is unaffected — it only touches `public` objects the migration role owns. A guard test pins the banner so nobody wires these into an automated migration later.
+**Migrations `0002` and `0003` CANNOT be applied by `supabase db push`, the MCP migration tool, or any CI migration step.** They fail with `42501: must be owner of table messages`. Both files now open with a banner stating this, the evidence, and the supported path: **both files therefore live in `supabase/manual/`, not `supabase/migrations/`** — leaving them in the numbered chain would abort any `supabase db push` / `db reset` partway through, including the bootstrap of a fresh staging project. Paste them verbatim into the **Supabase dashboard SQL editor** — ⚠️ a remedy inferred from project history, **not yet measured**; prove it first with the inert `zz_probe_delete_me` ownership probe in the staging doc §24 step 3a — then prove the applied state with `EXPECT_STAGE=<2|3> pnpm tsx scripts/verify-room-security.ts`. `0001` is unaffected — it only touches `public` objects the migration role owns. A guard test pins the banner so nobody wires these into an automated migration later.
 
 ## 3. Migration sequence (staged; never a big-bang replacement)
 
@@ -44,8 +44,8 @@ Verified against production during the foundation audit (2026-07-29):
 |---|---|---|---|
 | 1 | `0001_plan_rooms.sql` | Tables, indexes, RLS, membership predicate, write functions, grants. **Purely additive — no existing policy or table is touched**, so live rooms keep working unchanged. | `pnpm tsx scripts/verify-room-security.ts` reports stage 1 healthy |
 | 2 | *(deploy the client)* | The app starts creating/joining membership records, so the new predicate has rows to match. | Rooms work as before; new rows appear in `plan_rooms` |
-| 3 | `0002_realtime_membership_policies.sql` | **Adds** membership-scoped read+write policies **alongside** the broad ones. Postgres ORs permissive policies, so this cannot break a live room — it is the dual-run checkpoint. | Script reports **stage 2 (DUAL-RUN)**; two-account test passes (§6) |
-| 4 | `0003_drop_broad_realtime_policies.sql` | **Drops** the two broad `plan-%` policies. This is the only step that removes access. | `EXPECT_STAGE=3 pnpm tsx scripts/verify-room-security.ts` exits 0 — it asserts the stage reached, that **no** unscoped policy of any name remains, and the function grants |
+| 3 | `supabase/manual/0002_…` | **Adds** membership-scoped read+write policies **alongside** the broad ones. Postgres ORs permissive policies, so this cannot break a live room — it is the dual-run checkpoint. | Script reports **stage 2 (DUAL-RUN)**; two-account test passes (§6) |
+| 4 | `supabase/manual/0003_…` | **Drops** the two broad `plan-%` policies. This is the only step that removes access. | `EXPECT_STAGE=3 pnpm tsx scripts/verify-room-security.ts` exits 0 — it asserts the stage reached, that **no** unscoped policy of any name remains, and the function grants |
 
 ## 4. Policies (after step 4)
 
@@ -63,7 +63,7 @@ No client-facing write policy exists on either new table by design.
 ## 5. Rollback
 
 - **After 0001 or 0002 (nothing removed yet):** `drop policy if exists "plan room members read"/"plan room members write" on realtime.messages;` then `drop table public.plan_room_members, public.plan_rooms cascade;` and drop the seven functions. Behaviour returns to today's exactly.
-- **After 0003 (access removed):** re-create the two broad policies — their verbatim text is kept in the header of `0003_drop_broad_realtime_policies.sql` precisely so a rollback needs no archaeology. This restores the old (permissive) behaviour in one statement pair while the cause is investigated.
+- **After 0003 (access removed):** re-create the two broad policies — their verbatim text is kept in the header of `supabase/manual/0003_…` precisely so a rollback needs no archaeology. This restores the old (permissive) behaviour in one statement pair while the cause is investigated.
 - **Client rollback:** revert the branch. The client tolerates a missing room record by surfacing an honest failure rather than crashing, but the intended rollback is git-level, not partial.
 
 ## 5b. Review findings and what changed because of them
@@ -78,7 +78,7 @@ Both required gates ran before this was presented as complete. **Neither returne
 
 ## 6. Testing
 
-**Automated — full suite green: 333 tests / 38 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
+**Automated — full suite green: 336 tests / 38 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
 
 | Claim | Test |
 |---|---|

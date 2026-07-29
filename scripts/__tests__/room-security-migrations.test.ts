@@ -7,7 +7,13 @@ import { join } from "node:path";
 // expensive to get wrong and easy to undo by accident.
 
 const DIR = join(process.cwd(), "supabase", "migrations");
-const read = (f: string) => readFileSync(join(DIR, f), "utf8");
+const MANUAL = join(process.cwd(), "supabase", "manual");
+// 0002/0003 live OUTSIDE migrations/ on purpose: they need owner-level
+// execution, so leaving them in the numbered chain would abort any
+// `supabase db push` / `db reset` partway through — including the bootstrap of
+// a fresh staging project.
+const read = (f: string) =>
+  readFileSync(join(f.startsWith("0001") ? DIR : MANUAL, f), "utf8");
 /** The file with SQL line comments removed — i.e. only what actually runs. */
 const executable = (f: string) =>
   read(f)
@@ -20,11 +26,37 @@ const M2 = "0002_realtime_membership_policies.sql";
 const M3 = "0003_drop_broad_realtime_policies.sql";
 
 describe("migration sequence", () => {
-  it("ships exactly the three staged files, in order", () => {
-    const files = readdirSync(DIR)
-      .filter((f) => f.endsWith(".sql"))
-      .sort();
-    expect(files).toEqual([M1, M2, M3]);
+  it("only the runner-applicable migration sits in migrations/", () => {
+    expect(
+      readdirSync(DIR)
+        .filter((f) => f.endsWith(".sql"))
+        .sort(),
+    ).toEqual([M1]);
+  });
+
+  it("the owner-level files sit in supabase/manual/, out of the runner's chain", () => {
+    expect(
+      readdirSync(MANUAL)
+        .filter((f) => f.endsWith(".sql"))
+        .sort(),
+    ).toEqual([M2, M3]);
+  });
+
+  it("each owner-level file names its OWN exact EXPECT_STAGE", () => {
+    // `EXPECT_STAGE=<2|3>` invited the wrong paste: running the verifier with
+    // 2 after applying 0003 passes without ever asserting the broad policies
+    // are gone (the check is `stage >= expected`).
+    expect(read(M2)).toContain("EXPECT_STAGE=2");
+    expect(read(M3)).toContain("EXPECT_STAGE=3");
+    expect(read(M2)).not.toContain("EXPECT_STAGE=<");
+    expect(read(M3)).not.toContain("EXPECT_STAGE=<");
+  });
+
+  it("the owner-level remedy is labelled UNVERIFIED and ships an ownership probe", () => {
+    for (const f of [M2, M3]) {
+      expect(read(f)).toContain("UNVERIFIED REMEDY");
+      expect(read(f)).toContain("zz_probe_delete_me");
+    }
   });
 
   it("0001 is additive only — it must not touch existing policies or tables", () => {
