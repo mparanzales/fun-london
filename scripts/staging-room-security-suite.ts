@@ -40,7 +40,12 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
-import { PRODUCTION_REFS, FIXTURE_EMAIL, isLoopback } from "./staging-guard";
+import {
+  PRODUCTION_REFS,
+  FIXTURE_EMAIL,
+  isLoopback,
+  refFromKey,
+} from "./staging-guard";
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -92,28 +97,6 @@ function env(name: string): string {
     process.exit(1);
   }
   return v;
-}
-
-/**
- * The project ref as claimed by the service key itself.
- *
- * A legacy Supabase key is a JWT whose payload carries {"iss":"supabase",
- * "ref":"<project-ref>"}. Decoding it (no signature check needed for a
- * denylist) beats comparing operator-supplied strings: the key names its own
- * project, so a custom domain or a mislabelled env var cannot hide it.
- * Returns null for opaque `sb_secret_…` keys — the caller must then refuse.
- */
-function refFromKey(key: string): string | null {
-  const parts = key.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const payload = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf8"),
-    ) as { ref?: string };
-    return typeof payload.ref === "string" ? payload.ref.toLowerCase() : null;
-  } catch {
-    return null;
-  }
 }
 
 function assertStaging(): { ref: string; url: string } {
@@ -626,7 +609,7 @@ async function main() {
       record(
         "H-1",
         "handoff",
-        "stale host replaced by earliest-joined member",
+        "stale host replaced by the next member in the ring",
         "SKIP",
         "no room",
       );
@@ -663,7 +646,19 @@ async function main() {
         .select("user_id", { head: true, count: "exact" })
         .eq("room_id", hoRoom.id)
         .in("user_id", [B.id, C.id]);
-      const joinedBoth = hoMembers === 2;
+      // The premise H-1 and H-4 rest on is the ORDER, not merely the count, so
+      // assert it rather than naming it in a label.
+      const { data: hoOrder } = await admin
+        .from("plan_room_members")
+        .select("user_id, joined_at")
+        .eq("room_id", hoRoom.id)
+        .order("joined_at", { ascending: true });
+      const order = (hoOrder ?? []).map((r) => (r as { user_id: string }).user_id);
+      const bBeforeC =
+        order.indexOf(B.id) > -1 &&
+        order.indexOf(C.id) > -1 &&
+        order.indexOf(B.id) < order.indexOf(C.id);
+      const joinedBoth = hoMembers === 2 && bBeforeC;
       record(
         "H-0",
         "handoff",
@@ -673,7 +668,7 @@ async function main() {
           : verdict(!bJoinErr && !cJoinErr && joinedBoth),
         hoMembersErr
           ? `count query errored: ${hoMembersErr.code}`
-          : `${hoMembers ?? "unknown"} of 2 membership rows${safeErr(bJoinErr ?? cJoinErr) ? ` — ${safeErr(bJoinErr ?? cJoinErr)}` : ""}`,
+          : `${hoMembers ?? "unknown"} of 2 membership rows, B before C: ${bBeforeC}${safeErr(bJoinErr ?? cJoinErr) ? ` — ${safeErr(bJoinErr ?? cJoinErr)}` : ""}`,
       );
 
       await admin

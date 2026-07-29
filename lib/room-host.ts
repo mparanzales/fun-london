@@ -5,12 +5,15 @@
 // tab, NO device held the host role, majority-veto swaps silently stopped
 // applying, and the room degraded into a read-only artefact with no owner.
 //
-// The rule, deliberately boring: the host is the next member after the
-// outgoing host in the roster ring — see promote_plan_room_host. Formerly the
-// earliest-joined member who
-// is still present. `joined_at` comes from the database (server clock), so
+// The CLIENT rule, deliberately boring: the host is the earliest-joined member
+// who is still PRESENT. `joined_at` comes from the database (server clock), so
 // every device sorts the same list the same way and converges on the same
 // answer WITHOUT any negotiation, election message, or race.
+//
+// The DATABASE rule is different on purpose (see below): it rotates forward
+// from the outgoing host rather than re-picking the earliest-joined, because
+// re-picking oscillated between two absent devices. See
+// promote_plan_room_host.
 //
 // ⚠️ The client rule and the DB rule are NOT identical, and that is deliberate:
 // the client knows who is PRESENT (Realtime presence); the database only knows

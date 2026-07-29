@@ -1,6 +1,6 @@
 /**
- * The two predicates that decide whether the staging harness is allowed to
- * touch a database at all.
+ * The predicates that decide which database a script is allowed to touch, and
+ * how it names that database in its own output.
  *
  * They live in their own module for one reason: `staging-room-security-suite.ts`
  * calls `main()` at import time, so a test importing it would run the whole
@@ -15,7 +15,8 @@ export const PRODUCTION_REFS = ["fxfuzabrivuianfwdopc"];
 
 /**
  * Every account the harness creates matches this shape, and nothing else may.
- * It is both the teardown selector and the "is anybody real in here?" guard —
+ * It is the "is anybody real in here?" guard (teardown itself deletes by user
+ * id, not by this pattern) —
  * `.invalid` is unroutable by RFC 2606, so these can never reach a person.
  */
 export const FIXTURE_EMAIL = /^fl-staging-[a-z]-\d+-\d+@example\.invalid$/;
@@ -35,5 +36,26 @@ export function isLoopback(url: string): boolean {
     return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
   } catch {
     return false;
+  }
+}
+
+/**
+ * The project ref a Supabase JWT key claims for itself.
+ *
+ * A legacy key's payload carries {"iss":"supabase","ref":"<project-ref>"}, so
+ * the key names its own project — better than trusting an operator-supplied
+ * string, because a custom domain or a mislabelled env var cannot hide it.
+ * Returns null for opaque `sb_secret_…` keys and for anything unparseable.
+ */
+export function refFromKey(key: string): string | null {
+  const parts = key.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8"),
+    ) as { ref?: string };
+    return typeof payload.ref === "string" ? payload.ref.toLowerCase() : null;
+  } catch {
+    return null;
   }
 }

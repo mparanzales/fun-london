@@ -14,8 +14,10 @@
 //     inflate a vote majority;
 //   · the channel's RLS requires a membership row for THIS room that is not
 //     departed, expired or closed;
-//   · host is the earliest-joined present member, computed identically on
-//     every device and written by a conditional UPDATE (lib/room-host.ts).
+//   · the client picks the earliest-joined PRESENT member and asks the DB to
+//     hand over; the DB decides who actually gets it by rotating forward from
+//     the outgoing host, via a conditional UPDATE with a server-clamped 30s
+//     staleness window (lib/room-host.ts, promote_plan_room_host).
 //
 // Late-join caveat: Broadcast has no replay, so a joiner who arrives after
 // the host set the plan would miss it. The host re-broadcasts settings +

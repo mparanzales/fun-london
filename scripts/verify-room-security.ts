@@ -24,6 +24,7 @@ dotenv.config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
 import { hashRoomCode } from "@/lib/room-code";
+import { isLoopback, refFromKey } from "./staging-guard";
 
 /**
  * Deliberately NOT `@/lib/supabase/admin`.
@@ -71,6 +72,43 @@ async function main() {
       "No service-role client. Set NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (see lib/supabase/admin.ts).",
     );
     process.exit(1);
+  }
+
+  // 🧨 NAME THE DATABASE, ALWAYS.
+  //
+  // This script loads .env.local, which means it certifies whatever that file
+  // happens to point at. During the staging run that file pointed at a loopback
+  // stack — so `EXPECT_STAGE=3 … → "All required invariants hold." → exit 0`
+  // could have authorised closing the PRODUCTION exposure while describing a
+  // local database, with nothing in the output to give it away. A gate that
+  // does not say what it inspected is not a gate.
+  const targetUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  let targetHost = "(unparseable)";
+  try {
+    targetHost = new URL(targetUrl).host;
+  } catch {
+    /* leave as unparseable */
+  }
+  const keyRef = refFromKey(process.env.SUPABASE_SERVICE_ROLE_KEY ?? "");
+  console.log(
+    `Target: ${targetHost}${keyRef ? ` (key names project ${keyRef})` : " (key names no project)"}`,
+  );
+  if (keyRef && targetHost !== "(unparseable)" && !targetHost.includes(keyRef)) {
+    console.error(
+      "REFUSING: the service key belongs to a different project than the URL.",
+    );
+    process.exit(1);
+  }
+  // A staged run against a local stack must opt in explicitly, so that a
+  // forgotten .env.local can never be mistaken for the production cutover.
+  if (isLoopback(targetUrl) && process.env.EXPECT_STAGE) {
+    if (process.env.ALLOW_LOCAL !== "1") {
+      console.error(
+        "REFUSING: EXPECT_STAGE is set but the target is loopback. Set ALLOW_LOCAL=1 to verify a local stack on purpose.",
+      );
+      process.exit(1);
+    }
+    console.log("(local stack, ALLOW_LOCAL=1)");
   }
 
   // Catalog reads go through a SQL helper because PostgREST cannot select

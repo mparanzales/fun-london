@@ -123,6 +123,10 @@ grant execute on function public.is_plan_room_participant(uuid) to authenticated
 -- A member may read the room they belong to (needed for the roster, host id
 -- and expiry). Writes go exclusively through SECURITY DEFINER functions
 -- below, so there are deliberately NO insert/update policies for clients.
+-- Idempotent like the rest of this file: a re-run (a fresh staging bootstrap, or
+-- a `db push` after the objects were applied out-of-band) must not abort with
+-- 42710. Every other statement here is `if not exists` / `or replace`.
+drop policy if exists "plan_rooms member read" on public.plan_rooms;
 create policy "plan_rooms member read"
   on public.plan_rooms
   for select
@@ -131,6 +135,7 @@ create policy "plan_rooms member read"
     public.is_plan_room_participant(id) or host_user_id = (select auth.uid())
   );
 
+drop policy if exists "plan_room_members member read" on public.plan_room_members;
 create policy "plan_room_members member read"
   on public.plan_room_members
   for select
@@ -191,6 +196,12 @@ begin
     raise exception 'auth required' using errcode = '42501';
   end if;
 
+  -- Forward reference: public.plan_room_join_attempts is created LATER in this
+  -- file. That is safe only because this function is `language plpgsql` (the
+  -- body is not resolved at CREATE time) and the whole file runs in one
+  -- transaction. If anyone ever splits this file or converts this function to
+  -- `language sql`, move the table's create above this function first.
+  --
   -- Throttle: 20 attempts per 10 minutes per account, enforced HERE so it
   -- cannot be skipped by calling the RPC directly. A successful guess
   -- self-enrols the guesser, so this is the enumeration perimeter, not the
@@ -323,9 +334,14 @@ begin
   -- Taking the next member AFTER the current host in a stable (joined_at,
   -- user_id) ordering, wrapping to the front only when the host is last, turns
   -- handoff into a rotation: A -> B -> C -> A. It cannot two-cycle, and one lap
-  -- reaches every remaining member, so a present device is found. Successor
-  -- choice stays server-owned and deterministic — a member still cannot elect
-  -- THEMSELVES, they get whoever is next in the ring.
+  -- reaches every remaining member, so a present device is found.
+  --
+  -- What this does NOT give you: it is not a guarantee that a caller cannot
+  -- become host. In a three-member ring the caller is the next member half the
+  -- time, and across an all-absent ring a member can walk the role to itself
+  -- one hop at a time. The real controls are the server-clamped 30s staleness
+  -- window and the conditional UPDATE below — a caller cannot shorten either,
+  -- so the walk stops at the first member whose client is actually pinging.
   select m.user_id into v_new_host
   from public.plan_room_members m
   where m.room_id = p_room_id

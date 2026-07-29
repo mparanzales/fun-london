@@ -14,7 +14,7 @@ GoTrue accounts, real PostgREST, real Realtime WebSockets, on loopback, for noth
 |---|---|---|
 | 1 | Environment proved not production | **Verified** — loopback host, parsed not matched; zero real accounts |
 | 2 | `0001_plan_rooms.sql` applied | **Verified** — by the migration runner |
-| 3 | `realtime.messages` ownership handled | **Verified locally**; production still needs an owner-level session (§4) |
+| 3 | `realtime.messages` ownership handled | **Verified locally**, and the production route **confirmed by probe** (§4) |
 | 4 | `supabase/manual/0002` applied (dual-run) | **Verified** — nothing broke, nothing yet closed |
 | 5 | App run against the isolated database | **Verified** — real sign-in, real room, zero console errors |
 | 6 | Host / member / unrelated account | **Verified** — 4 accounts, positive controls first |
@@ -69,7 +69,7 @@ evidence file, because a check that cannot fail is worse than no check: the envi
 could never have fired (it refused at ≥25 accounts; production holds 16), and the anon
 assertion passed whether or not the grant had been revoked.
 
-## 4. Production still requires an owner-level session — measured, not assumed
+## 4. The owner-level route — measured, and the earlier conclusion corrected
 
 Re-measured today against production, read-only:
 
@@ -79,14 +79,18 @@ owner of realtime.messages                     = supabase_realtime_admin
 pg_has_role(postgres, supabase_realtime_admin) = false
 ```
 
-`CREATE POLICY` / `DROP POLICY` require table ownership, so **0002 and 0003 cannot be applied
-by `supabase db push`, by the MCP migration tool, or by CI.** They live in `supabase/manual/`,
+**Correction, 2026-07-29:** the inert probe was subsequently RUN against production through
+the Supabase MCP `execute_sql` path and **succeeded** (created, confirmed, dropped; production
+left at its two original policies). `postgres` holds `supabase_privileged_role`. So the route
+does exist — the measurement above was right, the inference drawn from it was not.
+
+**0002 and 0003 still must not be applied by `supabase db push`, `db reset`,
+`apply_migration` or CI** — those take a different path. They live in `supabase/manual/`,
 outside the numbered chain, so a `db push` or `db reset` cannot abort partway through on files
 the runner can never apply.
 
-Locally this constraint does not reproduce — `postgres` is effectively superuser — which is why
-it was measured directly on production instead. That is a stated fidelity limit, not an
-assumption.
+Locally this constraint does not reproduce — `postgres` is effectively superuser there — which
+is why it was measured directly on production instead.
 
 ## 5. Review gates
 
@@ -101,14 +105,19 @@ because it discarded RPC errors and skipped nulls. And the guard tests pinned st
 
 ## 6. Remaining production prerequisites
 
-1. **An owner-level SQL session** for 0002/0003. Prove it first with the inert probe in the
-   file header (`create policy … using (false)`, then drop it). If that 42501s, stop.
-2. **`exec_sql_readonly`** does not exist in production. Every automated gate calls it, so
-   without it the gate aborts — it fails closed, but it does not run. A hardened definition is
-   in the evidence folder.
-3. **"Allow public access to channels" must be OFF** in Project Settings → Realtime. If it is
-   on, RLS on `realtime.messages` is bypassed and every policy here is decorative. No script
-   can read this setting; check it by eye.
+1. **A privileged SQL session** for 0002/0003 — CONFIRMED available via the Supabase MCP
+   `execute_sql` path. Re-prove it with the inert probe immediately before use; if it 42501s,
+   stop.
+2. **`exec_sql_readonly` is REJECTED — do not create it.** The automated gate calls it, so
+   against production the gate aborts (fails closed, but does not run). It was rejected because
+   its "only SELECT is possible here" defence is false: `select public.purge_expired_plan_rooms()`
+   passes both of its filters and DELETEs rows, as `postgres`, because a SELECT of a volatile
+   SECURITY DEFINER function is a side effect. Verify production with direct catalog queries
+   instead. See `REJECTED-exec_sql_readonly.sql`.
+3. **"Allow public access to channels" must be OFF** — **CONFIRMED OFF on production**
+   2026-07-29 by probe: an anon-role private-channel subscribe to `plan-ZZ9999` and to an
+   unrelated topic both return `CHANNEL_ERROR`. Were it on, RLS on `realtime.messages` would be
+   bypassed and every policy here decorative. Re-check after any Realtime settings change.
 4. **Two sibling scripts are dead the same way** as the gate was: `verify-feed-rank.ts` and
    `verify-plan.ts` both import the `server-only` admin client. Out of scope here, logged as
    follow-up. Note the trap: adding `server-only` as a dependency does **not** fix them — that
@@ -140,19 +149,20 @@ no branch-compute charge was incurred. Production was read, never written.
 Unchanged in shape from the previous revision, with one addition: step 0 now includes creating
 `exec_sql_readonly`, without which every gate below aborts.
 
-0. Create `exec_sql_readonly` (definition in the evidence folder). Confirm
-   **Realtime → Allow public access to channels = OFF**.
+0. Do **not** create `exec_sql_readonly` (rejected — see above). Confirm
+   **Realtime → Allow public access to channels = OFF** with the anon private-channel probe,
+   and confirm the ownership route with the inert `zz_probe_delete_me` probe.
 1. Apply `supabase/migrations/0001_plan_rooms.sql` by the normal runner. Purely additive.
-   Gate: `EXPECT_STAGE=1 pnpm tsx scripts/verify-room-security.ts`.
+   Gate: the catalog queries from `scripts/verify-room-security.ts` §1-3, run over a privileged session.
 2. Deploy the client. Rooms still run on the broad policies; membership records start
    accumulating.
 3. **Prove ownership before touching any policy** — run the inert probe from the header of
    `supabase/manual/0002`. If it 42501s, STOP: the rest of the plan needs a different mechanism.
-4. Apply `supabase/manual/0002` in that owner-level session. Gate: `EXPECT_STAGE=2`.
+4. Apply `supabase/manual/0002` in that owner-level session. Gate: catalog query — 4 policies, 2 scoped + 2 broad.
    Nothing should change for users; this is the dual-run soak.
 5. Soak. Confirm rooms are being created with membership rows and that no member reports a
    failure.
-6. Apply `supabase/manual/0003` in the same kind of session. Gate: `EXPECT_STAGE=3` — this is
-   the gate that authorises calling the exposure closed.
+6. Apply `supabase/manual/0003` in the same kind of session. Gate: catalog query — 2 policies, both scoped, zero broad. That is what
+   authorises calling the exposure closed.
 7. If anything is wrong at any point after step 6, re-create the two broad policies verbatim
    from the header of `0003`. Proved by execution here, in both directions, twice.

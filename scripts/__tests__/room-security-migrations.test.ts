@@ -62,16 +62,38 @@ describe("migration sequence", () => {
     expect(read(M3)).not.toContain("EXPECT_STAGE=<");
   });
 
-  it("the owner-level remedy is labelled UNVERIFIED and ships an ownership probe", () => {
+  it("the owner-level remedy ships an ownership probe and demands it be re-run", () => {
+    // This used to assert the label "UNVERIFIED REMEDY". The route was then
+    // actually exercised against production (2026-07-29) and it worked, so that
+    // label became false and asserting it would have forced the docs to lie.
+    // What must NOT be lost is the probe itself and the instruction to re-prove
+    // the route every time — the privilege is Supabase platform behaviour that
+    // stock PostgreSQL semantics do not explain, so it could change under us.
     for (const f of [M2, M3]) {
-      expect(read(f)).toContain("UNVERIFIED REMEDY");
-      expect(read(f)).toContain("zz_probe_delete_me");
+      const sql = read(f);
+      expect(sql).toContain("zz_probe_delete_me");
+      expect(sql).toMatch(/re-prove it every time|re-run this/i);
+      expect(sql).toMatch(/If it ever 42501s, STOP|If it 42501s, STOP/);
     }
   });
 
   it("0001 is additive only — it must not touch existing policies or tables", () => {
     const sql = executable(M1).toLowerCase();
-    expect(sql).not.toContain("drop policy");
+    // 0001 may drop ONLY its own policies, on its own tables, for idempotency.
+    // Anything else — and in particular anything on realtime.messages, which is
+    // where the live exposure lives — must stay out of this file: it is applied
+    // by the normal runner, and the runner must never be able to change
+    // Realtime access.
+    const allowedDrops = [
+      'drop policy if exists "plan_rooms member read" on public.plan_rooms;',
+      'drop policy if exists "plan_room_members member read" on public.plan_room_members;',
+    ];
+    const drops = sql
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("drop policy"));
+    expect(drops.sort()).toEqual(allowedDrops.sort());
+    expect(sql).not.toContain("realtime.messages");
     expect(sql).not.toContain("drop table");
     expect(sql).not.toContain("alter table public.venues");
     expect(sql).not.toContain("alter table public.plans");
@@ -398,7 +420,29 @@ describe("staging-harness guards (behaviour, not spelling)", () => {
     expect(verify).toContain("plan_room_join_attempts");
   });
 
-  it("🧨 no script under scripts/ imports the server-only admin client", () => {
+  it("🧨 the suite still USES the shared guard module (not a re-inlined copy)", () => {
+    // Extracting the predicates only helps if the harness keeps importing them.
+    // Re-inlining a substring isLoopback in the suite would leave typecheck and
+    // CI green while the tested module drifted out of the call path — the same
+    // "guard whose test cannot fail" defect, moved up one level.
+    expect(suite).toContain('from "./staging-guard"');
+    expect(suite).not.toMatch(/^\s*function isLoopback/m);
+    expect(suite).not.toMatch(/^\s*const FIXTURE_EMAIL\s*=/m);
+    expect(suite).not.toMatch(/^\s*const PRODUCTION_REFS\s*=/m);
+    expect(suite).not.toMatch(/^\s*function refFromKey/m);
+  });
+
+  it("🧨 the production gate NAMES the database it certifies and refuses stray loopback", () => {
+    // It loads .env.local, so without this it would happily certify whatever
+    // that file points at — and during the staging run it pointed at a local
+    // stack. A gate that does not say what it inspected is not a gate.
+    expect(verify).toContain("new URL(targetUrl).host");
+    expect(verify).toMatch(/Target: \$\{targetHost\}/);
+    expect(verify).toContain("isLoopback(targetUrl) && process.env.EXPECT_STAGE");
+    expect(verify).toContain("ALLOW_LOCAL");
+  });
+
+  it("the known-broken sibling scripts are exactly the two we expect", () => {
     // `lib/supabase/admin.ts` starts with `import "server-only"`, which is NOT
     // an installed package, so any script importing it dies with
     // MODULE_NOT_FOUND before its first line. vitest aliases `server-only` to a
@@ -413,8 +457,12 @@ describe("staging-harness guards (behaviour, not spelling)", () => {
           readFileSync(join(dir, f), "utf8"),
         ),
       );
-    // verify-plan and verify-feed-rank are known-broken the same way and are
-    // tracked as follow-up work; this pins that the room-security gate is not.
-    expect(offenders).not.toContain("verify-room-security.ts");
+    // Asserting the EXACT set, not just "the gate is clean": a THIRD script
+    // picking up this import must fail here rather than pass silently.
+    // verify-plan and verify-feed-rank are tracked as follow-up work.
+    expect(offenders.sort()).toEqual([
+      "verify-feed-rank.ts",
+      "verify-plan.ts",
+    ]);
   });
 });

@@ -32,11 +32,31 @@ Verified against production during the foundation audit (2026-07-29):
 - **Analytics correlation** uses the room's UUID, never the code (a code is a bearer token; the salted hash is reversible because the salt ships in the bundle), and PostHog's `sanitize_properties` strips `room=` from every URL-shaped property.
 - **Failure states** (`lib/room-errors.ts`): `timeout · channel-error · denied · expired · closed · not-found · offline · auth`, each with short honest copy in the existing voice, rendered by a minimal notice inside the existing layout.
 
-## 2b. 🧨 Supabase ownership limitation (measured 2026-07-29, changes how this ships)
+## 2b. Supabase ownership: what is actually true (re-measured 2026-07-29)
 
-`realtime.messages` is owned by **`supabase_realtime_admin`**; the migration role is **`postgres`**, which is **not a member** of that role (`pg_has_role(...)` = false, verified read-only against the live project). `CREATE POLICY` and `DROP POLICY` require table ownership, so:
+`realtime.messages` is owned by **`supabase_realtime_admin`**. The migration role is
+**`postgres`**, which is **not** a superuser, does **not** own that table, and is **not** a
+member of its owner (`pg_has_role(postgres,'supabase_realtime_admin','MEMBER')` = false). Stock
+PostgreSQL requires table ownership for `CREATE POLICY` / `DROP POLICY`, so the earlier
+conclusion was that `0002`/`0003` could not be applied at all.
 
-**Migrations `0002` and `0003` CANNOT be applied by `supabase db push`, the MCP migration tool, or any CI migration step.** They fail with `42501: must be owner of table messages`. Both files now open with a banner stating this, the evidence, and the supported path: **both files therefore live in `supabase/manual/`, not `supabase/migrations/`** — leaving them in the numbered chain would abort any `supabase db push` / `db reset` partway through, including the bootstrap of a fresh staging project. Paste them verbatim into the **Supabase dashboard SQL editor** — ⚠️ a remedy inferred from project history, **not yet measured**; prove it first with the inert `zz_probe_delete_me` ownership probe in the staging doc §24 step 3a — then prove the applied state with `EXPECT_STAGE=<2|3> pnpm tsx scripts/verify-room-security.ts`. `0001` is unaffected — it only touches `public` objects the migration role owns. A guard test pins the banner so nobody wires these into an automated migration later.
+**That conclusion was wrong, and the correction matters.** The inert ownership probe was run
+against the live project through the Supabase MCP `execute_sql` path and **succeeded** — policy
+created, confirmed in `pg_policies`, dropped, production left at exactly its two original
+policies. `postgres` holds `supabase_privileged_role`, which is the likely mechanism; stock
+PostgreSQL semantics do not fully explain it. The measurement was always right; the inference
+from it was not.
+
+Practical consequences:
+
+- **The route exists**, but it is Supabase platform behaviour rather than something the SQL
+  standard guarantees, so it is re-proved with the probe immediately before every use. If the
+  probe ever returns `42501`, stop.
+- **`supabase db push`, `db reset`, `apply_migration` and CI still must not be used** for these
+  two files — they take a different path. Both files therefore stay in `supabase/manual/`,
+  outside the numbered chain, so a runner cannot abort partway through.
+- `0001` is unaffected: it only touches `public` objects the migration role owns.
+- A guard test pins that both files ship the probe and instruct re-proving it.
 
 ## 3. Migration sequence (staged; never a big-bang replacement)
 
@@ -78,7 +98,7 @@ Both required gates ran before this was presented as complete. **Neither returne
 
 ## 6. Testing
 
-**Automated — full suite green: 336 tests / 38 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
+**Automated — full suite green: 347 tests / 38 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
 
 | Claim | Test |
 |---|---|
@@ -99,7 +119,7 @@ Both required gates ran before this was presented as complete. **Neither returne
 | Purge is service_role-only and self-guards on `current_user` | same |
 | The join throttle is enforced in the database, not just the action | same |
 | The host-staleness window is clamped server-side | same |
-| Host handoff excludes the outgoing host | same |
+| Host handoff ROTATES forward and cannot two-cycle (the measured defect) | same |
 | Table reads stay readable for closed/expired rooms | same |
 | Room codes are shape-pinned (no 4-char room via a direct RPC) | same |
 | Create-path throttling shows create copy, not join copy | `lib/room-roster.test.ts` |
