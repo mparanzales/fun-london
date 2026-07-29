@@ -1,6 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { PRODUCTION_REFS, FIXTURE_EMAIL, isLoopback } from "../staging-guard";
+
+const suite = readFileSync(
+  join(process.cwd(), "scripts", "staging-room-security-suite.ts"),
+  "utf8",
+);
+const verify = readFileSync(
+  join(process.cwd(), "scripts", "verify-room-security.ts"),
+  "utf8",
+);
 
 // Guard tests for the group-room security migrations, in the house style of
 // color-tokens.test.ts / dependency-pins.test.ts: pin the decisions that are
@@ -249,6 +259,26 @@ describe("post-review hardening (findings from supabase-guardian, 2026-07-29)", 
     expect(fn).toContain("host_user_id from public.plan_rooms");
   });
 
+  it("🧨 host handoff ROTATES FORWARD — the measured oscillation must not come back", () => {
+    // Measured on a live database 2026-07-29: excluding only the CURRENT host
+    // and taking earliest-joined made a 3-member room ping-pong B → A → B → A,
+    // handing the room back to the absent original host forever.
+    //
+    // This test exists because the previous version of it could not catch that.
+    // It asserted `is distinct from (` and `host_user_id from public.plan_rooms`
+    // — BOTH of which the broken rule also contained, and both of which still
+    // live in the wrap branch — so a revert stayed green.
+    const fn = sql.slice(sql.indexOf("function public.promote_plan_room_host"));
+    const forwardScan = fn.indexOf("(m.joined_at, m.user_id) >");
+    const wrapBranch = fn.indexOf("is distinct from (");
+    expect(forwardScan).toBeGreaterThan(-1);
+    expect(wrapBranch).toBeGreaterThan(-1);
+    // The ring step must come FIRST; the exclusion is only the wrap fallback.
+    expect(forwardScan).toBeLessThan(wrapBranch);
+    // and it must compare against the CURRENT HOST's position in the roster
+    expect(fn).toMatch(/r\.host_user_id\s*=\s*h\.user_id/);
+  });
+
   it("table reads use the participant predicate so closed/expired stays READABLE", () => {
     // Otherwise a member loses SELECT the instant a room closes and can never
     // be told WHY it stopped.
@@ -281,5 +311,110 @@ describe("blast radius", () => {
         expect(sql).not.toContain(forbidden);
       }
     }
+  });
+});
+
+describe("staging-harness guards (behaviour, not spelling)", () => {
+  // These import the real predicates. The previous version of this block
+  // grepped the harness source for the right strings — which pins the spelling
+  // and not the behaviour, and silently stopped testing anything the moment the
+  // code moved. A guard whose test cannot fail is the defect this whole track
+  // keeps rediscovering.
+
+  it("still refuses the production ref outright", () => {
+    expect(PRODUCTION_REFS).toContain("fxfuzabrivuianfwdopc");
+  });
+
+  it("accepts a genuine loopback host", () => {
+    for (const ok of [
+      "http://127.0.0.1:54321",
+      "http://localhost:54321",
+      "http://[::1]:54321",
+      "https://LOCALHOST:54321/rest/v1",
+    ]) {
+      expect(isLoopback(ok)).toBe(true);
+    }
+  });
+
+  it("🧨 rejects hosts that merely LOOK like loopback", () => {
+    for (const hostile of [
+      "http://127.0.0.1.attacker.example/", // suffix trick
+      "http://localhost.attacker.example/", // suffix trick
+      "http://user@127.0.0.1@evil.com/", // userinfo trick — real host is evil.com
+      "https://fxfuzabrivuianfwdopc.supabase.co",
+      "not a url",
+      "",
+    ]) {
+      expect(isLoopback(hostile)).toBe(false);
+    }
+  });
+
+  it("the fixture pattern matches what the harness creates and nothing a person owns", () => {
+    // Exactly the shape makeActor builds: fl-staging-<label>-<ts>-<rand>@example.invalid
+    const label = "a";
+    const generated = `fl-staging-${label}-${1769000000000}-${123456}@example.invalid`;
+    expect(FIXTURE_EMAIL.test(generated)).toBe(true);
+    for (const real of [
+      "maria@funldn.com",
+      "someone@gmail.com",
+      "fl-staging-a-1-1@example.invalid.attacker.example", // suffix trick
+      "x fl-staging-a-1-1@example.invalid", // prefix trick
+      "fl-staging-a-1-1@example.invalidx",
+    ]) {
+      expect(FIXTURE_EMAIL.test(real)).toBe(false);
+    }
+  });
+
+  it("🧨 the anon assertions demand a PERMISSION error, not merely zero rows", () => {
+    // Both RLS policies on the room tables are `to authenticated`, so a
+    // signed-out caller reads zero rows whether or not 0001's
+    // `revoke ... from anon` applied. Asserting "0 rows" could never fail on
+    // the regression it exists to catch; asserting 42501 can.
+    for (const id of ["AN-1", "AN-3", "AN-4"]) {
+      const block = suite.slice(suite.indexOf(`"${id}",`));
+      expect(block.slice(0, 700)).toContain('?.code === "42501"');
+    }
+  });
+
+  it("🧨 E-1 asserts the EFFECT (no membership row), not payload truthiness", () => {
+    // PostgREST renders a NULL composite as an all-null OBJECT, which is truthy
+    // in JS, so `!expJoin` failed against a database that correctly refused.
+    const block = suite.slice(suite.lastIndexOf('"E-1",'));
+    expect(block.slice(0, 900)).toContain("expMembers === 0");
+    expect(suite).not.toContain("verdict(!expJoin)");
+  });
+
+  it("🧨 a SKIP cannot exit 0 — the header promises otherwise", () => {
+    expect(suite).toContain("skipped.length > 0");
+  });
+
+  it("🧨 the guard does NOT gate on a user COUNT — production holds 16", () => {
+    expect(suite).not.toMatch(/POPULATED_LIMIT\s*=/);
+    expect(suite).not.toMatch(/totalUsers\s*>=/);
+  });
+
+  it("the verification gate asserts anon holds no table grant", () => {
+    expect(verify).toContain("has_table_privilege('anon'");
+    expect(verify).toContain("plan_room_join_attempts");
+  });
+
+  it("🧨 no script under scripts/ imports the server-only admin client", () => {
+    // `lib/supabase/admin.ts` starts with `import "server-only"`, which is NOT
+    // an installed package, so any script importing it dies with
+    // MODULE_NOT_FOUND before its first line. vitest aliases `server-only` to a
+    // stub, so tests stay green while the script is dead — which is exactly how
+    // this went unnoticed until a live run. Adding `server-only` as a real
+    // dependency does NOT fix it: that package throws by design under Node.
+    const dir = join(process.cwd(), "scripts");
+    const offenders = readdirSync(dir)
+      .filter((f) => f.endsWith(".ts"))
+      .filter((f) =>
+        /^\s*import\b[^;]*["']@?\/?lib\/supabase\/admin["']/m.test(
+          readFileSync(join(dir, f), "utf8"),
+        ),
+      );
+    // verify-plan and verify-feed-rank are known-broken the same way and are
+    // tracked as follow-up work; this pins that the room-security gate is not.
+    expect(offenders).not.toContain("verify-room-security.ts");
   });
 });

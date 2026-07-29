@@ -1,52 +1,104 @@
-# Environment proof (Phase 1) — 2026-07-29
+# Environment proof — 2026-07-29
 
-All commands below are read-only. **No SQL was executed against any database in this task except the read-only catalog queries quoted here.**
+Two things have to be true before any of the results in `02-test-matrix.md` mean anything:
+the target must not be production, and it must not belong to real people. Both were proved
+by measurement, not by naming a variable "staging".
 
-## Branch and commit
+## The target
 
-```
-$ git branch --show-current
-fix/group-room-security
-$ git rev-parse HEAD
-9584e4ec53df507c3a948fb3d875990df3127c02
-$ git status --short
-(empty — clean tree)
-```
+| Property | Value |
+|---|---|
+| Kind | local Supabase CLI stack (`supabase start`), Docker via colima |
+| API | `http://127.0.0.1:54321` — loopback |
+| Database | `127.0.0.1:54322`, Postgres 17 |
+| Project directory | `~/.fl-local-staging` (temporary; deleted at teardown) |
+| Hosted project involved | **none** |
+| Cost | **£0** |
 
-## Supabase projects visible to this session
+Nothing on loopback can be a hosted Supabase project. That is the isolation argument, and it
+is structural rather than procedural — there is no configuration mistake that turns
+`127.0.0.1` into `fxfuz…dopc`.
 
-| ref (redacted) | name | status | verdict |
-|---|---|---|---|
-| `fxfuza…dopc` | fun-london | ACTIVE_HEALTHY | **PRODUCTION** — matches the ref recorded in `STATUS.md`; never a target |
-| `rcecrn…fskx` | fun-london-dev | **INACTIVE (paused)** | designated dev project, currently not running |
+## Guard 1 — the production denylist ran first
 
-## Migration role and Realtime ownership (the decisive finding)
+`assertStaging()` runs before any client is constructed. The production ref is a hard denylist
+checked against both `STAGING_PROJECT_REF` and the URL, and — for hosted targets — against the
+project ref decoded from the service key's own JWT payload, so a custom domain or a mislabelled
+env var cannot disguise the target.
 
-Read-only query against the production catalog (no DDL, nothing written):
+The loopback branch is entered only after that denylist, and it proves loopback by **parsing**
+the URL:
 
-```sql
-select current_user, session_user,
-       (select rolname from pg_roles r
-          join pg_class c on c.relowner = r.oid
-          join pg_namespace n on n.oid = c.relnamespace
-         where n.nspname='realtime' and c.relname='messages') as owner,
-       pg_has_role(current_user,'supabase_realtime_admin','MEMBER') as is_member;
-```
-
-```
-current_user | session_user | owner                     | is_member
--------------+--------------+---------------------------+-----------
-postgres     | postgres     | supabase_realtime_admin   | false
+```ts
+const host = new URL(url).hostname.toLowerCase();
+return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
 ```
 
-**Consequence:** `CREATE POLICY` / `DROP POLICY` on `realtime.messages` require table ownership. The migration role is not an owner and not a member of the owner, so **migrations 0002 and 0003 cannot be applied by `supabase db push`, the MCP `apply_migration` tool, or any CI migration step** — they will fail with `42501: must be owner of table messages`. This matches the note already in `supabase/realtime-policies.sql` (the live broad policies were created through the dashboard). Both migration files now carry this as a banner.
+A substring test would have accepted `http://127.0.0.1.attacker.example/`, whose host is not
+loopback at all.
 
-## Isolated-database options and why none could be used autonomously
+Observed banner from every run in this task:
 
-| Option | Availability | Blocker |
-|---|---|---|
-| Supabase **branch** off production | Available via MCP | **Costs $0.01344/hour (~£7/month)** and `create_branch` requires an explicit cost confirmation from the account owner. Incurring recurring spend is a founder decision. |
-| Resume **fun-london-dev** (`rcecrn…fskx`) | Project exists, INACTIVE | Resuming a paused project changes **shared** infrastructure (Vercel previews point at it) and resumes compute billing on the Pro org. Founder decision. |
-| **Local Supabase** (`supabase start`) | Not available | Neither Docker nor the Supabase CLI is installed on this machine (`docker: not found`, `supabase: not found`). |
+```
+Target: http://127.0.0.1:54321 (local CLI stack, loopback-verified) ✓
+```
 
-**Therefore Phases 2–12 of the staging brief were not executed.** No database was provisioned, so no migration was applied anywhere, and the multi-account tests could not run against real policies. Everything that follows in the verification document is labelled accordingly.
+## Guard 2 — the target holds nobody real
+
+This guard was rebuilt during this task because the previous version could not have worked.
+
+It refused only when the target held **25 or more** accounts. Production was then measured
+read-only: `select count(*) from auth.users` → **16**. On the one database the guard existed
+to protect, it was inert — a count cannot separate a small real cohort from a fresh stack.
+
+It now tests identity. Every account the suite creates matches
+
+```
+/^fl-staging-[a-z]-\d+-\d+@example\.invalid$/
+```
+
+and the presence of **any** account that does not match aborts the run before a single row is
+written. `.invalid` is unroutable by RFC 2606, so no fixture address can ever reach a person.
+Observed:
+
+```
+✅ [ENV-0] target holds no real user accounts — 0 account(s), 0 not test fixtures
+```
+
+Against production the same guard would see 16 non-fixture accounts and refuse.
+
+## The stack was made faithful to production before testing
+
+A fresh CLI stack is *safer* than production in one respect that would have invalidated the
+anon results. Default privileges for role `postgres` on new public tables:
+
+```
+production : {postgres=arwdDxtm, anon=rm, authenticated=rm, service_role=arwdDxtm}
+local CLI  : {postgres=arwdDxtm, anon=Dxtm, authenticated=Dxtm, service_role=Dxtm}
+```
+
+In production every new table is born with **anon = SELECT**, and 0001's
+`revoke all … from anon` is what takes it away. Locally that grant never existed, so the anon
+checks would have passed whether or not the revoke were present — a check that cannot fail.
+A local-only fixture aligns the defaults to production's before any migration runs. After the
+alignment, the room tables show `anon` with **no privileges at all**, which is 0001's revoke
+visibly doing work.
+
+The same gap also left `service_role` with no DML, which is why PostgREST answered `42501` for
+the admin client on the first attempt. That was a local artifact, not a defect in 0001 — the
+identical shortfall appears on `venues`, a table 0001 never touches.
+
+## What was done to production
+
+Read-only inspection only, via the Supabase management API:
+
+- `select current_user`, ownership of `realtime.messages`, `pg_has_role(...)`
+- `select … from pg_policies where schemaname='realtime'`
+- `select … from pg_default_acl`, `information_schema.role_table_grants`
+- `select count(*) from auth.users`
+- a check that no `%room%` function exists in `public` — **0**, confirming 0001 has never
+  been applied there
+
+No migration, no policy change, no RPC change, no test room, no test account, no write of any
+kind. `list_branches` on the production project still shows only `main`; no database branch
+was created, so no branch-compute charge was incurred.

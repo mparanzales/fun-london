@@ -13,7 +13,9 @@
 --                     the old broad ones still OR in, so nothing breaks)
 --   0003              DROP the broad plan-% policies    ← only after verify
 --
--- Rollback for this file: drop the two tables and the three functions (see
+-- Rollback for this file: drop the THREE tables (plan_rooms,
+-- plan_room_members, plan_room_join_attempts — the last one holds user ids, so
+-- leaving it behind is a data-retention miss) and the NINE functions (see
 -- docs/FUNLDN_GROUP_SECURITY_IMPLEMENTATION.md § Rollback). Nothing else in
 -- the product reads them until the client change ships.
 -- ─────────────────────────────────────────────────────────────────────────
@@ -35,7 +37,8 @@ create table if not exists public.plan_rooms (
   -- Host-controlled early closure. Non-null = closed.
   closed_at    timestamptz,
   -- Liveness for host handoff: the host's client refreshes this; when it goes
-  -- stale the earliest remaining member is promoted (see promote_plan_room_host).
+  -- stale the NEXT member in the roster ring is promoted, not simply the
+  -- earliest-joined (see promote_plan_room_host for why that oscillated).
   host_seen_at timestamptz not null default now(),
   -- Pin the SHAPE, not just the length: create_plan_room takes the code from
   -- its caller, so without this a direct PostgREST call could mint a 4-char
@@ -271,7 +274,8 @@ as $$
 $$;
 
 -- Deterministic host handoff. The DB — not the client — picks the winner:
--- the earliest-joined active member. The single conditional UPDATE is the
+-- the next member after the current host in the roster ring. The single
+-- conditional UPDATE is the
 -- race guard: concurrent callers all attempt the same transition and only
 -- one row-version wins, so every client converges on one host.
 create or replace function public.promote_plan_room_host(
@@ -303,21 +307,52 @@ begin
     return null;
   end if;
 
-  -- 🧨 EXCLUDE the outgoing host. `left_at` is best-effort (a closed tab may
-  -- never write it), so "earliest-joined active member" would otherwise
-  -- re-select the very host we are replacing, the UPDATE below would no-op on
-  -- `is distinct from`, and the room would stay hostless forever while every
-  -- remaining device retried. The caller only reaches here when the host is
-  -- absent AND stale, so removing them from the candidate set is correct.
+  -- 🧨 ROTATE FORWARD from the outgoing host — do not simply re-run
+  -- "earliest-joined active member who isn't the current host".
+  --
+  -- Measured on a live database 2026-07-29 (staging verification): with the
+  -- simple exclusion, a room with members A (creator, joined 1st), B and C
+  -- oscillated forever —
+  --     round 1 -> B     round 2 -> A (the ORIGINAL, absent host)
+  --     round 3 -> B     round 4 -> A ...
+  -- because excluding only the CURRENT host makes the host we just replaced
+  -- eligible again, and they are the earliest-joined. The room ping-pongs
+  -- between two absent devices and never reaches a member who is actually
+  -- there.
+  --
+  -- Taking the next member AFTER the current host in a stable (joined_at,
+  -- user_id) ordering, wrapping to the front only when the host is last, turns
+  -- handoff into a rotation: A -> B -> C -> A. It cannot two-cycle, and one lap
+  -- reaches every remaining member, so a present device is found. Successor
+  -- choice stays server-owned and deterministic — a member still cannot elect
+  -- THEMSELVES, they get whoever is next in the ring.
   select m.user_id into v_new_host
   from public.plan_room_members m
   where m.room_id = p_room_id
     and m.left_at is null
-    and m.user_id is distinct from (
-      select r.host_user_id from public.plan_rooms r where r.id = p_room_id
+    and (m.joined_at, m.user_id) > (
+      select h.joined_at, h.user_id
+      from public.plan_room_members h
+      join public.plan_rooms r
+        on r.id = h.room_id and r.host_user_id = h.user_id
+      where h.room_id = p_room_id
     )
   order by m.joined_at asc, m.user_id asc   -- tiebreak: stable, not arbitrary
   limit 1;
+
+  -- Host was last in the ring (or holds no membership row at all): wrap to the
+  -- front, still excluding them so the UPDATE cannot no-op.
+  if v_new_host is null then
+    select m.user_id into v_new_host
+    from public.plan_room_members m
+    where m.room_id = p_room_id
+      and m.left_at is null
+      and m.user_id is distinct from (
+        select r.host_user_id from public.plan_rooms r where r.id = p_room_id
+      )
+    order by m.joined_at asc, m.user_id asc
+    limit 1;
+  end if;
 
   -- Nobody else is left: leave the room as-is rather than nulling the host.
   if v_new_host is null then

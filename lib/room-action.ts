@@ -178,7 +178,7 @@ export async function touchHost(roomId: string): Promise<void> {
   await supabase.rpc("touch_plan_room_host", { p_room_id: roomId });
 }
 
-/** Ask the DB to promote the earliest-joined active member. Returns new host. */
+/** Ask the DB to promote the next active member in the ring. Returns new host. */
 export async function promoteHost(roomId: string): Promise<string | null> {
   const user = await getAuthUser();
   if (!user) return null;

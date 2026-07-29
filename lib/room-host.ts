@@ -5,7 +5,9 @@
 // tab, NO device held the host role, majority-veto swaps silently stopped
 // applying, and the room degraded into a read-only artefact with no owner.
 //
-// The rule, deliberately boring: the host is the earliest-joined member who
+// The rule, deliberately boring: the host is the next member after the
+// outgoing host in the roster ring — see promote_plan_room_host. Formerly the
+// earliest-joined member who
 // is still present. `joined_at` comes from the database (server clock), so
 // every device sorts the same list the same way and converges on the same
 // answer WITHOUT any negotiation, election message, or race.
@@ -14,7 +16,9 @@
 // the client knows who is PRESENT (Realtime presence); the database only knows
 // who has not written `left_at`, which is best-effort. So the client decides
 // WHEN a handoff is needed and who should ask; the database decides WHO gets
-// it (earliest-joined member excluding the outgoing host) and makes that
+// it (the next member after the outgoing host in a stable (joined_at,
+// user_id) ordering, wrapping to the front — a rotation, so repeated handoffs
+// cannot ping-pong between two absent devices) and makes that
 // choice single-valued via a conditional UPDATE. The DB is the authority; this
 // module is the trigger. Where they can disagree — a member who is recorded
 // but not currently looking at the screen — the DB's answer wins and every

@@ -19,8 +19,33 @@
  * 🧨 Never prints a room code. Room identifiers are shown hashed.
  */
 
-import { createServiceClient } from "@/lib/supabase/admin";
+import * as dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+
+import { createClient } from "@supabase/supabase-js";
 import { hashRoomCode } from "@/lib/room-code";
+
+/**
+ * Deliberately NOT `@/lib/supabase/admin`.
+ *
+ * That module opens with `import "server-only"`, which Next resolves during a
+ * build but which is not an installed package — so importing it here made this
+ * script die with MODULE_NOT_FOUND before its first line ran. The header above
+ * has always told you to run it with `pnpm tsx`; until this was found (during
+ * the local staging run, 2026-07-29) that was impossible, which means the
+ * documented production gate could never have gated anything.
+ *
+ * The service client is four lines, so build it here and leave admin.ts's
+ * mechanical client-bundle guard intact for application code.
+ */
+function createServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 type PolicyRow = {
   policyname: string;
@@ -145,7 +170,20 @@ async function main() {
   // assertion a tautology: "stage 3 means no broad policies" then "assert no
   // broad policies" can never fail, so a silently no-op DROP in 0003 would
   // have reported success with the exposure fully open.
-  const expected = Number(process.env.EXPECT_STAGE ?? "0");
+  // 🧨 A deploy gate that disables itself on a malformed value is the same
+  // family as "the CI secret was an empty string so `??` never fired". If the
+  // variable is set at all, it must name a real stage.
+  const rawExpected = process.env.EXPECT_STAGE;
+  if (
+    rawExpected !== undefined &&
+    !["1", "2", "3"].includes(rawExpected.trim())
+  ) {
+    console.error(
+      `EXPECT_STAGE=${rawExpected} is not 1, 2 or 3. Refusing to run ungated.`,
+    );
+    process.exit(1);
+  }
+  const expected = Number(rawExpected ?? "0");
   const stage = scoped.length === 0 ? 1 : broad.length > 0 ? 2 : 3;
   if (expected) {
     check(
@@ -163,11 +201,24 @@ async function main() {
     (p) =>
       !`${p.qual ?? ""}${p.with_check ?? ""}`.includes("is_plan_room_member"),
   );
-  check(
-    stage < 3 || clientPolicies.length === 0,
-    "no unscoped policy of ANY name remains on realtime.messages",
-    clientPolicies.map((p) => `${p.policyname}:${p.cmd}`).join(", "),
-  );
+  // The label has to tell the truth at EVERY stage. Before 0003 these policies
+  // are supposed to still be there, and printing a green "none remain" next to
+  // a list of the ones that do remain is how a reader — or a reviewer reading
+  // the evidence file — concludes the exposure is closed when it is wide open.
+  const unscopedNames = clientPolicies
+    .map((p) => `${p.policyname}:${p.cmd}`)
+    .join(", ");
+  if (stage < 3) {
+    console.log(
+      `${INFO}${clientPolicies.length} unscoped policy(ies) still present — EXPECTED before 0003, not yet gated${unscopedNames ? ` — ${unscopedNames}` : ""}`,
+    );
+  } else {
+    check(
+      clientPolicies.length === 0,
+      "no unscoped policy of ANY name remains on realtime.messages",
+      unscopedNames,
+    );
+  }
 
   // Grants are load-bearing twice over: the membership predicate must be
   // EXECUTE-able by authenticated (a permission error inside a policy fails
@@ -185,6 +236,35 @@ async function main() {
     "purge_expired_plan_rooms is NOT executable by anon/authenticated",
     purge ? `anon=${purge.anon} auth=${purge.auth}` : "absent",
   );
+  // 🧨 THE ANON MOAT. Production hands every new public table `anon = SELECT`
+  // by default (pg_default_acl gives anon `rm` on tables created by postgres),
+  // and 0001's `revoke all ... from anon` is the ONLY thing that removes it.
+  // No behavioural test can see this: both RLS policies are `to authenticated`,
+  // so a signed-out caller reads zero rows whether the grant is there or not.
+  // It has to be asserted from the catalog.
+  const tableGrants = await q<{ tbl: string; anon: boolean; auth: boolean }>(
+    `select c.relname as tbl,
+            has_table_privilege('anon', c.oid, 'select') as anon,
+            has_table_privilege('authenticated', c.oid, 'select') as auth
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname='public'
+        and c.relname in ('plan_rooms','plan_room_members','plan_room_join_attempts')`,
+  );
+  const anonReadable = tableGrants.filter((g) => g.anon).map((g) => g.tbl);
+  check(
+    tableGrants.length === 3 && anonReadable.length === 0,
+    "anon holds NO select grant on any room table (0001's revoke actually applied)",
+    tableGrants.length !== 3
+      ? `only found ${tableGrants.length}/3 tables`
+      : anonReadable.join(", "),
+  );
+  const attempts = tableGrants.find((g) => g.tbl === "plan_room_join_attempts");
+  check(
+    !!attempts && !attempts.auth,
+    "authenticated cannot read plan_room_join_attempts (the throttle ledger)",
+    attempts ? `auth=${attempts.auth}` : "absent",
+  );
+
   const predicate = grants.find((g) => g.fn === "is_plan_room_member");
   check(
     !!predicate?.auth,

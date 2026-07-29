@@ -28,7 +28,7 @@ Verified against production during the foundation audit (2026-07-29):
 - **Client identity**: `memberFromSession(userId, name)` — the member id *is* the authenticated user id. `makeMember()`/`randomId()` are gone.
 - **Roster gating** (`lib/room-roster.ts`): the roster comes from the database; every inbound vote/done/react/taste payload and every presence entry is checked against it **once the roster is known** (before that the channel's own RLS is the control — gating against an unloaded roster would drop the whole group), and a payload stamped with my id that I did not actually send is dropped.
 - **Host-authored broadcasts** (`settings`, `swap`, `swaps`, `variant`) carry a `from` stamp and are accepted only from the DB-recorded host, so a member cannot re-plan the room from the console.
-- **Host** (`lib/room-host.ts` + `promote_plan_room_host`): the client knows who is *present* and decides **when** a handoff is needed and who should ask; the database decides **who gets it** — the earliest-joined member **excluding the outgoing host** — via a conditional UPDATE with a server-clamped staleness window. The DB is the authority; the client is the trigger.
+- **Host** (`lib/room-host.ts` + `promote_plan_room_host`): the client knows who is *present* and decides **when** a handoff is needed and who should ask; the database decides **who gets it** — the **next member after the outgoing host** in a stable `(joined_at, user_id)` ring, wrapping to the front — via a conditional UPDATE with a server-clamped staleness window. Rotating rather than simply excluding the current host is what stops the measured A→B→A→B oscillation (see §6b). The DB is the authority; the client is the trigger.
 - **Analytics correlation** uses the room's UUID, never the code (a code is a bearer token; the salted hash is reversible because the salt ships in the bundle), and PostHog's `sanitize_properties` strips `room=` from every URL-shaped property.
 - **Failure states** (`lib/room-errors.ts`): `timeout · channel-error · denied · expired · closed · not-found · offline · auth`, each with short honest copy in the existing voice, rendered by a minimal notice inside the existing layout.
 
@@ -62,7 +62,7 @@ No client-facing write policy exists on either new table by design.
 
 ## 5. Rollback
 
-- **After 0001 or 0002 (nothing removed yet):** `drop policy if exists "plan room members read"/"plan room members write" on realtime.messages;` then `drop table public.plan_room_members, public.plan_rooms cascade;` and drop the seven functions. Behaviour returns to today's exactly.
+- **After 0001 or 0002 (nothing removed yet):** `drop policy if exists "plan room members read"/"plan room members write" on realtime.messages;` then `drop table public.plan_room_join_attempts, public.plan_room_members, public.plan_rooms cascade;` and drop the nine functions. **Three** tables, not two — `plan_room_join_attempts` stores user ids, so a rollback that forgets it leaves personal data behind. Behaviour returns to today's exactly.
 - **After 0003 (access removed):** re-create the two broad policies — their verbatim text is kept in the header of `supabase/manual/0003_…` precisely so a rollback needs no archaeology. This restores the old (permissive) behaviour in one statement pair while the cause is investigated.
 - **Client rollback:** revert the branch. The client tolerates a missing room record by surfacing an honest failure rather than crashing, but the intended rollback is git-level, not partial.
 
@@ -105,6 +105,38 @@ Both required gates ran before this was presented as complete. **Neither returne
 | Create-path throttling shows create copy, not join copy | `lib/room-roster.test.ts` |
 
 **Not provable in unit tests** (they need a live database and two sessions): that Postgres actually denies a non-member's subscribe, that an expired/closed room actually denies, and that join rate-limiting trips under real load. Those are §7's manual steps, and `scripts/verify-room-security.ts` is the automated half of that gate.
+
+## 6b. Staging verification — what a live database changed (2026-07-29)
+
+Verified on an isolated local Supabase stack (loopback, £0, no hosted project created). Full
+write-up: `docs/FUNLDN_GROUP_SECURITY_STAGING_VERIFICATION.md`.
+
+The suite was run **before** the fix as well as after, which is what makes the result evidence
+rather than assertion:
+
+| | pre-fix | dual-run (0002) | after 0003 |
+|---|---|---|---|
+| | 32 pass / **3 fail** | 32 pass / **3 fail** | **35 pass / 0 fail** |
+
+The three failures are C-3, X-3 and X-4 — Realtime subscribes that should have been refused.
+Rollback was proved by execution in both directions, twice.
+
+**Two real defects, neither reachable by a unit test:**
+
+1. **Host handoff oscillated forever.** The rule described in §2 — exclude the current host,
+   take earliest-joined — made a three-member room ping-pong `B → A → B → A`, handing the room
+   back to the original *absent* host. `promote_plan_room_host` now rotates forward through the
+   roster; re-measured as `A → B → C → A`.
+2. **The verification gate could never run.** `scripts/verify-room-security.ts` imported the
+   `server-only` admin client, so `pnpm tsx` killed it with `MODULE_NOT_FOUND` before line one.
+   The gate that authorises the production cutover had never executed. Fixed; a guard test now
+   pins it. `verify-feed-rank.ts` and `verify-plan.ts` are still dead the same way — follow-up.
+
+**Also measured on production, read-only:** every new public table there is born with
+`anon = SELECT`, so 0001's `revoke … from anon` is load-bearing. Nothing tested it — both RLS
+policies are `to authenticated`, so a signed-out caller reads zero rows either way. The gate now
+asserts `has_table_privilege('anon', …)` from the catalog, and that assertion was proved able to
+fail by re-granting the privilege on purpose.
 
 ## 7. Production verification steps (manual, in order)
 

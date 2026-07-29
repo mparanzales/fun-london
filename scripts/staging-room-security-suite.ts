@@ -9,9 +9,19 @@
  *   STAGING_ANON_KEY=… STAGING_SERVICE_ROLE_KEY=… \
  *   pnpm staging:room-security
  *
+ * Against a local `supabase start` stack, point STAGING_SUPABASE_URL at
+ * http://127.0.0.1:54321 and set STAGING_PROJECT_REF=local. The CLI's demo
+ * service key carries no `ref` claim, so the loopback host is what proves the
+ * target is not hosted — see isLoopback().
+ *
  * 🧨 PRODUCTION GUARD: refuses unless STAGING_PROJECT_REF is set, is not a
  * known production ref, and matches the URL. No client is constructed before
  * that check. Never prints a key, JWT, password, email or full room code.
+ *
+ * 🧨 The second guard tests IDENTITY, not volume. It used to refuse only when
+ * the target held 25+ accounts; production was then measured and holds 16, so
+ * the guard could never have fired on the database it existed to protect. Any
+ * account that is not one of this suite's own fixtures now aborts the run.
  *
  * 🧨 DESIGN RULE, learned the hard way in review: **a check may never pass
  * because something was broken.** This suite therefore
@@ -30,7 +40,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
-const PRODUCTION_REFS = ["fxfuzabrivuianfwdopc"];
+import { PRODUCTION_REFS, FIXTURE_EMAIL, isLoopback } from "./staging-guard";
+
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 type Result = "PASS" | "FAIL" | "INCONCLUSIVE" | "SKIP";
@@ -115,6 +126,13 @@ function assertStaging(): { ref: string; url: string } {
       console.error(`REFUSING TO RUN: ${prod} is a PRODUCTION project.`);
       process.exit(1);
     }
+  }
+  // Local CLI stack: its demo service key carries no `ref` claim, so the
+  // key-derived checks below cannot apply. The loopback host is the proof
+  // instead — nothing hosted answers on 127.0.0.1.
+  if (isLoopback(url)) {
+    console.log(`Target: ${url} (local CLI stack, loopback-verified) ✓\n`);
+    return { ref, url };
   }
   if (!urlLower.includes(refLower)) {
     console.error(
@@ -290,22 +308,36 @@ async function main() {
     if (roomsErr || membersErr)
       throw new Error("0001 is not applied — stopping");
 
-    // Last line of defence before we create anything: a fresh staging project
-    // has a handful of users; a production project has a cohort. This measures
-    // reality instead of trusting a string.
-    const { data: userPage } = await admin.auth.admin.listUsers({ perPage: 1 });
-    const totalUsers = (userPage as { total?: number } | null)?.total ?? 0;
-    const POPULATED_LIMIT = 25;
+    // Last line of defence before we create anything: does this database hold
+    // anybody REAL?
+    //
+    // The earlier form of this check compared the user count to a threshold of
+    // 25. Production was then measured and holds 16 — so the guard could never
+    // have fired on the one database it existed to refuse. A count cannot tell
+    // a small real cohort from a fresh stack; identity can. Every account this
+    // suite creates matches FIXTURE_EMAIL, so ANY other account means the
+    // target belongs to real people and we must not touch it.
+    const PAGE = 50;
+    const { data: userPage, error: usersErr } =
+      await admin.auth.admin.listUsers({ perPage: PAGE });
+    if (usersErr) {
+      throw new Error(`cannot enumerate users: ${usersErr.message}`);
+    }
+    const existing = userPage?.users ?? [];
+    const strangers = existing.filter(
+      (u) => !FIXTURE_EMAIL.test(u.email ?? ""),
+    );
+    const clean = strangers.length === 0 && existing.length < PAGE;
     record(
       "ENV-0",
       "environment",
-      `target looks like staging (<${POPULATED_LIMIT} existing users)`,
-      verdict(totalUsers < POPULATED_LIMIT),
-      `${totalUsers} users`,
+      "target holds no real user accounts",
+      verdict(clean),
+      `${existing.length} account(s), ${strangers.length} not test fixtures`,
     );
-    if (totalUsers >= POPULATED_LIMIT) {
+    if (!clean) {
       throw new Error(
-        `refusing to create test data: ${totalUsers} existing users looks like a real cohort`,
+        `refusing to create test data: ${strangers.length} non-fixture account(s) present — this database belongs to real users`,
       );
     }
 
@@ -322,14 +354,48 @@ async function main() {
     const { data: anonRooms, error: anonRoomsErr } = await anon
       .from("plan_rooms")
       .select("id");
+    // 🧨 "Zero rows" is NOT evidence that anon lost its grant.
+    //
+    // Production hands every new public table `anon = SELECT` by default
+    // (measured: pg_default_acl gives anon `rm` on tables created by postgres).
+    // 0001's `revoke all ... from anon` is the only thing that removes it. But
+    // both RLS policies on these tables are `to authenticated`, so a signed-out
+    // caller reads zero rows whether the revoke applied or not — the old
+    // assertion passed identically on a database with anon SELECT still live,
+    // i.e. it could not fail on the exact regression it exists to catch.
+    // Require the PERMISSION error: 42501 is the grant being absent.
     record(
       "AN-1",
       "anon",
-      "signed-out caller reads no room rows",
-      verdict((anonRooms?.length ?? 0) === 0),
+      "signed-out caller is refused plan_rooms by GRANT (42501), not merely filtered to 0 rows",
+      verdict(anonRoomsErr?.code === "42501"),
       anonRoomsErr
         ? `error: ${anonRoomsErr.code}`
-        : `${anonRooms?.length ?? 0} rows`,
+        : `NO ERROR — anon still holds a table grant (${anonRooms?.length ?? 0} rows)`,
+    );
+    const { data: anonMembers, error: anonMembersErr } = await anon
+      .from("plan_room_members")
+      .select("user_id");
+    record(
+      "AN-3",
+      "anon",
+      "signed-out caller is refused plan_room_members by GRANT (42501)",
+      verdict(anonMembersErr?.code === "42501"),
+      anonMembersErr
+        ? `error: ${anonMembersErr.code}`
+        : `NO ERROR — anon still holds a table grant (${anonMembers?.length ?? 0} rows)`,
+    );
+    const { data: anonAttempts, error: anonAttemptsErr } = await anon
+      .from("plan_room_join_attempts")
+      .select("user_id");
+    record(
+      "AN-4",
+      "anon",
+      "signed-out caller is refused plan_room_join_attempts by GRANT (42501)",
+      verdict(anonAttemptsErr?.code === "42501"),
+      anonAttemptsErr
+        ? `error: ${anonAttemptsErr.code}`
+        : `NO ERROR — anon still holds a table grant (${anonAttempts?.length ?? 0} rows)`,
     );
     const { error: anonCreate } = await anon.rpc("create_plan_room", {
       p_code: randomCode(),
@@ -338,7 +404,7 @@ async function main() {
       "AN-2",
       "anon",
       "signed-out caller cannot execute create_plan_room",
-      verdict(!!anonCreate),
+      verdict(anonCreate?.code === "42501"),
       anonCreate ? `${anonCreate.code}` : "NO ERROR — BAD",
     );
 
@@ -571,7 +637,14 @@ async function main() {
         "SKIP",
         "no room",
       );
-      record("H-3", "handoff", "re-promotion is stable", "SKIP", "no room");
+      record("H-3", "handoff", "promotion is not reentrant", "SKIP", "no room");
+      record(
+        "H-4",
+        "handoff",
+        "handoffs rotate, never two-cycle",
+        "SKIP",
+        "no room",
+      );
     }
     if (hoRoom) {
       roomIds.push(hoRoom.id);
@@ -581,54 +654,146 @@ async function main() {
       const { error: cJoinErr } = await C.client.rpc("join_plan_room", {
         p_code: hoCode,
       });
+      // `join_plan_room` returns NULL *without an error* for an unknown, closed
+      // or expired code, so "no error" is not evidence that anybody joined —
+      // the same false-pass that E-1 was just fixed for. Everything below rests
+      // on B and C actually being members, so assert the rows.
+      const { count: hoMembers, error: hoMembersErr } = await admin
+        .from("plan_room_members")
+        .select("user_id", { head: true, count: "exact" })
+        .eq("room_id", hoRoom.id)
+        .in("user_id", [B.id, C.id]);
+      const joinedBoth = hoMembers === 2;
       record(
         "H-0",
         "handoff",
         "both successors joined (B before C) — the ordering premise",
-        verdict(!bJoinErr && !cJoinErr),
-        safeErr(bJoinErr ?? cJoinErr),
+        hoMembersErr || hoMembers === null
+          ? "INCONCLUSIVE"
+          : verdict(!bJoinErr && !cJoinErr && joinedBoth),
+        hoMembersErr
+          ? `count query errored: ${hoMembersErr.code}`
+          : `${hoMembers ?? "unknown"} of 2 membership rows${safeErr(bJoinErr ?? cJoinErr) ? ` — ${safeErr(bJoinErr ?? cJoinErr)}` : ""}`,
       );
 
       await admin
         .from("plan_rooms")
         .update({ host_seen_at: new Date(Date.now() - 120_000).toISOString() })
         .eq("id", hoRoom.id);
-      const { data: newHost } = await B.client.rpc("promote_plan_room_host", {
-        p_room_id: hoRoom.id,
-      });
+      const { data: newHost, error: promoteErr } = await B.client.rpc(
+        "promote_plan_room_host",
+        { p_room_id: hoRoom.id },
+      );
+      // H-1 does NOT discriminate the rotation fix from the rule it replaced —
+      // B is the answer under both. Only H-4 is evidence for the fix. H-1's job
+      // is to establish that promotion works at all, so H-3/H-4 mean something.
+      const handoffProven = !promoteErr && newHost === B.id && joinedBoth;
       record(
         "H-1",
         "handoff",
-        "a stale host is replaced by the EARLIEST-JOINED remaining member (B)",
-        verdict(newHost === B.id),
-        newHost === B.id
-          ? "B"
-          : newHost === C.id
-            ? "C (wrong)"
-            : "unchanged/null",
+        "a stale host is replaced by the next member in the ring (B)",
+        promoteErr ? "INCONCLUSIVE" : verdict(newHost === B.id),
+        promoteErr
+          ? safeErr(promoteErr)
+          : newHost === B.id
+            ? "B"
+            : newHost === C.id
+              ? "C (wrong)"
+              : "unchanged/null",
       );
       record(
         "H-2",
         "handoff",
         "the outgoing host is not re-selected",
-        verdict(newHost !== A.id),
+        promoteErr ? "INCONCLUSIVE" : verdict(newHost !== A.id),
       );
 
-      // Re-age deliberately: this proves the RULE is stable, not merely that
-      // <30s elapsed between two calls.
-      await admin
-        .from("plan_rooms")
-        .update({ host_seen_at: new Date(Date.now() - 120_000).toISOString() })
-        .eq("id", hoRoom.id);
-      const { data: again } = await C.client.rpc("promote_plan_room_host", {
-        p_room_id: hoRoom.id,
-      });
+      // H-3 and H-4 are gated on H-1 for the same reason the realtime denials
+      // are gated on the positive controls: if promotion never worked, "the
+      // host did not move" and "no two-cycle" are both trivially true.
+      // H-3 — NOT reentrant. A promotion sets host_seen_at = now(), so calling
+      // again immediately must be a no-op. This is the guarantee that stops a
+      // roomful of retrying devices from trading the host role around.
+      const { data: immediate, error: immediateErr } = await C.client.rpc(
+        "promote_plan_room_host",
+        { p_room_id: hoRoom.id },
+      );
       record(
         "H-3",
         "handoff",
-        "re-running promotion on a re-aged host is stable (no flapping)",
-        verdict(again === newHost),
-        `${again === newHost ? "unchanged" : "FLIPPED"}`,
+        "promotion is not reentrant — an immediate re-run cannot move the host",
+        !handoffProven || immediateErr || immediate == null
+          ? "INCONCLUSIVE"
+          : verdict(immediate === newHost),
+        !handoffProven
+          ? "H-1 did not establish a working handoff"
+          : immediateErr
+            ? safeErr(immediateErr)
+            : immediate == null
+              ? "RPC returned no host"
+              : immediate === newHost
+                ? "unchanged"
+                : "MOVED without the host going stale",
+      );
+
+      // H-4 — when the NEW host also goes stale, handoff must ROTATE, never
+      // two-cycle. The original code excluded only the current host, so the
+      // earliest-joined member — the absent host we had just replaced — was
+      // immediately eligible again and the room ping-ponged A→B→A→B forever,
+      // never reaching a device that was actually present. Measured on a live
+      // database 2026-07-29; fixed in 0001 by rotating forward.
+      //
+      // 🧨 This is the ONLY check that proves the defect this migration exists
+      // to fix, so it must not be able to go green having measured nothing.
+      // The first version discarded the RPC error and skipped nulls, so three
+      // failed calls produced [B, null, null, null] and scored PASS. Every
+      // round's error is now captured, any missing answer is INCONCLUSIVE, and
+      // the assertion is POSITIVE — all three members appear and no two
+      // consecutive rounds repeat — rather than merely "nothing repeated at a
+      // distance of two", which [B, B, C, C] would have satisfied.
+      const sequence: (string | null)[] = [newHost as string | null];
+      let roundProblem = "";
+      for (let round = 0; round < 3 && !roundProblem; round++) {
+        const { error: ageErr } = await admin
+          .from("plan_rooms")
+          .update({
+            host_seen_at: new Date(Date.now() - 120_000).toISOString(),
+          })
+          .eq("id", hoRoom.id);
+        if (ageErr) {
+          roundProblem = `could not age the host in round ${round + 1}: ${safeErr(ageErr)}`;
+          break;
+        }
+        const caller = round % 2 === 0 ? C : B;
+        const { data: next, error: nextErr } = await caller.client.rpc(
+          "promote_plan_room_host",
+          { p_room_id: hoRoom.id },
+        );
+        if (nextErr || next == null) {
+          roundProblem = `round ${round + 1} returned no host${nextErr ? `: ${safeErr(nextErr)}` : ""}`;
+          break;
+        }
+        sequence.push(next as string);
+      }
+      const label = (h: string | null) =>
+        h === A.id ? "A" : h === B.id ? "B" : h === C.id ? "C" : "?";
+      const complete = !roundProblem && sequence.length === 4;
+      const distinct = new Set(sequence).size === 3;
+      const adjacentDiffer = sequence.every(
+        (h, i) => i === 0 || h !== sequence[i - 1],
+      );
+      record(
+        "H-4",
+        "handoff",
+        "repeated handoffs ROTATE through the roster — they never two-cycle",
+        !handoffProven || !complete
+          ? "INCONCLUSIVE"
+          : verdict(distinct && adjacentDiffer),
+        !handoffProven
+          ? "H-1 did not establish a working handoff"
+          : roundProblem
+            ? roundProblem
+            : `${sequence.map(label).join(" → ")}${distinct ? "" : " — did NOT reach all three"}`,
       );
     }
 
@@ -744,18 +909,21 @@ async function main() {
       .rpc("create_plan_room", { p_code: expCode })
       .single<{ id: string }>();
     if (!expRoom) {
+      // An unmet fixture precondition is INCONCLUSIVE, never SKIP. A SKIP does
+      // not affect the exit code, so recording one here meant the expiry
+      // invariants could go unexecuted and the suite would still exit 0.
       record(
         "E-1",
         "expiry",
         "expired room cannot be joined",
-        "SKIP",
+        "INCONCLUSIVE",
         "could not create the expiry fixture",
       );
       record(
         "E-2",
         "expiry",
         "expired room stays readable to members",
-        "SKIP",
+        "INCONCLUSIVE",
         "could not create the expiry fixture",
       );
     }
@@ -768,11 +936,29 @@ async function main() {
       const { data: expJoin } = await B.client
         .rpc("join_plan_room", { p_code: expCode })
         .maybeSingle();
+      // Assert the EFFECT, not the payload. A plpgsql function declared
+      // `returns public.plan_rooms` that returns NULL comes back over PostgREST
+      // as an object with every column null — truthy in JS. Testing `!expJoin`
+      // therefore failed against a database that had correctly refused the
+      // join (proven directly in SQL: 0 membership rows). What matters is
+      // whether a membership row appeared, so measure that.
+      const { count: expMembers, error: expMembersErr } = await admin
+        .from("plan_room_members")
+        .select("user_id", { head: true, count: "exact" })
+        .eq("room_id", expRoom.id)
+        .eq("user_id", B.id);
       record(
         "E-1",
         "expiry",
-        "expired room cannot be joined",
-        verdict(!expJoin),
+        "expired room cannot be joined (no membership row is created)",
+        expMembersErr || expMembers === null
+          ? "INCONCLUSIVE"
+          : verdict(
+              expMembers === 0 && !(expJoin as { id?: string } | null)?.id,
+            ),
+        expMembersErr
+          ? `count query errored: ${expMembersErr.code}`
+          : `${expMembers ?? 0} membership rows`,
       );
       const { data: stillReadable, error: readErr } = await A.client
         .from("plan_rooms")
@@ -866,7 +1052,12 @@ async function main() {
     );
   console.log(JSON.stringify({ ref: `${ref.slice(0, 6)}…`, checks }, null, 2));
   // Let stdout drain naturally — process.exit() truncates a piped evidence file.
-  process.exitCode = failed.length > 0 || inconclusive.length > 0 ? 1 : 0;
+  const skipped = checks.filter((c) => c.result === "SKIP");
+  // The header promises "Exit 0 only when every check is PASS". A SKIP used to
+  // slip through that, so a block whose fixture never got built could leave its
+  // invariants unexecuted behind a green exit code.
+  process.exitCode =
+    failed.length > 0 || inconclusive.length > 0 || skipped.length > 0 ? 1 : 0;
 }
 
 main().catch((e) => {
