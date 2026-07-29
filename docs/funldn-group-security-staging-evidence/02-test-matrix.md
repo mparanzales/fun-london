@@ -10,14 +10,20 @@ Four disposable accounts per run (`fl-staging-<a|b|c|d>-…@example.invalid`):
 
 ## Headline
 
+> **On the numbers below.** The run recorded here was executed at commit `acc8368`, when the
+> suite had 33 checks. Review afterwards added `AN-3`, `AN-4` and a reworked `H-4`, so the
+> current suite has more checks than that run exercised. The counts below are the ones actually
+> observed; they are **not** rescaled to the current check count. A re-run against the current
+> suite is recorded separately when it happens.
+
 | Stage | Database state | Result |
 |---|---|---|
-| 1 — pre-fix | 0001 + production's two broad `plan-%` policies | **32 pass / 3 fail** |
-| 2 — dual-run | + 0002 membership-scoped policies | **32 pass / 3 fail** (unchanged) |
-| 3 — final | + 0003 drops the broad policies | **35 pass / 0 fail / 0 inconclusive** |
-| rollback of 0003 | back to dual-run | **32 pass / 3 fail** — identical to baseline |
+| 1 — pre-fix | 0001 + production's two broad `plan-%` policies | **30 pass / 3 fail** |
+| 2 — dual-run | + 0002 membership-scoped policies | **30 pass / 3 fail** (unchanged) |
+| 3 — final | + 0003 drops the broad policies | **33 pass / 0 fail / 0 inconclusive** |
+| rollback of 0003 | back to dual-run | **30 pass / 3 fail** — identical to baseline |
 | rollback of 0002 | back to stage 1 | stage 1 detected |
-| re-applied forward | 0002 then 0003 again | **35 pass / 0 fail** (repeatable) |
+| re-applied forward | 0002 then 0003 again | **33 pass / 0 fail** (repeatable) |
 
 The three stage-1 failures are **C-3, X-3, X-4** — every one of them a Realtime subscribe
 that should have been refused. They are the live vulnerability, reproduced. They are still

@@ -74,6 +74,23 @@ async function main() {
     process.exit(1);
   }
 
+  // 🧨 A deploy gate that disables itself on a malformed value is the same
+  // family as "the CI secret was an empty string so `??` never fired". If the
+  // variable is set at all it must name a real stage — and this has to run
+  // BEFORE any query, or the script dies on something else first and the guard
+  // never gets a turn. It originally sat next to its use ~100 lines below, and
+  // a live test of EXPECT_STAGE=three sailed straight past it.
+  const rawExpected = process.env.EXPECT_STAGE;
+  if (
+    rawExpected !== undefined &&
+    !["1", "2", "3"].includes(rawExpected.trim())
+  ) {
+    console.error(
+      `EXPECT_STAGE=${rawExpected} is not 1, 2 or 3. Refusing to run ungated.`,
+    );
+    process.exit(1);
+  }
+
   // 🧨 NAME THE DATABASE, ALWAYS.
   //
   // This script loads .env.local, which means it certifies whatever that file
@@ -93,7 +110,11 @@ async function main() {
   console.log(
     `Target: ${targetHost}${keyRef ? ` (key names project ${keyRef})` : " (key names no project)"}`,
   );
-  if (keyRef && targetHost !== "(unparseable)" && !targetHost.includes(keyRef)) {
+  if (
+    keyRef &&
+    targetHost !== "(unparseable)" &&
+    !targetHost.includes(keyRef)
+  ) {
     console.error(
       "REFUSING: the service key belongs to a different project than the URL.",
     );
@@ -203,24 +224,6 @@ async function main() {
     `${INFO}realtime.messages policies: ${rt.length} total · ${scoped.length} membership-scoped · ${broad.length} broad plan-%`,
   );
 
-  // 🧨 The expected stage comes from the OPERATOR, not from the data. Deriving
-  // it from `broad.length` (as this script first did) made the stage-3
-  // assertion a tautology: "stage 3 means no broad policies" then "assert no
-  // broad policies" can never fail, so a silently no-op DROP in 0003 would
-  // have reported success with the exposure fully open.
-  // 🧨 A deploy gate that disables itself on a malformed value is the same
-  // family as "the CI secret was an empty string so `??` never fired". If the
-  // variable is set at all, it must name a real stage.
-  const rawExpected = process.env.EXPECT_STAGE;
-  if (
-    rawExpected !== undefined &&
-    !["1", "2", "3"].includes(rawExpected.trim())
-  ) {
-    console.error(
-      `EXPECT_STAGE=${rawExpected} is not 1, 2 or 3. Refusing to run ungated.`,
-    );
-    process.exit(1);
-  }
   const expected = Number(rawExpected ?? "0");
   const stage = scoped.length === 0 ? 1 : broad.length > 0 ? 2 : 3;
   if (expected) {

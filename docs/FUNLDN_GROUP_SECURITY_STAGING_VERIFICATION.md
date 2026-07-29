@@ -26,7 +26,7 @@ GoTrue accounts, real PostgREST, real Realtime WebSockets, on loopback, for noth
 | 12 | Analytics privacy | **Verified** — no room code reaches any property |
 | 13 | `supabase/manual/0003` applied (final) | **Verified** — exposure closed |
 | 14 | `EXPECT_STAGE=3 verify-room-security` | **Passes**, and provably fails when broken |
-| 15 | `pnpm staging:room-security` | **35 pass / 0 fail / 0 inconclusive** |
+| 15 | `pnpm staging:room-security` | **33 pass / 0 fail / 0 inconclusive** at commit `acc8368` (see note in the evidence file) |
 | 16 | Test suite, typecheck, lint, build, copy guard | **347 tests / 38 files pass**; build compiles |
 | 17 | Rollback | **Proved by execution**, both directions, twice |
 | 18 | supabase-guardian / code-reviewer gates | Both ran; **both found blockers; all fixed** (§5) |
@@ -43,7 +43,7 @@ it is measuring the fix or measuring a broken channel.
 
 | | pre-fix | dual-run | after 0003 |
 |---|---|---|---|
-| result | 32 pass / **3 fail** | 32 pass / **3 fail** | **35 pass / 0 fail** |
+| result | 30 pass / **3 fail** | 30 pass / **3 fail** | **33 pass / 0 fail** |
 | failing | C-3, X-3, X-4 — all Realtime subscribes that should have been refused | identical | none |
 
 Dual-run behaving identically to pre-fix is correct and important: permissive policies OR
