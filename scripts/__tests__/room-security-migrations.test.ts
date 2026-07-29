@@ -8,6 +8,12 @@ import { join } from "node:path";
 
 const DIR = join(process.cwd(), "supabase", "migrations");
 const read = (f: string) => readFileSync(join(DIR, f), "utf8");
+/** The file with SQL line comments removed — i.e. only what actually runs. */
+const executable = (f: string) =>
+  read(f)
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("--"))
+    .join("\n");
 
 const M1 = "0001_plan_rooms.sql";
 const M2 = "0002_realtime_membership_policies.sql";
@@ -22,7 +28,7 @@ describe("migration sequence", () => {
   });
 
   it("0001 is additive only — it must not touch existing policies or tables", () => {
-    const sql = read(M1).toLowerCase();
+    const sql = executable(M1).toLowerCase();
     expect(sql).not.toContain("drop policy");
     expect(sql).not.toContain("drop table");
     expect(sql).not.toContain("alter table public.venues");
@@ -117,7 +123,22 @@ describe("realtime policies", () => {
   });
 
   it("0002 does NOT remove anything (dual-run: old policies still OR in)", () => {
-    expect(read(M2).toLowerCase()).not.toContain("drop policy");
+    // Executable SQL only: both files now carry an owner-level banner whose
+    // PROSE explains that CREATE/DROP POLICY need ownership. A comment
+    // removes nothing, so scanning raw text would flag the documentation.
+    expect(executable(M2).toLowerCase()).not.toContain("drop policy");
+  });
+
+  it("both realtime migrations declare the owner-level requirement", () => {
+    // Measured 2026-07-29: the migration role is `postgres`, realtime.messages
+    // is owned by supabase_realtime_admin, and postgres is NOT a member — so
+    // these two files cannot be applied by the CLI/CI path. If that banner is
+    // ever dropped, someone will wire them into an automated migration and it
+    // will fail in production at exactly the wrong moment.
+    for (const f of [M2, M3]) {
+      expect(read(f)).toContain("OWNER-LEVEL EXECUTION REQUIRED");
+      expect(read(f)).toContain("supabase_realtime_admin");
+    }
   });
 
   it("🧨 0003 removes BOTH broad plan-% policies — the actual exposure fix", () => {
@@ -216,7 +237,7 @@ describe("post-review hardening (findings from supabase-guardian, 2026-07-29)", 
 describe("blast radius", () => {
   it("no migration touches solo planning, the catalogue, or unrelated policies", () => {
     for (const f of [M1, M2, M3]) {
-      const sql = read(f).toLowerCase();
+      const sql = executable(f).toLowerCase();
       for (const forbidden of [
         "public.plans",
         "public.venues",

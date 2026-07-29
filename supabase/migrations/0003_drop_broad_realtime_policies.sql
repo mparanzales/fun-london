@@ -1,3 +1,24 @@
+-- ⚠️ OWNER-LEVEL EXECUTION REQUIRED — THIS FILE CANNOT BE APPLIED BY THE
+-- NORMAL MIGRATION PATH.
+--
+-- Verified against the live project 2026-07-29 (read-only):
+--   current_user                                  = postgres
+--   owner of realtime.messages                    = supabase_realtime_admin
+--   pg_has_role(postgres, supabase_realtime_admin) = FALSE
+--
+-- CREATE POLICY / DROP POLICY require table ownership, so `supabase db push`,
+-- the MCP apply_migration tool and any CI migration step will fail here with
+--   ERROR: 42501: must be owner of table messages
+-- This is the same constraint recorded in supabase/realtime-policies.sql: the
+-- live broad policies were created through the Supabase dashboard, not a
+-- migration.
+--
+-- APPLY VIA: the Supabase dashboard SQL editor (or another owner-level
+-- mechanism), pasting the statements below verbatim. Then prove the result:
+--   EXPECT_STAGE=<2|3> pnpm tsx scripts/verify-room-security.ts
+-- The repository copy and the applied database state must stay identical; the
+-- verification script is what proves they are.
+--
 -- ─────────────────────────────────────────────────────────────────────────
 -- 0003 · Remove the broad plan-% Realtime policies.
 --

@@ -32,6 +32,12 @@ Verified against production during the foundation audit (2026-07-29):
 - **Analytics correlation** uses the room's UUID, never the code (a code is a bearer token; the salted hash is reversible because the salt ships in the bundle), and PostHog's `sanitize_properties` strips `room=` from every URL-shaped property.
 - **Failure states** (`lib/room-errors.ts`): `timeout · channel-error · denied · expired · closed · not-found · offline · auth`, each with short honest copy in the existing voice, rendered by a minimal notice inside the existing layout.
 
+## 2b. 🧨 Supabase ownership limitation (measured 2026-07-29, changes how this ships)
+
+`realtime.messages` is owned by **`supabase_realtime_admin`**; the migration role is **`postgres`**, which is **not a member** of that role (`pg_has_role(...)` = false, verified read-only against the live project). `CREATE POLICY` and `DROP POLICY` require table ownership, so:
+
+**Migrations `0002` and `0003` CANNOT be applied by `supabase db push`, the MCP migration tool, or any CI migration step.** They fail with `42501: must be owner of table messages`. Both files now open with a banner stating this, the evidence, and the supported path: paste them verbatim into the **Supabase dashboard SQL editor** (the same mechanism that created the current live policies), then prove the applied state with `EXPECT_STAGE=<2|3> pnpm tsx scripts/verify-room-security.ts`. `0001` is unaffected — it only touches `public` objects the migration role owns. A guard test pins the banner so nobody wires these into an automated migration later.
+
 ## 3. Migration sequence (staged; never a big-bang replacement)
 
 | Step | File | Effect | Gate before proceeding |
@@ -72,7 +78,7 @@ Both required gates ran before this was presented as complete. **Neither returne
 
 ## 6. Testing
 
-**Automated — full suite green: 332 tests / 38 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
+**Automated — full suite green: 333 tests / 38 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
 
 | Claim | Test |
 |---|---|
@@ -102,7 +108,7 @@ Both required gates ran before this was presented as complete. **Neither returne
 
 ## 7. Production verification steps (manual, in order)
 
-Nothing below has been performed — the migrations are unapplied.
+Nothing below has been performed — the migrations are unapplied. **Staging verification was attempted and is blocked on provisioning an isolated database; see `FUNLDN_GROUP_SECURITY_STAGING_VERIFICATION.md`.** The live multi-account harness that executes most of this list automatically is `scripts/staging-room-security-suite.ts` (`pnpm staging:room-security`), which refuses to run against a production ref.
 
 1. **Apply `0001` only.** Run `pnpm tsx scripts/verify-room-security.ts` → expect stage 1, tables + definer functions present, no client write policies, RLS on.
 2. **Deploy the client** (this branch, after merge). Open `/plan/together` as account A → a room is created; confirm a row in `plan_rooms` and one in `plan_room_members`, and that the URL code is **6 characters**.
