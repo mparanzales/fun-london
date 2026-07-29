@@ -33,6 +33,49 @@ anything while the broad policies remain. They pass only after 0003.
 That contrast is the point. A suite that was only ever run against the fixed database could
 not tell you whether it was measuring the fix or measuring a broken channel.
 
+
+## Second run, 2026-07-29 (commit `477e893`) — the checks added after the first run
+
+The first run predates `AN-3`, `AN-4`, the `H-0` ordering assertion and the reworked `H-4`.
+Those were re-run against a fresh isolated stack. Realtime could not be brought up on this
+attempt (its container fails its healthcheck under colima), so this run covers the
+database-level checks only — and what it did with the Realtime checks is itself the result
+worth recording:
+
+```
+29 passed · 3 failed · 3 inconclusive · 1 skipped
+❌ [M-1] host CAN subscribe (positive control) — CHANNEL_ERROR
+❌ [M-2] member CAN subscribe (positive control) — CHANNEL_ERROR
+❌ [GATE-1] Realtime reachable — denial checks are meaningful
+⚠️  [C-3] unrelated account CANNOT subscribe — positive control failed
+⚠️  [X-3] member's NEW subscribe is denied after closure — positive control failed
+⚠️  [X-4] unrelated account still denied after closure — positive control failed
+```
+
+**With Realtime switched off entirely, the three denial checks reported INCONCLUSIVE, not
+PASS.** That is the design rule working under exactly the condition it was written for: an
+earlier version of this harness would have scored all three green here and "proved" the fix on
+a stack with no Realtime at all.
+
+Every assertion added since the first run passed against a real database:
+
+| ID | Result |
+|---|---|
+| AN-1 | PASS — `42501`, refused by grant rather than filtered to zero rows |
+| AN-3 | PASS — `42501` on `plan_room_members` |
+| AN-4 | PASS — `42501` on `plan_room_join_attempts` |
+| H-0 | PASS — `2 of 2 membership rows, B before C: true` (the ordering premise, now asserted) |
+| H-3 | PASS — promotion is not reentrant |
+| H-4 | PASS — `B → C → A → B`, the rotation fix re-verified |
+| E-1 | PASS — 0 membership rows on an expired room |
+| T-1 | PASS — throttle trips at attempt 21 |
+
+The Realtime-dependent checks (`M-1`, `M-2`, `C-3`, `X-2`, `X-3`, `X-4`) stand on the first run
+at `acc8368`, where they were exercised end to end with real WebSockets. Their logic is
+unchanged since.
+
+Also confirmed on this run: the edited `0001` applies cleanly through the migration runner.
+
 ## Full results at stage 3
 
 | ID | Area | Expectation | Result |
