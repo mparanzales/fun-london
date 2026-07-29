@@ -47,7 +47,13 @@ export type AnalyticsEvent =
   | "plan_preview_built"
   | "plan_stop_opened"
   | "plan_stash_restored"
-  | "detail_wall_dismissed";
+  | "detail_wall_dismissed"
+  // Group-room security operations (2026-07-29). Payloads carry ONLY a
+  // one-way hashed room reference (lib/room-code.ts) — never a raw room code,
+  // display name, taste map, venue choice or coordinate.
+  | "together_join_denied"
+  | "together_room_expired"
+  | "together_host_handoff";
 
 type Props = Record<string, string | number | boolean | null | undefined>;
 
@@ -73,6 +79,26 @@ function analyticsAllowed(): boolean {
 // in init's `loaded` callback so the identity is never dropped to a race.
 let pendingIdentify: string | null = null;
 
+/**
+ * Remove `room=` from any URL-shaped analytics property.
+ *
+ * Applies to $current_url, $referrer, $pathname and anything else carrying a
+ * query string. Replaced with a placeholder rather than dropped so funnels on
+ * /plan/together still work.
+ */
+function stripRoomCodes(
+  props: Record<string, unknown>,
+  _event: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...props };
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === "string" && v.includes("room=")) {
+      out[k] = v.replace(/([?&]room=)[^&#]*/gi, "$1redacted");
+    }
+  }
+  return out;
+}
+
 // Called by the consent-gated AnalyticsGate. Safe to call repeatedly: inits at
 // most once, and no-ops when there's no key configured yet (so the app runs
 // fine before the PostHog project key is added to the env).
@@ -88,6 +114,13 @@ export function initAnalytics(): void {
     capture_pageview: true, // "app open" / page views
     autocapture: true, // broad capture: clicks, inputs, etc.
     disable_session_recording: true, // explicit: no screen recordings
+    // 🧨 A Plan Together room code is a BEARER SECRET and it lives in the URL
+    // (/plan/together?room=CODE). PostHog attaches $current_url (and referrer /
+    // pathname) to EVERY captured event, including autocaptured clicks — so
+    // without this hook a code lifted from the analytics feed would be a
+    // working key to a live room, defeating the membership check. Strip it
+    // from every URL-bearing property before anything leaves the browser.
+    sanitize_properties: stripRoomCodes,
     loaded: (ph) => {
       if (!analyticsAllowed()) ph.opt_out_capturing();
       else if (pendingIdentify) {

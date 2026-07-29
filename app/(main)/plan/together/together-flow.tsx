@@ -9,12 +9,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Event, Venue } from "@/lib/types";
+import { memberFromSession, useRoom, type Member } from "@/lib/realtime/room";
+import { createRoom, joinRoom, leaveRoom, closeRoom } from "@/lib/room-action";
+import { normaliseRoomCode } from "@/lib/room-code";
 import {
-  makeMember,
-  randomRoomCode,
-  useRoom,
-  type Member,
-} from "@/lib/realtime/room";
+  failureFromJoin,
+  ROOM_FAILURE_COPY,
+  type RoomFailure,
+} from "@/lib/room-errors";
 import { venueInArea } from "@/lib/regions";
 import { isOpenAt, withinBudget } from "@/lib/plan-engine";
 import { loadMyTaste } from "@/lib/my-taste-action";
@@ -29,38 +31,88 @@ export function TogetherFlow({
   venues,
   events,
   myName,
+  myUserId,
 }: {
   venues: Venue[];
   events: Event[];
   myName: string;
+  /** The authenticated user id — the ONLY source of member identity. */
+  myUserId: string;
 }) {
   const [ready, setReady] = useState(false);
+  const [failure, setFailure] = useState<RoomFailure | null>(null);
   const codeRef = useRef<string>("");
+  const roomIdRef = useRef<string>("");
+  const hostRef = useRef<string>("");
   const meRef = useRef<Member | null>(null);
-  const isHostRef = useRef(false);
   const initedRef = useRef(false);
 
   useEffect(() => {
-    // Resolve identity + host flag exactly once. React StrictMode (dev)
-    // double-invokes this effect; on the second pass the room code is already
-    // in the URL, which would otherwise read `existing` as set and flip the
-    // creator from host → guest. The guard keeps the first decision stable
-    // (and makes us resilient to any later remount).
+    // Resolve the room exactly once. React StrictMode (dev) double-invokes
+    // this effect; the guard keeps the first decision stable.
     if (initedRef.current) return;
     initedRef.current = true;
-    const existing = new URLSearchParams(window.location.search).get("room");
-    const code = existing ?? randomRoomCode();
-    if (!existing) {
-      window.history.replaceState(null, "", `/plan/together?room=${code}`);
-    }
-    codeRef.current = code;
-    isHostRef.current = !existing; // the room's creator is the host
-    meRef.current = makeMember(myName);
-    // Viral-loop signal: a created room is a potential invite; a joined room
-    // is the K-factor payoff (someone followed a shared link in).
-    track(existing ? "together_room_join" : "together_room_create");
-    setReady(true);
-  }, [myName]);
+
+    void (async () => {
+      const raw = new URLSearchParams(window.location.search).get("room");
+      const existing = raw ? normaliseRoomCode(raw) : null;
+      // Create/join now go through the server: the DB mints the 6-char code,
+      // records membership against auth.uid(), and enforces expiry/closure.
+      // A client can no longer conjure a room by putting a code in the URL.
+      const result = existing ? await joinRoom(existing) : await createRoom();
+
+      if (!result.ok) {
+        const f = failureFromJoin(result, existing ? "join" : "create");
+        setFailure(f);
+        // No room identifier at all here: a denied join means we may not even
+        // have a room, and a code must never reach analytics (it is a bearer
+        // token — see lib/room-code.ts).
+        if (existing) track("together_join_denied", { reason: result.reason });
+        setReady(true);
+        return;
+      }
+
+      const { room } = result;
+      codeRef.current = room.code;
+      roomIdRef.current = room.id;
+      hostRef.current = room.hostUserId;
+      meRef.current = memberFromSession(myUserId, myName);
+      if (!existing) {
+        window.history.replaceState(
+          null,
+          "",
+          `/plan/together?room=${room.code}`,
+        );
+      }
+      // Viral-loop signal: a created room is a potential invite; a joined room
+      // is the K-factor payoff. Never carries the code itself.
+      // Correlate on the room's UUID, never the code: the id is useless
+      // without membership, the code IS membership.
+      track(existing ? "together_room_join" : "together_room_create", {
+        room_id: room.id,
+      });
+      setReady(true);
+    })();
+  }, [myName, myUserId]);
+
+  // Best-effort "I've left" so the roster (and host handoff) stays truthful.
+  useEffect(() => {
+    const onUnload = () => {
+      if (roomIdRef.current) void leaveRoom(roomIdRef.current);
+    };
+    window.addEventListener("pagehide", onUnload);
+    return () => window.removeEventListener("pagehide", onUnload);
+  }, []);
+
+  if (failure)
+    return (
+      <RoomFailureNotice
+        failure={failure}
+        roomCode={
+          new URLSearchParams(window.location.search).get("room") ?? undefined
+        }
+      />
+    );
 
   if (!ready || !meRef.current) {
     return (
@@ -74,27 +126,72 @@ export function TogetherFlow({
     <RoomFlow
       code={codeRef.current}
       me={meRef.current}
-      isHost={isHostRef.current}
+      roomId={roomIdRef.current}
+      initialHostUserId={hostRef.current}
       venues={venues}
       events={events}
     />
   );
 }
 
+/**
+ * Honest failure surface. Deliberately minimal — this track does NOT redesign
+ * the room UI; it replaces a silent forever-spinner with a sentence and a way
+ * out, in the existing voice and the existing type scale.
+ */
+function RoomFailureNotice({
+  failure,
+  roomCode,
+}: {
+  failure: RoomFailure;
+  roomCode?: string;
+}) {
+  const copy = ROOM_FAILURE_COPY[failure];
+  // A transport blip must retry the SAME room. Sending a joiner to a bare
+  // /plan/together would silently drop them into a new, empty room while they
+  // believed they had rejoined their friends.
+  const retriesSameRoom =
+    failure === "timeout" ||
+    failure === "channel-error" ||
+    failure === "offline";
+  const href =
+    retriesSameRoom && roomCode
+      ? `/plan/together?room=${encodeURIComponent(roomCode)}`
+      : "/plan/together";
+  return (
+    <div className="px-5 py-16 text-center">
+      <h2 className="text-[20px] font-extrabold text-heading">{copy.title}</h2>
+      <p className="mt-2 text-[13px] leading-relaxed text-muted-fg">
+        {copy.body}
+      </p>
+      {copy.action && (
+        <a
+          href={href}
+          className="mt-6 inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-[15px] font-extrabold text-primary-fg"
+        >
+          {copy.action}
+        </a>
+      )}
+    </div>
+  );
+}
+
 function RoomFlow({
   code,
   me,
-  isHost,
+  roomId,
+  initialHostUserId,
   venues,
   events,
 }: {
   code: string;
   me: Member;
-  isHost: boolean;
+  roomId: string;
+  initialHostUserId: string;
   venues: Venue[];
   events: Event[];
 }) {
-  const room = useRoom(code, me, isHost);
+  const room = useRoom(code, me, roomId, initialHostUserId);
 
   // Share MY OWN taste into the room, once. A session-gated server fetch (the
   // client can't read the service-role embeddings) → broadcast to the channel,
@@ -140,10 +237,25 @@ function RoomFlow({
     [filteredVenues, venues, room.settings],
   );
 
+  // A room can also fail AFTER it opened (expiry, host closure, a dropped
+  // subscription). Placed after every hook so the hook order never varies.
+  if (room.failure)
+    return <RoomFailureNotice failure={room.failure} roomCode={code} />;
+
   return (
     <div className="pb-4">
       {room.phase === "lobby" && (
-        <Lobby room={room} onStart={() => room.sendPhase("settings")} />
+        <Lobby
+          room={room}
+          onStart={() => room.sendPhase("settings")}
+          onCloseRoom={
+            room.isHost
+              ? () => {
+                  void closeRoom(roomId);
+                }
+              : undefined
+          }
+        />
       )}
       {room.phase === "settings" && <Settings room={room} venues={venues} />}
       {room.phase === "swipe" && (
