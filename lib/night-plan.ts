@@ -149,7 +149,15 @@ export function parseNightPlan(value: unknown): NightPlan | null {
   if (!VIBES.has(p.vibe as PlanVibe)) return null;
   if (!BUDGETS.has(p.budget as PlanBudget)) return null;
   if (p.daypart !== "day" && p.daypart !== "evening") return null;
-  if (p.startsAt !== null && typeof p.startsAt !== "string") return null;
+  // 🧨 PARSEABLE, not merely a string. `new Date("garbage")` is an Invalid
+  // Date, so an unguarded value renders "arrive ~invalid date" on every card —
+  // and, because `NaN < Date.now()` is false, the has-this-night-finished
+  // check can never fire to hide them. Guarding here covers every consumer at
+  // once rather than each call site remembering.
+  if (p.startsAt !== null) {
+    if (typeof p.startsAt !== "string") return null;
+    if (!Number.isFinite(Date.parse(p.startsAt))) return null;
+  }
   if (!Array.isArray(p.stops) || p.stops.length === 0) return null;
   if (!p.stops.every(isStop)) return null;
   const source = p.source;

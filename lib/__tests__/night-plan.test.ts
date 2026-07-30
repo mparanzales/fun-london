@@ -323,6 +323,23 @@ describe("adapters", () => {
   });
 });
 
+describe("parseNightPlan · startsAt must be usable, not merely a string", () => {
+  it("🧨 rejects an unparseable startsAt", () => {
+    // `new Date("last tuesday")` is an Invalid Date, so every card renders
+    // "arrive ~invalid date" — and because `NaN < Date.now()` is false, the
+    // has-this-night-finished check can never fire to hide them. A string
+    // typecheck alone let that straight through to the screen.
+    expect(parseNightPlan({ ...plan(), startsAt: "last tuesday" })).toBeNull();
+    expect(parseNightPlan({ ...plan(), startsAt: "" })).toBeNull();
+  });
+
+  it("accepts a real ISO instant, and null", () => {
+    const iso = new Date("2026-07-30T19:30:00.000Z").toISOString();
+    expect(parseNightPlan({ ...plan(), startsAt: iso })?.startsAt).toBe(iso);
+    expect(parseNightPlan({ ...plan(), startsAt: null })?.startsAt).toBeNull();
+  });
+});
+
 describe("hydrateStops", () => {
   const catalogue = new Map([
     ["v1", { id: "v1", name: "One" }],

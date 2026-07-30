@@ -20,6 +20,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
 import { clearSignInTrigger } from "@/lib/analytics-keys";
+import { clearAnonPlanKeys } from "@/lib/active-plan";
 import { isSignOutTransition } from "@/lib/auth-transition";
 
 const AuthUserIdContext = createContext<string | null>(null);
@@ -54,6 +55,14 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
       if (isSignOutTransition(prevIdRef.current, nextId)) {
         resetAnalyticsIdentity();
         clearSignInTrigger();
+        // 🧨 And the anonymous night, for the reason stated at the top of this
+        // effect: a session that expires, a sign-out in another tab, cleared
+        // cookies and a deleted account all reach this subscription and none
+        // of them reach the profile buttons. These keys are anon-SCOPED, so
+        // whatever survives here is what the NEXT person on this browser sees
+        // on /plan — and, because the signed-out flow re-persists what it
+        // rehydrates, what gets claimed into the next account that signs in.
+        clearAnonPlanKeys();
       }
 
       prevIdRef.current = nextId;

@@ -36,7 +36,7 @@ import {
   type PlanVibe,
   type PlanDaypart,
 } from "@/lib/plan-engine";
-import type { PlanArea } from "@/lib/regions";
+import { regionOf, type PlanArea } from "@/lib/regions";
 import {
   track,
   type SaveMode,
@@ -600,8 +600,15 @@ export function PlanFlow({
       // onto the daypart; the AREA control still cannot be mapped back (see
       // above), which is why this is a partial re-seed rather than a full one.
       setWhen(np.daypart);
+      // Only when `regionOf` resolves it. REGION_OF is a hand-maintained map
+      // over a crawl-grown catalogue, so an unmapped neighbourhood is normal —
+      // and it renders the Area chip highlighted but labelled the literal word
+      // "Area", with no drill-down, pinning the user to a selection they can
+      // neither see nor change. The engine copes (it widens the pool); the
+      // picker does not.
+      const region = np.area ? regionOf(np.area) : null;
       setAreaSel(
-        np.area && np.area !== ANYWHERE
+        region
           ? { kind: "neighbourhood", name: np.area }
           : { kind: "anywhere" },
       );
@@ -617,8 +624,11 @@ export function PlanFlow({
       if (np.source === "saved") {
         // Entries written by the build BEFORE this rule existed are still in
         // people's browsers, and returning early would leave them there —
-        // read-only stickiness for another 12 hours post-deploy.
-        clearActivePlan(owner);
+        // read-only stickiness for another 12 hours post-deploy. But clear
+        // ONLY a stored saved night: an unconditional clear meant that
+        // glancing at a saved night destroyed the unsaved one you had in
+        // progress, which is a worse bug than the one being fixed.
+        if (readActivePlan(owner)?.source === "saved") clearActivePlan(owner);
         return true;
       }
 

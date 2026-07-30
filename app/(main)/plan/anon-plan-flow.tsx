@@ -275,11 +275,10 @@ export function AnonPlanFlow({
       // "from 1:00 pm" over stops arriving at 10:00 pm, and the CLAIMED night
       // was then relinked from 13:00. The night someone made an account to
       // keep came back with different times than the one they were looking at.
-      setStartISO(
-        new Date(Math.max(Date.parse(t.whenISO), Date.now())).toISOString(),
-      );
+      const startsAt = new Date(Math.max(Date.parse(t.whenISO), Date.now()));
+      setStartISO(startsAt.toISOString());
       setStartLabel(
-        new Date(t.whenISO)
+        startsAt
           .toLocaleTimeString("en-GB", {
             hour: "numeric",
             minute: "2-digit",
@@ -383,7 +382,14 @@ export function AnonPlanFlow({
             typeof s.slug === "string" &&
             typeof s.name === "string" &&
             typeof s.rating === "number" &&
-            typeof s.dwellMins === "number",
+            typeof s.dwellMins === "number" &&
+            // role + walkToNextMins are what isStop (lib/night-plan.ts)
+            // requires. Validating a narrower set here let a drifted shape
+            // render perfectly and then fail parseNightPlan on the canonical
+            // write -- which is swallowed -- so the night looked fine and was
+            // silently unclaimable.
+            typeof s.role === "string" &&
+            (s.walkToNextMins === null || typeof s.walkToNextMins === "number"),
         )
       ) {
         window.localStorage.removeItem(ANON_RESULT_KEY);
@@ -403,9 +409,32 @@ export function AnonPlanFlow({
     // worth the confusion of a wall appearing on a fresh page load.
   }, []);
 
+  // 🧨 STOP WRITING ONCE ANOTHER TAB HAS CLAIMED THIS NIGHT. Magic links open
+  // in a NEW TAB — that is why this flow uses localStorage at all (see the
+  // header) — so the claim happens in tab B while tab A is still mounted with
+  // the night in React state and no idea anyone signed in. One Reshuffle or
+  // Edit -> Build in tab A rewrote all three anon keys, signed in, undoing the
+  // clear. The `storage` event fires in the OTHER tabs on exactly that write,
+  // so tab A learns about the claim without importing an auth hook here (which
+  // the moat allowlist forbids, correctly).
+  const claimedElsewhere = useRef(false);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (
+        (e.key === ANON_RESULT_KEY || e.key === ANON_PLAN_STASH_KEY) &&
+        e.newValue === null
+      ) {
+        claimedElsewhere.current = true;
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const stashed = useRef("");
   useEffect(() => {
     if (!result) return;
+    if (claimedElsewhere.current) return;
     try {
       const json = JSON.stringify({
         stops: result.stops.map((s) => ({

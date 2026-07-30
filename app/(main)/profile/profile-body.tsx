@@ -2,7 +2,6 @@
 
 import { resetAnalyticsIdentity } from "@/lib/analytics";
 import { FEED_SNAPSHOT_KEY } from "@/lib/feed-constants";
-import { clearAnonPlanKeys } from "@/lib/active-plan";
 
 import Link from "next/link";
 import { LegalLinks } from "@/components/legal-links";
@@ -190,12 +189,6 @@ function SignedInProfile({
     } catch {
       /* sessionStorage unavailable — nothing to clear */
     }
-    // 🧨 And the anonymous night, in every form it can take. These keys are
-    // anon-SCOPED, not owner-scoped: whatever is in them is what the next
-    // person on this browser sees on /plan, and — because the signed-out flow
-    // re-persists what it rehydrates — what gets claimed into the next account
-    // that signs in here. Same class as the saved-venues bleed in PR #129.
-    clearAnonPlanKeys();
     // Refresh the route so the Server Component re-fetches getAuthUser()
     // and renders the anonymous view.
     router.refresh();
