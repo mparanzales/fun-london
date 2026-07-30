@@ -29,7 +29,10 @@
  */
 import { parseNightPlan, type NightPlan } from "@/lib/night-plan";
 
-const PREFIX = "fl:active-plan:v1";
+/** Exported so a cross-tab listener can recognise ANY owner's slot without
+ *  knowing the uuid — the signal that somebody signed in and claimed. */
+export const ACTIVE_PLAN_PREFIX = "fl:active-plan:v1";
+const PREFIX = ACTIVE_PLAN_PREFIX;
 
 /**
  * 🧨 EVERY KEY THAT CAN HOLD THE ANONYMOUS BROWSER'S NIGHT, IN ONE PLACE.

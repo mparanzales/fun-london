@@ -407,6 +407,11 @@ export function totalMins(plan: NightPlan): number {
  * A stale night must not be restored onto the result screen under "Tonight,
  * the plan:" — see NIGHT_PLAN_TTL_MS.
  */
+/** The furthest ahead a night may legitimately be planned. `lib/plan-preview.ts`
+ *  clamps a requested start to now + 7d; this is twice that, as a sanity
+ *  ceiling on stored data rather than a second policy. */
+const MAX_LEAD_MS = 14 * 24 * 60 * 60 * 1000;
+
 export function isFresh(plan: NightPlan, now: number = Date.now()): boolean {
   // 🧨 A NIGHT GOES STALE WHEN IT IS OVER, NOT 12 HOURS AFTER IT WAS THOUGHT OF.
   //
@@ -426,7 +431,15 @@ export function isFresh(plan: NightPlan, now: number = Date.now()): boolean {
   // until its own last stop is behind us. `createdAt` remains the fallback for
   // a night with no start (the engine fails open on hours before mount).
   const start = plan.startsAt ? Date.parse(plan.startsAt) : NaN;
-  if (Number.isFinite(start)) return now < start + totalMins(plan) * 60_000;
+  if (Number.isFinite(start)) {
+    // 🧨 BOUNDED FORWARD. Without a ceiling, `now < start + duration` makes a
+    // night with a far-future start immortal — and localStorage is editable by
+    // hand, so "the server clamps to now + 7d at creation" is not a guarantee
+    // about what is on disk. Double the server's window: generous enough that
+    // no real plan is refused, finite enough that a nonsense stamp expires.
+    if (start - now > MAX_LEAD_MS) return false;
+    return now < start + totalMins(plan) * 60_000;
+  }
 
   const created = Date.parse(plan.createdAt);
   if (!Number.isFinite(created)) return false;

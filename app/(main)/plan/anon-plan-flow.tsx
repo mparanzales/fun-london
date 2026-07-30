@@ -54,6 +54,7 @@ import {
 import { AuthWall } from "@/components/auth-wall";
 import {
   WhenPicker,
+  WHENS,
   AreaPicker,
   Group,
   toISODate,
@@ -78,6 +79,7 @@ import { isStop, parseNightPlan, NIGHT_PLAN_VERSION } from "@/lib/night-plan";
 import {
   writeActivePlan,
   activePlanKey,
+  ACTIVE_PLAN_PREFIX,
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
@@ -219,10 +221,6 @@ export function AnonPlanFlow({
   };
 
   const build = async (offset: 0 | 1) => {
-    // A deliberate build is a NEW anonymous night, so it is allowed to
-    // persist even if another tab claimed the previous one. See the ref's
-    // declaration for why the latch must not be permanent.
-    claimedElsewhere.current = false;
     setBuilding(true);
     setFailure(null);
     const t = resolveAnonTiming(when, customDate, customTime);
@@ -419,11 +417,24 @@ export function AnonPlanFlow({
       // for. Each field is applied only if present, so an entry written
       // before `brief` existed degrades to today's behaviour rather than
       // wiping the controls.
+      // 🧨 VALIDATED against the same closed sets the controls offer. The
+      // stops go through the parser's own isStop; the brief was the one part
+      // of this entry taken on trust — and a bad vibe or budget makes
+      // parseNightPlan return null on the canonical write below, which is
+      // swallowed, so the sign-in claim finds nothing while the screen looks
+      // perfect. The conversion dies silently.
       if (brief) {
-        if (brief.vibe) setVibe(brief.vibe);
-        if (brief.budget) setBudget(brief.budget);
-        if (brief.areaSel) setAreaSel(brief.areaSel);
-        if (brief.when) setWhen(brief.when);
+        if (VIBES.some((v) => v.v === brief.vibe)) setVibe(brief.vibe!);
+        if (BUDGETS.includes(brief.budget as (typeof BUDGETS)[number]))
+          setBudget(brief.budget!);
+        if (
+          brief.areaSel &&
+          ["anywhere", "nearYou", "region", "neighbourhood"].includes(
+            brief.areaSel.kind,
+          )
+        )
+          setAreaSel(brief.areaSel);
+        if (WHENS.some((w) => w.v === brief.when)) setWhen(brief.when!);
         if (typeof brief.customDate === "string")
           setCustomDate(brief.customDate);
         if (typeof brief.customTime === "string")
@@ -438,10 +449,12 @@ export function AnonPlanFlow({
     } catch {
       /* corrupt or private mode — fall through to the setup screen */
     }
-    // Mount only. Deliberately does NOT restore the reshuffle counter: the
-    // server-side limit is the real perimeter (lib/plan-preview-action.ts),
-    // and a client counter that survives a refresh is neither enforceable nor
-    // worth the confusion of a wall appearing on a fresh page load.
+    // Mount only. The reshuffle counter IS restored, reversing an earlier
+    // note here: dropping it turned a tap through to a venue and back into a
+    // free extra reshuffle, which is a loophole rather than a kindness. The
+    // server-side limit (lib/plan-preview-action.ts) is the real perimeter
+    // either way, so the client counter should describe the same reality
+    // rather than a friendlier one.
   }, []);
 
   // 🧨 STOP WRITING ONCE ANOTHER TAB HAS CLAIMED THIS NIGHT. Magic links open
@@ -452,25 +465,32 @@ export function AnonPlanFlow({
   // clear. The `storage` event fires in the OTHER tabs on exactly that write,
   // so tab A learns about the claim without importing an auth hook here (which
   // the moat allowlist forbids, correctly).
-  // Reset by an explicit Build/Reshuffle below: the latch exists to stop a
-  // STALE mounted tab re-arming keys for a night that was already claimed, not
-  // to disable persistence forever. clearAnonPlanKeys() on sign-out fires the
-  // same event, so without the reset a sign-out in another tab silently killed
-  // persistence in this one for the rest of its life.
+  // One-way once a claim is seen: this tab's night now belongs to an account,
+  // and re-arming the anon keys from here would hand it to whoever is next on
+  // this browser. NOT reset by a new Build — see the listener for why that was
+  // a mistake.
   const claimedElsewhere = useRef(false);
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      // 🧨 THE CANONICAL SLOT ONLY. Watching ANON_RESULT_KEY as well looked
-      // like belt-and-braces and was a live conversion bug: only
-      // claimAnonPlan/clearAnonPlanKeys ever remove the canonical slot, but
-      // the result key is ALSO removed by ordinary TTL and shape eviction. So
-      // leaving /plan open in one tab and opening it in a second an hour later
-      // -- nobody signing in -- evicted the stale entry there, fired this
-      // event here, and permanently stopped the first tab persisting anything.
-      // Build, Save, sign up, and land on an empty setup form: exactly the
-      // moment the feature exists for. Same on any deploy that bumps
-      // ANON_RESULT_VERSION.
-      if (e.key === activePlanKey(null) && e.newValue === null) {
+      // 🧨 WATCH THE CLAIM, NOT A REMOVAL. Every earlier version of this
+      // keyed on a key being DELETED, and deletion is ambiguous: ordinary TTL
+      // eviction, a version bump and sign-out all delete anon keys without
+      // anyone signing in, and each silently disabled persistence in this tab.
+      // Resetting the latch on the next Build then reopened the original hole,
+      // because magic links open a NEW TAB, so a stale anon tab is the normal
+      // case rather than an exotic one.
+      //
+      // A claim is unambiguous and needs no marker key: claimAnonPlan WRITES
+      // the owner's slot immediately after clearing the anon one. An
+      // owner-scoped key appearing WITH A VALUE means "somebody signed in on
+      // this browser and took the night", and nothing else produces it —
+      // sign-out and eviction only ever remove.
+      if (
+        e.key &&
+        e.key.startsWith(ACTIVE_PLAN_PREFIX) &&
+        e.key !== activePlanKey(null) &&
+        e.newValue !== null
+      ) {
         claimedElsewhere.current = true;
       }
     };

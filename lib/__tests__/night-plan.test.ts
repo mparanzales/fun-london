@@ -365,6 +365,10 @@ describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
       "no isSignOutTransition block in auth-user-context",
     ).not.toBeNull();
     expect(block![1]).toContain("clearAnonPlanKeys()");
+    // The departing account's OWN slot too. Without this line the fix for it
+    // could be refactored away with the suite green — the same "green test,
+    // live data left behind" shape this describe block exists for.
+    expect(block![1]).toContain("clearActivePlan(prevIdRef.current)");
   });
 
   it("does not depend on the profile sign-out buttons", () => {
@@ -484,6 +488,17 @@ describe("isFresh · a night is stale when it is OVER, not 12h after it was thou
     expect(
       isFresh(plan({ startsAt: nextSaturday, createdAt: builtThreeDaysAgo })),
     ).toBe(true);
+  });
+
+  it("🧨 rejects an absurd future start rather than living forever", () => {
+    // localStorage is editable by hand, so the server's now+7d clamp says
+    // nothing about what is on disk. Unbounded, `now < start + duration`
+    // would make a stamp of the year 3000 permanently fresh.
+    const yearsAway = new Date(Date.now() + 400 * 24 * H).toISOString();
+    expect(isFresh(plan({ startsAt: yearsAway }))).toBe(false);
+    // ...but a legitimate week-ahead plan is still fine.
+    const nextWeek = new Date(Date.now() + 6 * 24 * H).toISOString();
+    expect(isFresh(plan({ startsAt: nextWeek }))).toBe(true);
   });
 
   it("a night in progress keeps its remaining stops", () => {

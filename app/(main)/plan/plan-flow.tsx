@@ -389,6 +389,12 @@ export function PlanFlow({
   // remove, degrading the entry point to the whole saved-night loop. The
   // signature was already computed inside onSave for analytics; it just never
   // reached the button.
+  // Known limits, both failing SAFE: the signature is venue ids in order, so
+  // the same three venues rebuilt for a different DAY read as already saved
+  // (plans stores no start time to tell them apart); and it is false while
+  // loadSavedPlans is still in flight, so a fast double-tap can still
+  // duplicate. Under-saving is recoverable in one tap; the duplicate rows this
+  // replaced were not recoverable at all.
   const planSignature = display.steps.map((s) => s.venue.id).join("|");
   const alreadySaved = savedPlans.some(
     (p) => p.steps.map((s) => s.venueId).join("|") === planSignature,
@@ -631,10 +637,25 @@ export function PlanFlow({
       // TONIGHT: different venues, different opening-hours filtering, and no
       // date anywhere on screen to reveal the swap. startsAt is already
       // stored; the controls just were not being fed from it.
+      // 🧨 Seed the clock whenever the night was planned for a SPECIFIC time,
+      // not only when that time is on another day. Gating on the date alone
+      // meant a night built for today at 22:00 restored as `when: "evening"`
+      // and reshuffled from 19:00 — a silent three-hour swap, the same class
+      // of bug this block exists to fix, just inside one day.
+      //
+      // A "Right now" night is the exception: its start is its build time, so
+      // it must keep tracking the live clock rather than pinning to a stamp
+      // that is already going stale. Distinguishable because for that night
+      // and no other, startsAt ~= createdAt.
       const startDate = np.startsAt ? new Date(np.startsAt) : null;
-      const startsToday =
-        !startDate || toISODate(startDate) === toISODate(new Date());
-      if (startDate && !startsToday) {
+      const wasRightNow =
+        !!startDate &&
+        Math.abs(startDate.getTime() - Date.parse(np.createdAt)) < 2 * 60_000;
+      // A night still running after midnight would seed YESTERDAY, below the
+      // picker's floor, and then plan for a time already past.
+      const inThePast =
+        !!startDate && toISODate(startDate) < toISODate(new Date());
+      if (startDate && !wasRightNow && !inThePast) {
         setWhen("custom");
         setCustomDate(toISODate(startDate));
         setCustomTime(
