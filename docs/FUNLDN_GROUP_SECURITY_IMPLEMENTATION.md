@@ -80,6 +80,8 @@ Practical consequences:
 | 2 | *(deploy the client)* | The app starts creating/joining membership records, so the new predicate has rows to match. | Rooms work as before; new rows appear in `plan_rooms` |
 | 3 | `supabase/manual/0002_…` | **Adds** membership-scoped read+write policies **alongside** the broad ones. Postgres ORs permissive policies, so this cannot break a live room — it is the dual-run checkpoint. | Script reports **stage 2 (DUAL-RUN)**; two-account test passes (§6) |
 | 4 | `supabase/manual/0003_…` | **Drops** the two broad `plan-%` policies. This is the only step that removes access. | `EXPECT_STAGE=3 pnpm tsx scripts/verify-room-security.ts` exits 0 — it asserts the stage reached, that **no** unscoped policy of any name remains, and the function grants |
+| 5a | 🧨 **`0004_server_side_room_codes.sql` — APPLY BEFORE MERGING THE CLIENT** | The branch client calls `create_plan_room()` with **no argument**. Against a database without 0004 that is `PGRST202` and room creation is dead for everyone. The shim protects old-client/new-DB, **not** new-client/old-DB. Apply to production *and* the dev project (PR previews point at dev), and let PostgREST reload its schema cache, before the merge. | Gate below reports `0004 applied: exactly one create_plan_room, with a DEFAULTed parameter` |
+| 5b | `0004_server_side_room_codes.sql` (what it does) | **Hygiene, post-cutover.** Moves room-code generation into the database so a collision can no longer answer "does this room exist?". Additive: adds one function, replaces two, drops nothing. | Guard tests in `scripts/__tests__/room-hygiene.test.ts`; behaviour proven on a throwaway Postgres |
 
 ## 4. Policies (after step 4)
 
@@ -99,6 +101,11 @@ No client-facing write policy exists on either new table by design.
 - **After 0001 or 0002 (nothing removed yet):** `drop policy if exists "plan room members read"/"plan room members write" on realtime.messages;` then `drop table public.plan_room_join_attempts, public.plan_room_members, public.plan_rooms cascade;` and drop the nine functions. **Three** tables, not two — `plan_room_join_attempts` stores user ids, so a rollback that forgets it leaves personal data behind. Behaviour returns to today's exactly.
 - **After 0003 (access removed):** re-create the two broad policies — their verbatim text is kept in the header of `supabase/manual/0003_…` precisely so a rollback needs no archaeology. This restores the old (permissive) behaviour in one statement pair while the cause is investigated.
 - **Client rollback:** revert the branch. The client tolerates a missing room record by surfacing an honest failure rather than crashing, but the intended rollback is git-level, not partial.
+
+### Rollback for 0004
+
+`create or replace` the previous bodies from git history. It drops nothing and
+touches no table, policy or grant, so there is no data to restore.
 
 ## 5b. Review findings and what changed because of them
 
@@ -187,6 +194,45 @@ Nothing below has been performed — the migrations are unapplied. **Staging ver
 9. **Host handoff.** With A and B in a room, close A's tab; after ~30 s B must become host on every device (check `host_user_id` flipped to B, and only once).
 10. **Rate limit.** Attempt >20 joins in 10 minutes with one account → later attempts return the denied state.
 11. **Cleanup.** Delete the test rooms (`delete from plan_rooms where code in (...)`), or leave them to expire and be purged.
+
+## 7b. Hygiene follow-up (branch `fix/room-hygiene`, not yet applied)
+
+Three items that the cutover deliberately left open, now addressed:
+
+**The room-code existence oracle is closed.** `create_plan_room(p_code text)`
+took the code from its caller and leaned on the unique constraint, so `23505`
+answered "does room ABC234 exist?" at unlimited rate, entirely bypassing the
+20-per-10-minutes throttle on `join_plan_room` — the stated enumeration
+perimeter had a door beside it. `0004` mints the code server-side from
+`extensions.gen_random_bytes`, retries collisions internally, and raises a
+generic error that names no code. The parameter is retained, DEFAULTED and IGNORED — one signature, not two
+overloads, so PostgREST has no payload-key routing to resolve. That keeps the
+currently deployed client working; it is dropped once the server log stops
+reporting callers that still send it. Proven on a throwaway Postgres 17: the shim
+returns a different code than the one passed, and a forced permanent collision
+raises `could not create room`, not `23505`.
+
+**The purge is scheduled.** `purge_expired_plan_rooms()` had no caller at all,
+so `plan_room_members` — a record of who planned a night with whom, and when —
+accumulated forever. It now runs from the existing daily `maintenance.yml` at
+03:00 UTC, on the existing service-role secret, under the existing failure
+alerting. Retention (7 days past expiry) stays in the SQL so the script cannot
+widen it, logs are counts only, and the run fails loudly if rows were eligible
+but nothing was purged.
+
+**The verification scripts run again, with no SQL-execution RPC.**
+`verify-room-security.ts` opens a direct Postgres connection with the session
+pinned `default_transaction_read_only`, so the server refuses any write from
+that path. That is strictly stronger than the rejected `exec_sql_readonly`
+helper, whose "only a SELECT is possible" defence was defeated by
+`select public.purge_expired_plan_rooms()`; under the read-only session that
+exact statement now fails with `cannot execute DELETE in a read-only
+transaction`. `verify-plan.ts` and `verify-feed-rank.ts` were broken by a
+*transitive* `import "server-only"` through `lib/taste-feed.ts`, so they could
+not be repaired by editing the scripts; they now run under a separate
+`tsconfig.scripts.json` that aliases the specifier to the repo's existing test
+stub. That alias is deliberately absent from `tsconfig.json`, because Next
+reads that file and it could silently disable the client-bundle guard.
 
 ## 8. Remaining limitations (honest)
 

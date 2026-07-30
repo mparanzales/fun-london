@@ -392,9 +392,12 @@ async function main() {
     );
 
     // ── A creates a room ────────────────────────────────────────────────
-    const code = randomCode();
+    // 🧨 No argument: 0004 mints the code server-side, and the code it returns
+    // is the ONLY valid one. Passing our own and then joining with it — which
+    // this suite used to do — silently breaks the moment 0004 lands, because
+    // join_plan_room returns NULL *without an error* for an unknown code.
     const { data: room, error: createErr } = await A.client
-      .rpc("create_plan_room", { p_code: code })
+      .rpc("create_plan_room")
       .single<{
         id: string;
         code: string;
@@ -406,9 +409,10 @@ async function main() {
       "room create",
       "host creates a room via RPC",
       verdict(!createErr && !!room),
-      createErr ? safeErr(createErr) : `room ${redact(code)}`,
+      createErr ? safeErr(createErr) : `room ${redact(room?.code ?? "")}`,
     );
     if (!room) throw new Error("no room — cannot continue");
+    const code = room.code;
     roomIds.push(room.id);
     record(
       "R-2",
@@ -432,7 +436,7 @@ async function main() {
     );
 
     const { data: joined, error: joinErr } = await B.client
-      .rpc("join_plan_room", { p_code: code })
+      .rpc("join_plan_room", { p_code: room.code })
       .maybeSingle<{ id: string }>();
     record(
       "R-5",
@@ -594,10 +598,9 @@ async function main() {
     );
 
     // ── HOST HANDOFF (before the throttle test, which burns an account) ──
-    const hoCode = randomCode();
     const { data: hoRoom } = await A.client
-      .rpc("create_plan_room", { p_code: hoCode })
-      .single<{ id: string }>();
+      .rpc("create_plan_room")
+      .single<{ id: string; code: string }>();
     if (!hoRoom) {
       record(
         "H-0",
@@ -632,10 +635,10 @@ async function main() {
     if (hoRoom) {
       roomIds.push(hoRoom.id);
       const { error: bJoinErr } = await B.client.rpc("join_plan_room", {
-        p_code: hoCode,
+        p_code: hoRoom.code,
       });
       const { error: cJoinErr } = await C.client.rpc("join_plan_room", {
-        p_code: hoCode,
+        p_code: hoRoom.code,
       });
       // `join_plan_room` returns NULL *without an error* for an unknown, closed
       // or expired code, so "no error" is not evidence that anybody joined —
@@ -899,10 +902,9 @@ async function main() {
     await cFresh.client.realtime.disconnect();
 
     // ── EXPIRY ──────────────────────────────────────────────────────────
-    const expCode = randomCode();
     const { data: expRoom } = await A.client
-      .rpc("create_plan_room", { p_code: expCode })
-      .single<{ id: string }>();
+      .rpc("create_plan_room")
+      .single<{ id: string; code: string }>();
     if (!expRoom) {
       // An unmet fixture precondition is INCONCLUSIVE, never SKIP. A SKIP does
       // not affect the exit code, so recording one here meant the expiry
@@ -929,7 +931,7 @@ async function main() {
         .update({ expires_at: new Date(Date.now() - 60_000).toISOString() })
         .eq("id", expRoom.id);
       const { data: expJoin } = await B.client
-        .rpc("join_plan_room", { p_code: expCode })
+        .rpc("join_plan_room", { p_code: expRoom.code })
         .maybeSingle();
       // Assert the EFFECT, not the payload. A plpgsql function declared
       // `returns public.plan_rooms` that returns NULL comes back over PostgREST

@@ -36,12 +36,23 @@ const M2 = "0002_realtime_membership_policies.sql";
 const M3 = "0003_drop_broad_realtime_policies.sql";
 
 describe("migration sequence", () => {
-  it("only the runner-applicable migration sits in migrations/", () => {
-    expect(
-      readdirSync(DIR)
-        .filter((f) => f.endsWith(".sql"))
-        .sort(),
-    ).toEqual([M1]);
+  it("only runner-applicable migrations sit in migrations/", () => {
+    // The invariant is NOT "exactly one file" — it is that nothing needing
+    // owner-level execution is in the runner's numbered chain, because a
+    // `db push` that aborts partway through is worse than a manual step.
+    const inChain = readdirSync(DIR)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    expect(inChain).toEqual(["0001_plan_rooms.sql", "0004_server_side_room_codes.sql"]);
+    for (const f of inChain) {
+      const sql = readFileSync(join(DIR, f), "utf8")
+        .split("\n")
+        .filter((l) => !l.trimStart().startsWith("--"))
+        .join("\n");
+      expect(sql, `${f} must not touch realtime.messages`).not.toContain(
+        "realtime.messages",
+      );
+    }
   });
 
   it("the owner-level files sit in supabase/manual/, out of the runner's chain", () => {
@@ -436,9 +447,9 @@ describe("staging-harness guards (behaviour, not spelling)", () => {
     // It loads .env.local, so without this it would happily certify whatever
     // that file points at — and during the staging run it pointed at a local
     // stack. A gate that does not say what it inspected is not a gate.
-    expect(verify).toContain("new URL(targetUrl).host");
+    expect(verify).toContain("new URL(dbUrl).host");
     expect(verify).toMatch(/Target: \$\{targetHost\}/);
-    expect(verify).toContain("isLoopback(targetUrl) && process.env.EXPECT_STAGE");
+    expect(verify).toMatch(/isLoopback\(dbUrl\)\s*&&\s*rawExpected/);
     expect(verify).toContain("ALLOW_LOCAL");
   });
 

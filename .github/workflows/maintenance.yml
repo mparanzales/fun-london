@@ -207,3 +207,96 @@ jobs:
                 labels: ['cron-failure'],
               });
             }
+
+  purge-plan-rooms:
+    name: purge expired Plan Together rooms
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # 🧨 A SEPARATE JOB on purpose. This is a RETENTION obligation over a social
+    # graph (plan_room_members records who planned a night with whom, and when),
+    # and it must not be coupled to anything that can fail for unrelated
+    # reasons. As a trailing step of refresh-venues it would be skipped whenever
+    # the Places-dependent steps ahead of it failed — and the Google credits
+    # have been exhausted since 2026-07-23, so that is the likely case, not the
+    # unlikely one. The alert would then read "refresh failed", never
+    # "retention did not run".
+    #
+    # It needs no Google key, no R2 credentials, and none of the 15-minute
+    # budget the MiniLM download requires.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Matches the other cron workflows: @supabase/supabase-js constructs a
+          # realtime client at import, which needs native WebSocket (Node 22).
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Purge
+        # Deletes rooms more than 7 days past expiry; members follow by CASCADE
+        # and the throttle ledger is swept inside the same function, so the
+        # retention window lives in ONE place (the SQL) and this step cannot
+        # widen it. Output is COUNTS ONLY — never a room code, topic, user id or
+        # email, because Actions logs outlive the rows they describe.
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+        run: |
+          set -o pipefail
+          pnpm purge-plan-rooms 2>&1 | tee purge-rooms.log
+
+      - name: Render step summary
+        if: always()
+        run: |
+          {
+            echo "## Plan Together room purge"
+            echo ""
+            echo '```'
+            if grep -q "─── SUMMARY ───" purge-rooms.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' purge-rooms.log
+            else
+              tail -20 purge-rooms.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Alert on failure
+        # Job-level alerting does not span jobs, so this job carries its own.
+        # Retention failing silently is the whole thing we are guarding against.
+        if: failure() || cancelled()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `🤖 cron failing: ${context.workflow} (room purge)`;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'cron-failure',
+            });
+            const existing = open.data.find((i) => i.title === title);
+            const body = `Plan Together room purge failed — retention did NOT run: ${runUrl}`;
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['cron-failure'],
+              });
+            }
