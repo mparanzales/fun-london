@@ -208,17 +208,22 @@ perimeter had a door beside it. `0004` mints the code server-side from
 generic error that names no code. The parameter is retained, DEFAULTED and IGNORED — one signature, not two
 overloads, so PostgREST has no payload-key routing to resolve. That keeps the
 currently deployed client working; it is dropped once the server log stops
-reporting callers that still send it. Proven on a throwaway Postgres 17: the shim
-returns a different code than the one passed, and a forced permanent collision
-raises `could not create room`, not `23505`.
+reporting callers that still send it. Proven on a throwaway Postgres 17: a caller-supplied code is
+ignored (the function returns a different one), a forced permanent collision
+raises `could not create room` rather than `23505`, and the migration aborts
+loudly if `pgcrypto` is absent instead of applying clean and failing at runtime.
 
 **The purge is scheduled.** `purge_expired_plan_rooms()` had no caller at all,
 so `plan_room_members` — a record of who planned a night with whom, and when —
-accumulated forever. It now runs from the existing daily `maintenance.yml` at
-03:00 UTC, on the existing service-role secret, under the existing failure
-alerting. Retention (7 days past expiry) stays in the SQL so the script cannot
-widen it, logs are counts only, and the run fails loudly if rows were eligible
-but nothing was purged.
+accumulated forever. It now runs from `maintenance.yml` at 03:00 UTC in its
+OWN job — as a trailing step of the venue refresh it would have been skipped
+whenever an earlier Places step failed, and those credits have been exhausted
+since 2026-07-23, so the alert would have read "refresh failed" rather than
+"retention did not run". The job carries its own failure alerting, since
+job-level alerting does not span jobs. Both sweeps (rooms and the throttle
+ledger) live INSIDE `purge_expired_plan_rooms()`, so the retention window has
+one home and the script performs no deletes at all. Logs are counts only, and
+the run fails loudly if rows were eligible but nothing was purged.
 
 **The verification scripts run again, with no SQL-execution RPC.**
 `verify-room-security.ts` opens a direct Postgres connection with the session
