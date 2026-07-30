@@ -177,12 +177,15 @@ What has actually been checked, and what has not. Nothing below is inferred.
 | Permanent key is read-only | ✅ **proven** | POST to `/dashboards/` and `/insights/` both `403 permission_denied`, naming the missing write scopes. Nothing created. |
 | `venue_save`, `venue_unsave` | ✅ **counted** | Real counts read back from the project on 2026-07-30, not just observed on the wire. |
 | `together_room_create`, `together_room_join` | ✅ **counted** | Both firing, confirmed by `pnpm posthog:verify` on 2026-07-30 against the post-#187 secure environment. **No room code was exposed doing it:** the verifier counts events and never reads a property. This closes the item that was pending staging verification. |
-| #189's ten new events | ⏳ **all zero, as expected** | Checked over 90 days on 2026-07-30: every one reads `never`. #189 merged the same afternoon, so production has not yet had traffic through those paths. This is why Dashboard 5 stays on proxies. Re-run `pnpm posthog:verify -- --all` in a few days. |
+| #189's ten new events | ⏳ **still not arriving from real users** | Re-checked 2026-07-30 after #189 deployed. `plan_setup_started` shows exactly ONE event, and it is **mine**, from the probe that proved #189 was live. Nothing organic. Dashboard 5 therefore stays on proxies. |
+| #189's ten new events (earlier note) | ⏳ | Checked over 90 days on 2026-07-30: every one reads `never`. #189 merged the same afternoon, so production has not yet had traffic through those paths. This is why Dashboard 5 stays on proxies. Re-run `pnpm posthog:verify -- --all` in a few days. |
 | `sign_in_complete` | 🔎 **0 over 90 days** | Empirical confirmation of the bug #189 fixed: `SignInTracker` mounted before `AnalyticsGate`, so the event was dropped before PostHog initialised. It has literally never arrived. Expect it to start appearing now. |
 | Permanent read-only key | ✅ **created and working** | Created 2026-07-30. Never printed, never committed. |
-| Temporary provisioning key | ⏳ **created, used once, awaiting revocation** | Needs only `dashboard:write` + `insight:write` (see the note below on `POSTHOG_PROJECT_ID`). Delete it and prove it dead with `pnpm posthog:revoked-check`. |
-| Dashboards provisioned | ✅ **done 2026-07-30** | 6 dashboards, 26 insights. Verified **against the live project**, not from the script's own scoreboard: 4+4+5+4+5+4 = 26 insights, no duplicate dashboard names. |
-| Provisioning is idempotent | ✅ **proven** | Second run: `dashboards_created: 0`, `dashboards_reused: 6`, `insights_created: 0`, `insights_updated: 26`. |
+| Temporary provisioning key | ⏳ **used, awaiting revocation IN THE CONSOLE** | 🧨 It cannot be revoked through the API: PostHog answers `GET /api/personal_api_keys/` with *"This action does not support personal API key access"*, by design. Key management requires a logged-in session, so this is a console action and no scope change would help. Delete it at `/settings/user-api-keys`, then prove it dead with `pnpm posthog:revoked-check` (exit 0 = a real 401/403; exit 2 = nothing was tested). |
+| Dashboards provisioned | ✅ **done 2026-07-30** | 6 dashboards, 26 insights. Verified **against the live project**, not from the script's own scoreboard: 4+4+5+4+5+4 = 26, no duplicate dashboard names, no duplicate insight names. |
+| Provisioning is idempotent | ✅ **proven twice** | Two further runs, both `dashboards_created: 0, dashboards_reused: 6, insights_created: 0, insights_updated: 26`. |
+| Filters and date ranges | ✅ **reviewed live** | All 18 visualisation insights carry `dateRange: -30d` and their breakdowns; the 8 HogQL tables carry their own window in SQL. 18 + 8 = 26. ⚠️ A first pass reported all of them as missing a date range: PostHog wraps `TrendsQuery`/`FunnelsQuery` in an `InsightVizNode`, so the range sits at `query.source.dateRange`, one level deeper than the naive check looked. The checker was wrong, not the dashboards. |
+| Read-only key cannot write | ✅ **re-proven 2026-07-30** | POST to `/dashboards/` and `/insights/` both 403. |
 | `fl_probe_manual` excluded | ✅ **by construction, and confirmed live** (0 insights in the project reference it) | Every one of the 26 insights is scoped to explicit event names, so an unnamed event cannot be swept in. Pinned by `scripts/__tests__/posthog-dashboards.test.ts`. A project-level filter is still worth adding in the PostHog UI for ad-hoc exploration. |
 | Verifier covers every event | ✅ | It no longer keeps a hand-maintained list. It reads the `AnalyticsEvent` union from `lib/analytics.ts` at runtime and refuses to run if the parse returns an implausibly small list. The old hand-list had drifted to **13 of 33 events missing**. |
 
@@ -199,6 +202,18 @@ after creating two dashboards. That was harmless *because provisioning is
 idempotent*: shortening them and re-running reused what existed and continued.
 Had it not been idempotent, the recovery would have been manual cleanup. Keep
 long-form caveats in this repository's docs and keep the in-product text short.
+
+### Test data this work put into the production project
+
+Disclosed rather than left for someone to find:
+
+| What | Where from | Action |
+| --- | --- | --- |
+| `fl_probe_manual` (distinct_id `fl-cdp-probe`) | Proving the capture endpoint was reachable, 2026-07-29 | Excluded from all 26 insights by construction; a test asserts it |
+| One `plan_setup_started` + `plan_preview_built` | Proving #189 was actually deployed to production | Negligible, but it is why that event reads 1 and not 0 |
+| `localhost:3011` URLs, and a synthetic room code `ZZTST9` inside `$heatmap_data` | The leak audit for the invite fix. **The dev server uses the production `phc_` key**, so local events land in the real project. `ZZTST9` is not a real room. | Worth a PostHog filter excluding `$current_url` containing `localhost`, so local development never pollutes product numbers again |
+
+The last row is the one worth acting on: nothing stops any local `pnpm dev` session from writing into production analytics.
 
 ## Known limitations
 
