@@ -12,17 +12,27 @@ import {
   platformLabel,
   type ReserveTarget,
 } from "@/lib/booking-link";
-import { track } from "@/lib/analytics";
+import { track, type EntrySurface } from "@/lib/analytics";
 import type { Venue } from "@/lib/types";
 
 export function ReserveSheet({
   venue,
   target,
   onClose,
+  fromPlan = false,
+  stopIndex = null,
+  entrySurface,
 }: {
   venue: Venue;
   target: ReserveTarget;
   onClose: () => void;
+  // Booking attribution, all optional so the single render site is the only
+  // file that has to change. Resolved on the venue page from a one-shot
+  // sessionStorage handoff, never from the URL (a query param there would opt
+  // the route out of static rendering and kill the /anon ISR cache).
+  fromPlan?: boolean;
+  stopIndex?: 0 | 1 | 2 | null;
+  entrySurface?: EntrySurface;
 }) {
   const router = useRouter();
   // Default to *London's* today, not UTC's. toISOString() is UTC, so between
@@ -98,6 +108,13 @@ export function ReserveSheet({
       venue: venue.slug,
       platform: target.platform,
       party,
+      // Did this booking come out of a built night, or off a standalone venue
+      // page? The whole "plan the night" thesis rests on the answer.
+      from_plan: fromPlan,
+      // Only meaningful when it came from a plan. `undefined` is stripped by
+      // the analytics layer, so no null sentinel is needed.
+      stop_index: fromPlan && stopIndex !== null ? stopIndex : undefined,
+      entry_surface: entrySurface,
     });
     // Open the booking site in a new tab on the user gesture (not blocked).
     if (typeof window !== "undefined") {

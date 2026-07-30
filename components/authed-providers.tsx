@@ -23,8 +23,14 @@ export function AuthedProviders({ children }: { children: React.ReactNode }) {
         <BookingsProvider authUserId={authUserId}>{children}</BookingsProvider>
       </SavedProvider>
       <ConsentBanner />
-      <SignInTracker authUserId={authUserId} />
+      {/* 🧨 ORDER MATTERS. AnalyticsGate is the only caller of initAnalytics(),
+          and React flushes sibling effects in tree order. With SignInTracker
+          first, its track("sign_in_complete") ran while posthogReady was still
+          false, so the event reached Vercel and never reached PostHog. The
+          pending-event queue in lib/analytics.ts now covers this race too, but
+          the order is the cheap half of the fix: keep AnalyticsGate above. */}
       <AnalyticsGate />
+      <SignInTracker authUserId={authUserId} />
     </>
   );
 }

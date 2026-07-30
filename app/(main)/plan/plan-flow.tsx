@@ -8,7 +8,7 @@
 //   • "Try another combination" reshuffles within the same constraints.
 //   • Signed-in users can save a night to public.plans and re-open it.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   type LucideIcon,
@@ -37,7 +37,9 @@ import {
   type PlanDaypart,
 } from "@/lib/plan-engine";
 import type { PlanArea } from "@/lib/regions";
-import { track } from "@/lib/analytics";
+import { track, type SaveMode, type SwapMethod } from "@/lib/analytics";
+import { saveFailReason } from "@/lib/analytics-reasons";
+import { writePlanHandoff, writeSignInTrigger } from "@/lib/analytics-keys";
 import { recordSignal } from "@/lib/signals";
 import { googleMapsWalkingUrl } from "@/lib/plan-maps";
 import { PlanRouteMapLive } from "./plan-route-map-live";
@@ -241,6 +243,21 @@ export function PlanFlow({
     "idle",
   );
 
+  // ── Analytics-only refs (no product behaviour depends on these) ──────
+  // Fire-once latch for plan_setup_started. A ref, not state: flipping it must
+  // not re-render, and it must survive the input edits that reset saveState.
+  const setupStartedRef = useRef(false);
+  // Save attempt counter. Lives outside saveState because saveState is reset to
+  // "idle" by every input edit and by a reshuffle, so it cannot count retries.
+  const saveAttemptRef = useRef(0);
+  // True when this night began life as an anonymous preview that was stashed
+  // through the sign-in round trip. Replaces a SaveMode value that could never
+  // be produced (the Save button is unmounted for a restored plan).
+  const anonOriginRef = useRef(false);
+  // Whether the saved-plans list actually loaded. loadSavedPlans swallows its
+  // error, so without this a failed load would make every save look like "new".
+  const savedListLoadedRef = useRef(false);
+
   // Current time, set AFTER mount so the open-now plan filter can't cause an
   // SSR/client hydration mismatch: the server renders fail-open (when=undefined),
   // then the client applies real opening hours once mounted.
@@ -301,8 +318,10 @@ export function PlanFlow({
       .order("created_at", { ascending: false });
     if (error) {
       console.error("[plans] load failed:", error);
+      savedListLoadedRef.current = false;
       return;
     }
+    savedListLoadedRef.current = true;
     setSavedPlans((data as SavedPlanRow[]) ?? []);
   }, [authUserId]);
 
@@ -313,12 +332,54 @@ export function PlanFlow({
   const onSave = async () => {
     if (!authUserId || saveState === "saving") return;
     setSaveState("saving");
+
+    // ── Analytics: the save split ────────────────────────────────────
+    // Coarse shape shared by all three save events. Deliberately identical to
+    // the prop bag the legacy plan_save already sent, so a dashboard can be
+    // migrated without losing a dimension. No title, no venue names, no ids.
+    const swapCount = Object.values(swaps).filter((v) => v >= 0).length;
+    const signature = display.steps.map((s) => s.venue.id).join("|");
+    const alreadySaved = savedPlans.some(
+      (p) => p.steps.map((s) => s.venueId).join("|") === signature,
+    );
+    const mode: SaveMode = alreadySaved
+      ? "duplicate"
+      : swapCount > 0
+        ? "resave_after_swap"
+        : offset > 0
+          ? "resave_after_reshuffle"
+          : "new";
+    const attempt = ++saveAttemptRef.current;
+    const saveProps = {
+      area: display.area,
+      vibe: computed.vibe,
+      budget: computed.budget,
+      daypart: computed.daypart,
+      stops: display.steps.length, // legacy spelling, kept for continuity
+      stop_count: display.steps.length,
+      swapped: swapCount,
+      poolStage: computed.poolStage, // legacy spelling
+      pool_stage: computed.poolStage,
+      poolSize: computed.poolSize, // legacy spelling
+      pool_size: computed.poolSize,
+      mode,
+      attempt,
+      anon_origin: anonOriginRef.current,
+      saved_list_loaded: savedListLoadedRef.current,
+    };
+    // Intent. Fires AFTER the guard above, so the count can be compared
+    // directly against the insert count. Firing above the guard would
+    // double-count a double tap that the guard already swallowed.
+    track("plan_save_tapped", saveProps);
+
     const supabase = createClient();
     // Save what's ON SCREEN — i.e. with any per-stop swaps applied (`display`).
     const names = display.steps.map((s) => s.venue.name).join(" → ");
     const where = display.area === ANYWHERE ? "London" : display.area;
     const kind = computed.daypart === "day" ? "day out" : "night";
-    const { error } = await supabase.from("plans").insert({
+    // `status` is destructured purely to bucket a failure (0 = never left the
+    // device, 401/403 = expired session, 429 = throttled, 5xx = server).
+    const { error, status } = await supabase.from("plans").insert({
       user_id: authUserId,
       title: display.title,
       neighbourhood: display.area,
@@ -333,20 +394,26 @@ export function PlanFlow({
     if (error) {
       console.error("[plans] save failed:", error);
       setSaveState("idle");
+      // Only the mapped category and the SQLSTATE code. Never error.message,
+      // never error.details (a full stack trace on the network path), never
+      // error.hint. See lib/analytics-reasons.ts.
+      track("plan_save_failed", {
+        ...saveProps,
+        reason: saveFailReason(error.code, status),
+        pg_error_code: typeof error.code === "string" ? error.code : "none",
+      });
       return;
     }
     setSaveState("saved");
     recordSignal("plan_completed", { surface: "plan" });
-    track("plan_save", {
-      area: display.area,
-      vibe: computed.vibe,
-      budget: computed.budget,
-      daypart: computed.daypart,
-      stops: display.steps.length,
-      swapped: Object.values(swaps).filter((v) => v >= 0).length,
-      poolStage: computed.poolStage,
-      poolSize: computed.poolSize,
-    });
+    // Fires only after the insert came back clean, so this is confirmed
+    // persistence rather than intent.
+    track("plan_save_succeeded", saveProps);
+    // DEPRECATED dual-emit until 2026-09-30. Every existing PostHog insight and
+    // Vercel series keys on "plan_save", so it cannot be renamed in place. New
+    // dashboards must count plan_save_succeeded and must NOT also count this,
+    // or every save appears twice.
+    track("plan_save", saveProps);
     void loadSavedPlans();
   };
 
@@ -440,6 +507,10 @@ export function PlanFlow({
         steps,
       });
       setStep("result");
+      // This night came from an anonymous preview. Recorded as a boolean on the
+      // save events rather than a SaveMode value, because the Save button is
+      // unmounted while a restored plan is on screen (see the report in the PR).
+      anonOriginRef.current = true;
       track("plan_stash_restored", { stops: steps.length });
     } catch {
       /* corrupt stash — ignore */
@@ -451,6 +522,27 @@ export function PlanFlow({
   // Editing any input invalidates a re-opened saved plan, the saved flag, and
   // any per-stop swaps (the base plan is about to change).
   const editInputs = (fn: () => void) => {
+    // plan_setup_started, fired ONCE. editInputs is the single choke point for
+    // every setup control on this surface (When, Where, Vibe, Budget) and is
+    // called from nothing else, so the latch here cannot be reached by a page
+    // load, by the stash/saved-plan restore paths, or by the Build button.
+    //
+    // Known and accepted: the latch is per-MOUNT. A visitor who builds
+    // anonymously, signs in, and lands on a fresh PlanFlow can produce a second
+    // event. And a visitor who accepts every default emits plan_generate with
+    // no preceding setup event, so setup -> generate is a leaky funnel by
+    // construction. Both are documented in the event dictionary; neither is
+    // fixable without firing on Build, which would defeat the point.
+    if (!setupStartedRef.current) {
+      setupStartedRef.current = true;
+      track("plan_setup_started", {
+        plan_surface: "solo",
+        area_kind: areaSel.kind,
+        vibe,
+        budget,
+        when,
+      });
+    }
     setOpenedSaved(null);
     setSaveState("idle");
     setSwaps({});
@@ -460,7 +552,7 @@ export function PlanFlow({
   // "Change this one" — cycle stop `i` through its alternatives (dir +1 = next,
   // −1 = previous), wrapping through the original. relinkSteps (via toDisplay)
   // keeps the walk + arrivals + map honest after the swap.
-  const onSwap = (i: number, dir: 1 | -1 = 1) => {
+  const onSwap = (i: number, dir: 1 | -1 = 1, method: SwapMethod = "button") => {
     const alts = computed.alternatives[i] ?? [];
     if (alts.length === 0) return;
     setSwaps((prev) => {
@@ -474,7 +566,18 @@ export function PlanFlow({
       return next;
     });
     setSaveState("idle");
-    track("plan_swap", { stop: i, dir });
+    // `method` is passed in by the caller, never derived from `dir`: a LEFT
+    // swipe and the Change button's default argument both produce dir === 1.
+    // `stop_role` ships alongside stop_index because the group surface filters
+    // roles by hearted moods, so index 0 there is not necessarily the opener.
+    // Without the role, solo and group merge into a wrong conclusion.
+    track("plan_swap", {
+      stop: i, // legacy spelling, kept so existing insights keep working
+      stop_index: i,
+      stop_role: computed.steps[i]?.role ?? null,
+      dir,
+      method,
+    });
   };
 
   // "Near you" — ask the browser for location and keep the night within walking
@@ -633,23 +736,47 @@ export function PlanFlow({
               // Compute with the offset this click will apply (0) so the event
               // reflects the plan actually shown — useMemo's `computed` is a
               // render behind the setOffset below.
+              //
+              // The timer wraps ONLY computePlan. It is the actual elapsed
+              // work: a local, synchronous engine call over the in-props
+              // catalogue. The setState calls below are React scheduling, not
+              // work the user waited on, and animation timing is never used to
+              // manufacture a number.
+              const t0 = performance.now();
               const result = computePlan(venues, planOpts(0));
+              const duration_ms = Math.round(performance.now() - t0);
               setOffset(0);
               setSwaps({});
               setOpenedSaved(null);
               setStep("result");
               recordSignal("plan_started", { surface: "plan" });
-              track("plan_generate", {
+              const genProps = {
                 area: result.area, // resolved walkable pocket
-                areaKind: areaSel.kind, // anywhere | nearYou | region | neighbourhood
+                areaKind: areaSel.kind, // legacy spelling, kept for insights
+                area_kind: areaSel.kind, // anywhere | nearYou | region | neighbourhood
                 vibe,
                 budget,
                 daypart: result.daypart, // day out vs night
-                stops: result.steps.length, // engine outcome: 0–3 stops filled
+                stops: result.steps.length, // legacy spelling
+                stop_count: result.steps.length, // 0-3 stops filled
                 full: result.steps.length === 3, // did it fill a complete night?
-                poolStage: result.poolStage, // area | budget | all (had to widen?)
-                poolSize: result.poolSize, // candidates the engine chose from
-              });
+                poolStage: result.poolStage, // legacy spelling
+                pool_stage: result.poolStage, // area | budget | all (had to widen?)
+                poolSize: result.poolSize, // legacy spelling
+                pool_size: result.poolSize, // candidates the engine chose from
+                duration_ms,
+              };
+              // A night with zero stops is a FAILURE the user sees, even though
+              // nothing threw. Until now this emitted plan_generate regardless,
+              // so every no-result was counted as a success.
+              if (result.steps.length === 0) {
+                track("plan_generate_failed", {
+                  ...genProps,
+                  reason: "no_result",
+                });
+              } else {
+                track("plan_generate", genProps);
+              }
             }}
             className="w-full h-[52px] rounded-2xl bg-primary text-primary-fg text-[15px] font-extrabold shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
           >
@@ -786,7 +913,7 @@ export function PlanFlow({
               {!openedSaved && (computed.alternatives[i]?.length ?? 0) > 0 && (
                 <button
                   type="button"
-                  onClick={() => onSwap(i)}
+                  onClick={() => onSwap(i, 1, "button")}
                   aria-label={`Change the ${s.role} stop`}
                   className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
                 >
@@ -803,10 +930,15 @@ export function PlanFlow({
               enabled={
                 !openedSaved && (computed.alternatives[i]?.length ?? 0) > 0
               }
-              onSwipe={(dir) => onSwap(i, dir)}
+              onSwipe={(dir) => onSwap(i, dir, "swipe")}
             >
               <Link
                 href={`/venue/${s.venue.slug}`}
+                // Booking attribution, carried in sessionStorage rather than the
+                // URL: a query param here would opt the venue route out of
+                // static rendering and kill the /anon/venue/[slug] ISR cache.
+                // Slug + 0-based stop index only.
+                onClick={() => writePlanHandoff(s.venue.slug, i)}
                 className="block bg-card border border-border rounded-2xl overflow-hidden transition-transform duration-300 ease-out lg:hover:-translate-y-0.5"
               >
                 <div
@@ -917,21 +1049,37 @@ export function PlanFlow({
             type="button"
             onClick={() => {
               const nextOffset = offset + 1;
+              const t0 = performance.now();
               const result = computePlan(venues, planOpts(nextOffset));
+              const duration_ms = Math.round(performance.now() - t0);
               setSaveState("idle");
               setSwaps({});
               setOffset(nextOffset);
-              track("plan_reshuffle", {
+              const reshuffleProps = {
                 area: result.area, // resolved walkable pocket
-                areaKind: areaSel.kind,
+                areaKind: areaSel.kind, // legacy spelling
+                area_kind: areaSel.kind,
                 vibe,
                 budget,
                 daypart: result.daypart,
-                stops: result.steps.length,
+                stops: result.steps.length, // legacy spelling
+                stop_count: result.steps.length,
                 full: result.steps.length === 3,
-                poolStage: result.poolStage,
-                poolSize: result.poolSize,
-              });
+                poolStage: result.poolStage, // legacy spelling
+                pool_stage: result.poolStage,
+                poolSize: result.poolSize, // legacy spelling
+                pool_size: result.poolSize,
+                duration_ms,
+                offset: nextOffset, // separates reshuffle failures from first builds
+              };
+              if (result.steps.length === 0) {
+                track("plan_generate_failed", {
+                  ...reshuffleProps,
+                  reason: "no_result",
+                });
+              } else {
+                track("plan_reshuffle", reshuffleProps);
+              }
             }}
             className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold"
           >
@@ -968,6 +1116,7 @@ export function PlanFlow({
           ) : (
             <Link
               href="/sign-in?return=/plan"
+              onClick={() => writeSignInTrigger("plan_save")}
               className="w-full h-12 rounded-2xl bg-muted text-muted-fg text-[14px] font-extrabold flex items-center justify-center"
             >
               Sign in to save this night

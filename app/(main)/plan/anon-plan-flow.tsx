@@ -64,6 +64,14 @@ import { buildAnonPlan } from "@/lib/plan-preview-action";
 import type { AnonPlanPayload } from "@/lib/plan-preview-shape";
 import { ANYWHERE } from "@/lib/plan-engine";
 import { track } from "@/lib/analytics";
+// Both are import-safe from this file: analytics-keys has ZERO imports, and
+// analytics-reasons imports only types (erased at build). The moat guard test
+// pins this file's import list, so nothing with a data path may be added.
+import { writePlanHandoff, writeSignInTrigger } from "@/lib/analytics-keys";
+import {
+  planFailReasonFromServer,
+  throwFailReason,
+} from "@/lib/analytics-reasons";
 
 export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
 
@@ -156,18 +164,67 @@ export function AnonPlanFlow({
   const [reshuffles, setReshuffles] = useState(0);
   const [wallUp, setWallUp] = useState(false);
 
+  // plan_setup_started, fired ONCE per mount, from the setup controls only.
+  // Not from Build (a defaults-only visitor legitimately has no setup event),
+  // not from a restore, not from an effect.
+  const setupStartedRef = useRef(false);
+  const markSetupStarted = () => {
+    if (setupStartedRef.current) return;
+    setupStartedRef.current = true;
+    track("plan_setup_started", {
+      plan_surface: "anon",
+      area_kind: areaSel.kind,
+      vibe,
+      budget,
+      when,
+      daypart: resolveAnonTiming(when, customDate, customTime).daypart,
+    });
+  };
+
   const build = async (offset: 0 | 1) => {
     setBuilding(true);
     setFailure(null);
     const t = resolveAnonTiming(when, customDate, customTime);
-    const res = await buildAnonPlan({
-      vibe,
-      budget,
-      area: toPlanArea(areaSel),
-      daypart: t.daypart,
-      whenISO: t.whenISO,
-      offset,
-    });
+    // Unlike the signed-in engine (local + synchronous), this is a server
+    // round trip through lib/plan-preview.ts. Timed across the await, so the
+    // number is what the visitor actually waited for.
+    //
+    // 🧨 Read this before comparing it to the signed-in number: the server
+    // holds a module-level TTL cache, so a COLD call includes a paged read of
+    // the whole catalogue and a WARM one does not. The distribution is bimodal
+    // by design, and it is not comparable to the signed-in duration at all.
+    const t0 = performance.now();
+    let res: Awaited<ReturnType<typeof buildAnonPlan>>;
+    try {
+      res = await buildAnonPlan({
+        vibe,
+        budget,
+        area: toPlanArea(areaSel),
+        daypart: t.daypart,
+        whenISO: t.whenISO,
+        offset,
+      });
+    } catch {
+      // A rejected server action previously skipped setBuilding(false)
+      // entirely, so the button stayed disabled on "Building your night…"
+      // forever. Recovering here is a real UX fix riding inside an analytics
+      // change; it is called out separately in the PR, not smuggled in.
+      setBuilding(false);
+      setFailure("soft");
+      track("plan_preview_failed", {
+        reason: throwFailReason(
+          typeof navigator === "undefined" ? undefined : navigator.onLine,
+        ),
+        duration_ms: Math.round(performance.now() - t0),
+        offset,
+        vibe,
+        budget,
+        area: areaSel.kind, // legacy spelling on this surface
+        area_kind: areaSel.kind,
+      });
+      return;
+    }
+    const duration_ms = Math.round(performance.now() - t0);
     setBuilding(false);
     if (res.ok) {
       setResult(res);
@@ -183,11 +240,45 @@ export function AnonPlanFlow({
       );
       setStep("result");
       window.scrollTo({ top: 0 });
-      track("plan_preview_built", { vibe, budget, area: areaSel.kind, offset });
+      track("plan_preview_built", {
+        vibe,
+        budget,
+        area: areaSel.kind, // legacy spelling on this surface, kept for insights
+        area_kind: areaSel.kind, // matches the signed-in events
+        offset,
+        duration_ms,
+        stop_count: res.stops.length,
+        // pool_stage is deliberately ABSENT here. The anon payload guard test
+        // asserts poolStage/poolSize never cross to the client, so the anon and
+        // signed-in generate events are not comparable on pool stage. Widening
+        // that payload is a moat decision, not an analytics one.
+      });
     } else if (res.reason === "limited") {
       setFailure("limited");
+      track("plan_preview_failed", {
+        reason: "rate_limited",
+        duration_ms,
+        offset,
+        vibe,
+        budget,
+        area: areaSel.kind,
+        area_kind: areaSel.kind,
+      });
     } else {
       setFailure("soft");
+      // res.reason was previously thrown away, so every non-rate-limit failure
+      // was invisible. Mapped onto a closed category; the bounded server string
+      // rides alongside so the mapping itself stays auditable.
+      track("plan_preview_failed", {
+        reason: planFailReasonFromServer(res.reason),
+        raw_reason: res.reason ?? "none",
+        duration_ms,
+        offset,
+        vibe,
+        budget,
+        area: areaSel.kind,
+        area_kind: areaSel.kind,
+      });
     }
   };
 
@@ -234,6 +325,7 @@ export function AnonPlanFlow({
           </p>
           <Link
             href={signInHref}
+            onClick={() => writeSignInTrigger("plan_rate_limited")}
             className="inline-flex h-10 px-5 items-center rounded-full bg-primary text-primary-fg text-[13px] font-extrabold"
           >
             Sign up free
@@ -316,7 +408,10 @@ export function AnonPlanFlow({
                 </div>
                 <Link
                   href={`/venue/${s.slug}`}
-                  onClick={() => track("plan_stop_opened", { i })}
+                  onClick={() => {
+                    track("plan_stop_opened", { i });
+                    writePlanHandoff(s.slug, i);
+                  }}
                   className="flex gap-3 items-center rounded-2xl border border-border bg-card p-3 no-underline"
                 >
                   <span className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-muted">
@@ -374,6 +469,7 @@ export function AnonPlanFlow({
           <div className="mt-4 lg:mt-3 flex gap-2 lg:flex-col">
             <Link
               href={signInHref}
+              onClick={() => writeSignInTrigger("plan_save")}
               className="flex-1 h-[46px] rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold inline-flex items-center justify-center gap-1.5 no-underline shadow-[0_6px_14px_rgba(0,0,0,0.12)]"
             >
               <Heart size={15} />
@@ -460,6 +556,7 @@ export function AnonPlanFlow({
           timeStr={customTime}
           minDate={minDate}
           onChange={(next) => {
+            markSetupStarted();
             setWhen(next.choice);
             setCustomDate(next.dateStr);
             setCustomTime(next.timeStr);
@@ -472,7 +569,10 @@ export function AnonPlanFlow({
           value={areaSel}
           venues={[]}
           neighbourhoods={neighbourhoods}
-          onChange={setAreaSel}
+          onChange={(a) => {
+            markSetupStarted();
+            setAreaSel(a);
+          }}
         />
       </Group>
 
@@ -484,7 +584,10 @@ export function AnonPlanFlow({
               <button
                 key={v}
                 type="button"
-                onClick={() => setVibe(v)}
+                onClick={() => {
+                  markSetupStarted();
+                  setVibe(v);
+                }}
                 className={
                   "px-3.5 py-3 rounded-[14px] border-[1.5px] text-left text-[13px] font-bold transition-colors " +
                   (on
@@ -514,7 +617,10 @@ export function AnonPlanFlow({
             <button
               key={b}
               type="button"
-              onClick={() => setBudget(b)}
+              onClick={() => {
+                markSetupStarted();
+                setBudget(b);
+              }}
               className={
                 "h-11 rounded-xl border-[1.5px] text-[13px] font-bold transition-colors " +
                 (budget === b

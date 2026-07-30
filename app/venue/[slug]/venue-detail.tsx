@@ -25,6 +25,12 @@ import { ReserveSheet } from "@/components/reserve-sheet";
 import { platformLabel, type ReserveTarget } from "@/lib/booking-link";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
+import {
+  readPlanHandoff,
+  readEntrySurface,
+  writeSignInTrigger,
+  type PlanHandoff,
+} from "@/lib/analytics-keys";
 import { recordSignal } from "@/lib/signals";
 import {
   getOpenState,
@@ -144,6 +150,19 @@ export function VenueDetail({
   // mount to avoid an SSR/client hydration mismatch. Until then the strip
   // renders a neutral "Hours" state.
   const [now, setNow] = useState<Date | null>(null);
+
+  // Booking attribution. Read ONCE on mount, client-side and one-shot, so a
+  // booking made from a plan stop can be told apart from a standalone one.
+  // Deliberately not a server prop: adding searchParams to this route (or its
+  // /anon ISR twin) would opt it out of static rendering.
+  const [planHandoff, setPlanHandoff] = useState<PlanHandoff | null>(null);
+  const [entrySurface, setEntrySurface] = useState<
+    ReturnType<typeof readEntrySurface> | undefined
+  >(undefined);
+  useEffect(() => {
+    setPlanHandoff(readPlanHandoff(venue.slug));
+    setEntrySurface(readEntrySurface());
+  }, [venue.slug]);
   useEffect(() => {
     setNow(new Date());
   }, []);
@@ -472,6 +491,7 @@ export function VenueDetail({
             {anonTeaserTruncated && (
               <Link
                 href={signInHref}
+                onClick={() => writeSignInTrigger("venue_teaser_readmore")}
                 className="mt-1.5 inline-block rounded text-sm font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 Continue reading · free
@@ -715,6 +735,7 @@ export function VenueDetail({
                   </p>
                   <Link
                     href={signInHref}
+                    onClick={() => writeSignInTrigger("venue_reviews_locked")}
                     className="ml-auto shrink-0 text-sm font-bold text-primary rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     Sign up free
@@ -964,6 +985,9 @@ export function VenueDetail({
           venue={venue}
           target={reserveTarget}
           onClose={() => setShowReserve(false)}
+          fromPlan={planHandoff !== null}
+          stopIndex={planHandoff?.stopIndex ?? null}
+          entrySurface={entrySurface}
         />
       )}
     </div>
@@ -1050,6 +1074,7 @@ function VenueActions({
         // deliver.
         <Link
           href={signInHref}
+          onClick={() => writeSignInTrigger("venue_booking_cta")}
           className="flex-1 inline-flex items-center justify-center px-5 py-3 border border-fg/15 rounded-full text-fg text-sm font-semibold transition-colors lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           Sign in to see booking options
