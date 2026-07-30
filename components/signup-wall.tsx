@@ -12,13 +12,17 @@
 // authenticating.
 
 import Link from "next/link";
+import { writeSignInTrigger, type SignInTrigger } from "@/lib/analytics-keys";
 import { ArrowRight } from "lucide-react";
 
 export function SignupWall({
   returnTo = "/explore",
   onJustLooking,
+  trigger = "unknown",
 }: {
   returnTo?: string;
+  // See AuthWall: allow-listed sign-in attribution, localStorage not URL.
+  trigger?: SignInTrigger;
   // When provided, the wall shows a "Just looking" back-out that reveals the
   // bounded browse set instead of being a dead end (the feed re-walls after a
   // few minutes). Omitted → the wall is a hard gate (its old behaviour).
@@ -45,6 +49,7 @@ export function SignupWall({
 
           <Link
             href={href}
+            onClick={() => writeSignInTrigger(trigger)}
             className="mt-6 flex h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-primary text-[15px] font-extrabold text-primary-fg shadow-soft"
           >
             Sign up free
@@ -53,6 +58,7 @@ export function SignupWall({
 
           <Link
             href={href}
+            onClick={() => writeSignInTrigger(trigger)}
             className="mt-3 inline-block text-[13px] font-semibold text-muted-fg underline underline-offset-2 hover:text-fg"
           >
             Already have an account? Sign in

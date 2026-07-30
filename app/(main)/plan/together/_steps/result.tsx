@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Event, Venue } from "@/lib/types";
 import type { Member, Room, StopReaction } from "@/lib/realtime/room";
 import { averageTasteMaps } from "@/lib/group-taste";
@@ -175,6 +175,7 @@ export function Result({
   // majority. If the host has left, no device has isHost, so a reached majority
   // simply doesn't apply (a graceful no-op for an ephemeral room). Departed
   // members' votes are pruned in room.ts, so a leave can't cross the threshold.
+  const swapReportedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!room.isHost || total === 0) return;
     plan.alternatives.forEach((alts, i) => {
@@ -183,7 +184,27 @@ export function Result({
         const len = alts.length + 1;
         const pos = ((((room.swaps[i] ?? -1) + 2) % len) + len) % len;
         room.sendSwap(i, pos - 1);
-        track("plan_swap", { stop: i, dir: 1 });
+        // Report each (stop, target position) pair once. sendSwap deliberately
+        // does NOT optimistically update room.swaps, so this effect re-runs
+        // inside the broadcast round trip and would otherwise emit the same
+        // swap several times. The swap itself is idempotent and untouched.
+        const fired = `${i}:${pos - 1}`;
+        if (!swapReportedRef.current.has(fired)) {
+          swapReportedRef.current.add(fired);
+          track("plan_swap", {
+            stop: i, // legacy spelling
+            stop_index: i,
+            // Group roles are filtered by the room's hearted moods, so index 0
+            // here is NOT necessarily the opener. Without the role, group and
+            // solo swaps merge into a wrong conclusion about which stop people
+            // reject.
+            stop_role: plan.steps[i]?.role ?? null,
+            dir: 1,
+            // Not "swipe" and not "button": the deciding vote can arrive over
+            // Realtime from another device, so no local gesture describes it.
+            method: "group_veto",
+          });
+        }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

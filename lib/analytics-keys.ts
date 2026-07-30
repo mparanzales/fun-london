@@ -215,7 +215,8 @@ export function readPlanHandoff(slug: string): PlanHandoff | null {
     if (typeof v.at !== "number" || Date.now() - v.at > PLAN_HANDOFF_TTL_MS) {
       return null;
     }
-    if (v.stopIndex !== 0 && v.stopIndex !== 1 && v.stopIndex !== 2) return null;
+    if (v.stopIndex !== 0 && v.stopIndex !== 1 && v.stopIndex !== 2)
+      return null;
     return { slug, stopIndex: v.stopIndex };
   } catch {
     return null;
@@ -260,10 +261,7 @@ export function consumeSignInTrigger(): SignInTrigger {
   if (!raw) return "unknown";
   try {
     const v = JSON.parse(raw) as { trigger?: unknown; at?: unknown };
-    if (
-      typeof v.at !== "number" ||
-      Date.now() - v.at > SIGNIN_TRIGGER_TTL_MS
-    ) {
+    if (typeof v.at !== "number" || Date.now() - v.at > SIGNIN_TRIGGER_TTL_MS) {
       return "unknown";
     }
     return isSignInTrigger(v.trigger) ? v.trigger : "unknown";

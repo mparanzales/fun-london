@@ -503,6 +503,7 @@ export function AnonPlanFlow({
 
         {wallUp && (
           <AuthWall
+            trigger="plan_rate_limited"
             signedIn={false}
             title="Sign up for more nights"
             body="You've seen two takes on your brief. A free account gets you endless reshuffles, saved nights and booking."

@@ -413,6 +413,7 @@ export function EventsFeed({
           "See all of London" cap under the bounded set. */}
       {!signedIn && (
         <SignupWall
+          trigger="events_wall"
           returnTo="/events"
           onJustLooking={justLooking ? undefined : () => setJustLooking(true)}
         />
@@ -449,6 +450,7 @@ export function EventsFeed({
           overlay for everyone; category chips just filter — neither walls.) */}
       {!signedIn && wallFor && (
         <AuthWall
+          trigger="events_wall"
           signedIn={false}
           mainShell
           title={eventsWallTitle()}
@@ -460,6 +462,7 @@ export function EventsFeed({
           comes back; "Keep browsing" dismisses it and re-arms the timer. */}
       {!signedIn && justLooking && reWalled && (
         <AuthWall
+          trigger="events_wall"
           signedIn={false}
           mainShell
           title="Seen something you like? Sign up to see all of London."

@@ -552,7 +552,11 @@ export function PlanFlow({
   // "Change this one" — cycle stop `i` through its alternatives (dir +1 = next,
   // −1 = previous), wrapping through the original. relinkSteps (via toDisplay)
   // keeps the walk + arrivals + map honest after the swap.
-  const onSwap = (i: number, dir: 1 | -1 = 1, method: SwapMethod = "button") => {
+  const onSwap = (
+    i: number,
+    dir: 1 | -1 = 1,
+    method: SwapMethod = "button",
+  ) => {
     const alts = computed.alternatives[i] ?? [];
     if (alts.length === 0) return;
     setSwaps((prev) => {

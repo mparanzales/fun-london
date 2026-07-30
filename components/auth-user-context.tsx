@@ -18,10 +18,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import {
-  setAnalyticsAuthState,
-  resetAnalyticsIdentity,
-} from "@/lib/analytics";
+import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
 import { clearSignInTrigger } from "@/lib/analytics-keys";
 import { isSignOutTransition } from "@/lib/auth-transition";
 

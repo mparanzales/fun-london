@@ -89,10 +89,7 @@ export type SaveFailReason =
 //                          never be produced. The `anon_origin` boolean on the
 //                          same events carries that information instead.
 export type SaveMode =
-  | "new"
-  | "duplicate"
-  | "resave_after_swap"
-  | "resave_after_reshuffle";
+  "new" | "duplicate" | "resave_after_swap" | "resave_after_reshuffle";
 
 // How a stop was replaced. "group_veto" is the honest third value: on the
 // group surface the deciding vote can arrive over Realtime from another
@@ -121,7 +118,9 @@ export function viewportBucket(width: number): ViewportBucket {
   return "desktop";
 }
 
-export function positionBucket(position: number | null | undefined): PositionBucket {
+export function positionBucket(
+  position: number | null | undefined,
+): PositionBucket {
   if (typeof position !== "number" || !Number.isFinite(position)) return "0-4";
   if (position < 5) return "0-4";
   if (position < 12) return "5-11";
