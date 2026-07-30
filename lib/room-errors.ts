@@ -124,3 +124,28 @@ export function failureFromJoin(
       return "denied";
   }
 }
+
+/**
+ * Is this join failure worth keeping the stashed room code for?
+ *
+ * 🧨 THIS TAKES THE ROOM RESULT'S OWN `reason`, NOT THE MAPPED RoomFailure, and
+ * that distinction is the whole point. The first version of the caller tested
+ * the mapped value against "timeout" / "channel-error" / "offline" — three
+ * values `failureFromJoin` CANNOT PRODUCE. They come from `failureFromStatus`,
+ * the Realtime path. So the guard was always false and every join failure
+ * deleted the invite, including a transport blip on patchy 4G: the invitee got
+ * "You're not in this room" with no action, and because the URL is clean now, a
+ * reload started a brand new empty room instead of retrying.
+ *
+ *   error        — the RPC threw. Network, timeout, a transient DB error.
+ *   rate-limited — 20 join attempts per 10 minutes, enforced in the DB. A user
+ *                  on a flaky connection burns these through no fault of their
+ *                  own, and they refill.
+ *
+ * Everything else (not-found, expired, closed, auth) is terminal: the room is
+ * gone or was never theirs, and holding the code would re-attempt it on every
+ * future visit to /plan/together on this browser.
+ */
+export function isTransientJoinReason(reason?: string): boolean {
+  return reason === "error" || reason === "rate-limited";
+}

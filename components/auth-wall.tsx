@@ -37,8 +37,15 @@ export function AuthWall({
   body?: string;
   // Where to land after sign-in. Defaults to the current path (usePathname),
   // which is right for in-place walls. Pass this when the return target needs
-  // a query string usePathname would drop — e.g. /plan/together?room=ABCD so
-  // an invitee rejoins the SAME room instead of creating a new one.
+  // a query string usePathname would drop.
+  //
+  // 🧨 NEVER PUT A ROOM CODE HERE. This used to read "e.g.
+  // /plan/together?room=ABCD so an invitee rejoins the SAME room", which is
+  // exactly what was removed: a returnTo travels into /sign-in, into
+  // /auth/callback, into Supabase's redirect_to and into the magic-link EMAIL
+  // BODY, and posthog freezes whatever is in the URL into $initial_person_info
+  // and posts it on every /flags request afterwards. The invite is carried by
+  // lib/room-invite.ts instead, and /plan/together passes a constant.
   returnTo?: string;
   // When the page lives inside the tabbed (main) shell, inset the blur so the
   // page title (top) and the bottom nav stay sharp + usable — only the content

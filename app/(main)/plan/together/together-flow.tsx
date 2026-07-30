@@ -19,6 +19,7 @@ import {
 } from "@/lib/room-invite";
 import {
   failureFromJoin,
+  isTransientJoinReason,
   ROOM_FAILURE_COPY,
   type RoomFailure,
 } from "@/lib/room-errors";
@@ -85,9 +86,15 @@ export function TogetherFlow({
         // stash so the retry can rejoin the SAME room; anything terminal drops
         // it, otherwise every future visit to /plan/together on this browser
         // would re-attempt a room that is gone.
-        const transient =
-          f === "timeout" || f === "channel-error" || f === "offline";
-        if (existing && !transient) clearRoomInvite();
+        //
+        // 🧨 Tested against the RESULT'S reason, not the mapped failure `f`.
+        // This read `f === "timeout" || f === "channel-error" || f ===
+        // "offline"` — three values failureFromJoin cannot return, so the guard
+        // was always false and a 4G blip deleted the invite. See
+        // isTransientJoinReason.
+        if (existing && !isTransientJoinReason(result.reason)) {
+          clearRoomInvite();
+        }
         setReady(true);
         return;
       }
@@ -179,8 +186,11 @@ function RoomFailureNotice({
   // straight back into the address bar, where posthog reads it, undoing the
   // whole point. Re-arm the stash and navigate to the CLEAN path instead: the
   // resolver picks the code up from there.
+  // "invite", not the default "resume": this ASSIGNS a new location rather than
+  // reloading, so a resume entry would be refused on arrival and the retry
+  // would silently start a new empty room instead of rejoining.
   const retrySameRoom = () => {
-    if (roomCode) armRoomInvite(roomCode);
+    if (roomCode) armRoomInvite(roomCode, "invite");
     window.location.assign("/plan/together");
   };
   return (
@@ -191,6 +201,10 @@ function RoomFailureNotice({
       </p>
       {copy.action &&
         (retriesSameRoom && roomCode ? (
+          // Pixel-identical to the anchor below, but only because `items-center`
+          // is doing real work here: Chrome's UA stylesheet sets
+          // `button { align-items: flex-start }` and Tailwind's preflight does
+          // not reset it. Remove that class and only this branch mis-centers.
           <button
             type="button"
             onClick={retrySameRoom}
