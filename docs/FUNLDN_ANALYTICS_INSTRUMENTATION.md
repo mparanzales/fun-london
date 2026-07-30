@@ -268,10 +268,12 @@ These are decisions, not defects. None of them blocks the branch.
 2. **The `plan_save` dual-emit ends 2026-09-30.** Migrate insights before then.
 3. **The `search_query` `q` property is gone.** If an insight used it, it needs
    `q_len`.
-4. **A conversion bug found, not fixed:** the Save button is unmounted while a
-   restored anon plan is on screen (`{!openedSaved && (`), so the
-   highest-intent anon-to-signed-in moment has no Save button. Out of scope here;
-   worth its own fix.
+4. **FIXED — the restored-anon Save button.** The Save button used to be
+   unmounted for every restored night, so the highest-intent
+   anon-to-signed-in moment had no Save button. Only a night reopened from a
+   saved ROW is read-only now; restored and claimed nights keep Save and Try
+   another. Saves carry a `plan_origin` dimension (`live` | `generated` |
+   `anon` | `saved`) so the two can be told apart.
 5. **`entry_surface` extends the `SignalSurface` vocabulary** with `event` and
    `direct`. Analytics-only: the DB CHECK constraint is untouched, but a join
    against `user_events` will not match those two values.

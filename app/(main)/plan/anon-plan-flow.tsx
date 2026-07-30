@@ -29,10 +29,12 @@
 // lib/supabase/client, lib/signals, or lib/queries (pinned by
 // plan-preview-guard).
 //
-// The built night SURVIVES sign-in: on result render it is stashed in
-// localStorage (not sessionStorage — magic links open in a new tab), and
-// PlanFlow hydrates it through its openSaved path after the OAuth
-// round-trip.
+// The built night SURVIVES sign-in: on result render it is written to the
+// owner-scoped active-plan store under the anonymous slot (localStorage, not
+// sessionStorage — magic links open in a new tab), and PlanFlow claims it
+// into the new account via claimAnonPlan() after the OAuth round-trip. The
+// legacy one-shot stash is still written alongside for anyone mid-flight
+// across this deploy; PlanFlow reads it from its own separate effect.
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -82,7 +84,30 @@ import type { PlanRole } from "@/lib/plan-engine";
 
 export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
 
-// Mirrors plan-flow's resolveTiming (plan-flow.tsx:72) for the anon brief —
+// The signed-out night, kept so it survives a refresh and a tap through to a
+// venue page and back.
+//
+// 🧨 THIS IS A SEPARATE KEY FROM THE CANONICAL STORE, ON PURPOSE. A NightPlan
+// holds venue ids and slugs only — that is what keeps it on the safe side of
+// the anon moat — and this component has NO catalogue to hydrate them against,
+// so it cannot rebuild a screen from one. What it can keep is the payload it
+// was already handed: AnonPlanPayload is card-level by construction
+// (lib/plan-preview-shape.ts, pinned by plan-preview-guard), it is already in
+// this browser, and putting it in this browser's own localStorage moves it
+// nowhere new.
+//
+// Without this, every stop card on the result screen was a trap: the screen
+// invites a tap, and coming back landed on an empty setup form. Rebuilding
+// then spends one of the 12 builds an hour the server allows, so a visitor who
+// checked all three stops could be shown the sign-up wall for running out of
+// builds we made them spend.
+const ANON_RESULT_KEY = "fl.anonresult.v1";
+// One hour, matching the legacy stash rather than the canonical 12h: this
+// payload carries server-computed `isOpenNow` booleans, and a stale "open now"
+// is a wrong claim about a real business.
+const ANON_RESULT_TTL_MS = 60 * 60 * 1000;
+
+// Mirrors plan-flow's resolveTiming for the anon brief —
 // deliberately NOT imported from there: plan-flow drags in the supabase
 // browser client and the signals module, which this file must never bundle.
 function resolveAnonTiming(
@@ -162,6 +187,12 @@ export function AnonPlanFlow({
   const [building, setBuilding] = useState(false);
   const [result, setResult] = useState<AnonPlanPayload | null>(null);
   const [startLabel, setStartLabel] = useState<string | null>(null);
+  // The night's start as an ISO string. Kept beside the formatted label so the
+  // canonical NightPlan can carry a real `startsAt`: it was hardcoded null
+  // while this component was holding the value and rendering arrival times
+  // from it, so signing in to KEEP a night handed back a version with its
+  // clock stripped.
+  const [startISO, setStartISO] = useState<string | null>(null);
   const [failure, setFailure] = useState<"limited" | "soft" | null>(null);
   // One free reshuffle (offset 1); the 2nd raises the wall. The engine is
   // deterministic per offset, so a walled FIRST reshuffle would protect
@@ -235,6 +266,7 @@ export function AnonPlanFlow({
     if (res.ok) {
       setResult(res);
       if (offset === 1) setReshuffles(1);
+      setStartISO(t.whenISO);
       setStartLabel(
         new Date(t.whenISO)
           .toLocaleTimeString("en-GB", {
@@ -291,6 +323,49 @@ export function AnonPlanFlow({
   // Stash the built night so it survives the sign-in round-trip. Written on
   // RESULT RENDER (not on Save tap) — the sign-up band and the reshuffle
   // wall are also doors into /sign-in and must be covered too.
+  // Freshness is anchored to the ORIGINAL build, not to the last write. Keyed
+  // on the payload's identity so a restore -> re-persist cycle carries its
+  // stamp forward instead of restarting the hour on every tap-through.
+  const resultStamp = useRef<{ src: AnonPlanPayload | null; at: number }>({
+    src: null,
+    at: 0,
+  });
+  const rehydrated = useRef(false);
+  useEffect(() => {
+    if (rehydrated.current) return;
+    rehydrated.current = true;
+    try {
+      const raw = window.localStorage.getItem(ANON_RESULT_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as {
+        payload?: AnonPlanPayload;
+        startLabel?: string | null;
+        startISO?: string | null;
+        savedAt?: number;
+      };
+      if (!saved?.savedAt || Date.now() - saved.savedAt > ANON_RESULT_TTL_MS) {
+        window.localStorage.removeItem(ANON_RESULT_KEY);
+        return;
+      }
+      const payload = saved.payload;
+      // Shape check, not a trust check: this is our own payload in our own
+      // browser, but a half-written or hand-edited entry must not render as a
+      // night with no stops.
+      if (!Array.isArray(payload?.stops) || payload.stops.length === 0) return;
+      resultStamp.current = { src: payload, at: saved.savedAt };
+      setResult(payload);
+      setStartLabel(saved.startLabel ?? null);
+      setStartISO(saved.startISO ?? null);
+      setStep("result");
+    } catch {
+      /* corrupt or private mode — fall through to the setup screen */
+    }
+    // Mount only. Deliberately does NOT restore the reshuffle counter: the
+    // server-side limit is the real perimeter (lib/plan-preview-action.ts),
+    // and a client counter that survives a refresh is neither enforceable nor
+    // worth the confusion of a wall appearing on a fresh page load.
+  }, []);
+
   const stashed = useRef("");
   useEffect(() => {
     if (!result) return;
@@ -313,6 +388,20 @@ export function AnonPlanFlow({
         // completed against the NEW code — is not stranded. The reader in
         // plan-flow keeps handling it. Remove once a deploy cycle has passed.
         window.localStorage.setItem(ANON_PLAN_STASH_KEY, json);
+        // The screen itself, so a tap through to a venue and back returns to
+        // this night rather than to an empty form.
+        if (resultStamp.current.src !== result) {
+          resultStamp.current = { src: result, at: Date.now() };
+        }
+        window.localStorage.setItem(
+          ANON_RESULT_KEY,
+          JSON.stringify({
+            payload: result,
+            startLabel,
+            startISO,
+            savedAt: resultStamp.current.at,
+          }),
+        );
         // Canonical store. WRITE-ONLY on this side, deliberately: this is
         // what claimAnonPlan() hands to the account after sign-in, and
         // nothing here reads it back. Anon-side refresh restore is NOT
@@ -338,7 +427,7 @@ export function AnonPlanFlow({
           budget,
           daypart:
             result.daypart === "day" ? ("day" as const) : ("evening" as const),
-          startsAt: null,
+          startsAt: startISO,
           stops: result.stops.map((s) => ({
             // The anon payload is slug-keyed by design (it never carries
             // catalogue ids), so the slug is the id here too. hydrateStops

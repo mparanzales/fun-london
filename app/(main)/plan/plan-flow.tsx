@@ -291,9 +291,10 @@ export function PlanFlow({
   // Save attempt counter. Lives outside saveState because saveState is reset to
   // "idle" by every input edit and by a reshuffle, so it cannot count retries.
   const saveAttemptRef = useRef(0);
-  // True when this night began life as an anonymous preview that was stashed
-  // through the sign-in round trip. Replaces a SaveMode value that could never
-  // be produced (the Save button is unmounted for a restored plan).
+  // True when this night began life as an anonymous preview carried through
+  // the sign-in round trip. Rides on the save events as `anon_origin`; the
+  // `plan_origin` dimension carries the finer distinction between a live,
+  // restored, claimed and reopened night.
   const anonOriginRef = useRef(false);
   // 🧨 Freshness is measured from GENERATION, not from the last write. The
   // effect below re-persists on every swap, and stamping a fresh createdAt
@@ -355,8 +356,14 @@ export function PlanFlow({
     [venues, areaSel, vibe, budget, offset, timing, center, tasteScores],
   );
 
-  const display: DisplayPlan =
-    openedSaved ?? toDisplay(computed, swaps, timing?.when);
+  // Memoised because the persist effect below depends on it: an unmemoised
+  // `display` is a new object every render, so the effect's dep array never
+  // matched and a synchronous localStorage write fired on every single render
+  // of the result screen.
+  const display: DisplayPlan = useMemo(
+    () => openedSaved ?? toDisplay(computed, swaps, timing?.when),
+    [openedSaved, computed, swaps, timing],
+  );
 
   // Editorial eyebrow, same convention as the Explore header: 06:00–17:59 reads
   // "today,", 18:00–05:59 "tonight,". `now` is null until mount, so SSR + first
@@ -522,7 +529,17 @@ export function PlanFlow({
       // loses its middle stop renders "~6 min walk" between two venues that
       // may be 25 minutes apart, while the map draws the real leg. A short
       // night is honest; a wrong walk time is not.
-      const steps = dropped > 0 ? relinkSteps(stops, undefined) : stops;
+      // 🧨 ALWAYS relink, and relink from the night's OWN start time. A
+      // NightPlan stores `startsAt` but no per-stop arrivals, so a restored
+      // night rendered with no "arrive ~7:00 pm" line at all: the same night
+      // lost its clock the moment you refreshed or tapped through to a venue.
+      // relinkSteps recomputes arrivals from the start, and — the reason it
+      // was already called on the dropped path — keeps walk times honest when
+      // a stop has left the catalogue.
+      const steps = relinkSteps(
+        stops,
+        np.startsAt ? new Date(np.startsAt) : undefined,
+      );
       if (dropped > 0) {
         track("plan_restored_partial", {
           dropped,
@@ -556,7 +573,23 @@ export function PlanFlow({
       // behaviour is a hard requirement here.
       setVibe(np.vibe);
       setBudget(np.budget);
+      // The night's own daypart, so "Try another combination" regenerates
+      // against the brief on screen rather than against "Right now". Left at
+      // "now", a restored evening night reshuffled into a daytime one under a
+      // header still reading "Tonight,". WhenChoice's "day"/"evening" map 1:1
+      // onto the daypart; the AREA control still cannot be mapped back (see
+      // above), which is why this is a partial re-seed rather than a full one.
+      setWhen(np.daypart);
       setStep("result");
+
+      // 🧨 A REOPENED SAVED ROW IS NOT PERSISTED HERE. The active slot holds
+      // the night you are WORKING on; a saved row is already durable in the
+      // database and one tap away in "Your saved nights". Storing it made the
+      // read-only state sticky: for the next 12 hours every visit to /plan
+      // landed on a night with no Save, no Try another and no per-stop
+      // Change, and the only way out was Edit -> Build. Glancing at a saved
+      // night should not take the surface hostage.
+      if (np.source === "saved") return true;
 
       // Re-persist from the HYDRATED venues, so an anon-origin night (whose
       // ids are slugs) is re-keyed to real catalogue ids, and so a night that
@@ -614,7 +647,6 @@ export function PlanFlow({
 
     const claimed = owner ? claimAnonPlan(owner) : null;
     if (claimed) {
-      anonOriginRef.current = true;
       // The canonical claim has won. Drop the legacy one-shot stash so the
       // older effect below cannot restore a coarser copy of the same night
       // over the top of it and double-fire the analytics.
@@ -623,13 +655,25 @@ export function PlanFlow({
       } catch {
         /* private mode */
       }
-      if (activate(claimed)) {
-        track("plan_anon_claimed", { stops: claimed.stops.length });
+      // 🧨 THE CLAIM IS SUBJECT TO THE SAME FRESHNESS GATE AS A RESTORE. It
+      // was not, and an anonymous night is the one most likely to be old:
+      // someone builds a night on a Tuesday, does not sign in, and creates an
+      // account three weeks later. That claim put a three-week-old night on
+      // the result screen under "Tonight, the plan:" with opening hours
+      // checked three weeks ago, counted it as a conversion, and then — since
+      // it re-persists with the ORIGINAL createdAt — had the next mount's
+      // restore path reject it as stale. The night appeared exactly once and
+      // silently vanished. isFresh must be checked at BOTH call sites; the
+      // unit test on isFresh cannot see which ones exist.
+      //
+      // claimAnonPlan is destructive on the anon side before we get here, so
+      // a stale claim clears the owner slot rather than being handed back.
+      if (!isFresh(claimed) || !activate(claimed)) {
+        clearActivePlan(owner);
         return;
       }
-      // Every venue has gone. The anon copy is already destroyed by the claim,
-      // so drop the owner copy too rather than retrying it on every mount.
-      clearActivePlan(owner);
+      anonOriginRef.current = true;
+      track("plan_anon_claimed", { stops: claimed.stops.length });
       return;
     }
     const existing = readActivePlan(owner);
@@ -651,6 +695,13 @@ export function PlanFlow({
     // `activate`, in its hydrated and relinked form. Re-persisting from
     // `computed` here would overwrite it with an unrelated night.
     if (active) return;
+    // 🧨 A zero-stop result is the dead-end screen, not a night. This effect
+    // runs ABOVE that screen's early return, so without this a good stored
+    // night was destroyed by a failed build: Edit -> pick an empty area ->
+    // Build wrote `stops: []` over it, and the next load could not parse the
+    // result and cleared the slot. Losing the night to a search that found
+    // nothing is the worst possible moment to lose it.
+    if (display.steps.length === 0) return;
     if (genStampRef.current.src !== computed) {
       genStampRef.current = { src: computed, at: new Date().toISOString() };
     }
@@ -738,9 +789,8 @@ export function PlanFlow({
         source: "anon",
       });
       setStep("result");
-      // This night came from an anonymous preview. Recorded as a boolean on the
-      // save events rather than a SaveMode value, because the Save button is
-      // unmounted while a restored plan is on screen (see the report in the PR).
+      // This night came from an anonymous preview. Recorded as a boolean on
+      // the save events rather than a SaveMode value, alongside `plan_origin`.
       anonOriginRef.current = true;
       track("plan_stash_restored", { stops: steps.length });
     } catch {
@@ -990,6 +1040,13 @@ export function PlanFlow({
               setOffset(0);
               setSwaps({});
               setActive(null);
+              // Build produces a DIFFERENT night, so the save flag from the
+              // last one must not follow it. Without this: Build -> Try
+              // another -> Save -> Edit -> Build left the button reading
+              // "Saved to your nights", disabled, on a night that had never
+              // been saved — the app refusing to save while claiming it
+              // already had.
+              setSaveState("idle");
               setStep("result");
               recordSignal("plan_started", { surface: "plan" });
               const genProps = {
@@ -1284,8 +1341,14 @@ export function PlanFlow({
         </div>
       )}
 
-      {/* Actions — try another + save (live plans only, not re-opened) */}
-      {!isReopenedSaved && (
+      {/* Actions. "Try another combination" shows on EVERY night, including a
+          re-opened saved one: it is not an edit of the saved row, it is "give
+          me a different night", and it stands the re-opened night down first.
+          Without it a re-opened night had no forward action on the whole
+          screen — the one thing this product does was the one button missing.
+          Save stays hidden for a saved row: the plans write is insert-only,
+          so re-saving means a duplicate row rather than an update. */}
+      {
         <div className="px-5 pb-2 flex flex-col gap-2.5">
           <button
             type="button"
@@ -1339,7 +1402,7 @@ export function PlanFlow({
             />
           </button>
 
-          {authUserId ? (
+          {isReopenedSaved ? null : authUserId ? (
             <button
               type="button"
               onClick={onSave}
@@ -1371,7 +1434,7 @@ export function PlanFlow({
             </Link>
           )}
         </div>
-      )}
+      }
     </div>
   );
 }

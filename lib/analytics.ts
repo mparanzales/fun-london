@@ -90,10 +90,13 @@ export type SaveFailReason =
 // structural zero as a tracking bug:
 //   • no "update"        — the plans write is insert-only and there is no
 //                          UPDATE policy on the table.
-//   • no "restored_anon" — the Save button is unmounted in exactly the state a
-//                          restored anon stash creates, so the value could
-//                          never be produced. The `anon_origin` boolean on the
-//                          same events carries that information instead.
+//   • no "restored_anon" — a restored or claimed night IS savable (that is the
+//                          conversion path), so this would be a real state.
+//                          It is not a SaveMode because it is orthogonal to
+//                          the other four: a claimed night can also be a
+//                          duplicate or a resave after a swap. The
+//                          `plan_origin` dimension carries it, and
+//                          `anon_origin` carries the anon-specific half.
 export type SaveMode =
   "new" | "duplicate" | "resave_after_swap" | "resave_after_reshuffle";
 
