@@ -72,6 +72,13 @@ import {
   planFailReasonFromServer,
   throwFailReason,
 } from "@/lib/analytics-reasons";
+import {
+  parseNightPlan,
+  NIGHT_PLAN_VERSION,
+  type NightPlan,
+} from "@/lib/night-plan";
+import { writeActivePlan } from "@/lib/active-plan";
+import type { PlanRole } from "@/lib/plan-engine";
 
 export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
 
@@ -301,7 +308,44 @@ export function AnonPlanFlow({
         savedAt: Date.now(),
       });
       if (json !== stashed.current) {
+        // Legacy one-shot stash. Still written so a user who is mid-flight
+        // across this deploy — anon night stashed by the OLD code, sign-in
+        // completed against the NEW code — is not stranded. The reader in
+        // plan-flow keeps handling it. Remove once a deploy cycle has passed.
         window.localStorage.setItem(ANON_PLAN_STASH_KEY, json);
+        // Canonical store. This is what survives a refresh on the anon side
+        // and what claimAnonPlan() hands to the account after sign-in.
+        const np = parseNightPlan({
+          version: NIGHT_PLAN_VERSION,
+          // The anon payload carries no title (it has no vibe control to
+          // build the signed-in one from). Derive a plain one that keeps the
+          // "Day Out" / "Night" convention the daypart inference in
+          // fromSavedRow keys on, so a claimed night reads consistently.
+          title: `${result.area} ${result.daypart === "day" ? "Day Out" : "Night"}`,
+          area: result.area,
+          // The anon brief has no vibe/budget control, so these are the
+          // signed-in defaults. They affect regeneration only, never how the
+          // night renders.
+          vibe: "Chill" as const,
+          budget: "££" as const,
+          daypart:
+            result.daypart === "day" ? ("day" as const) : ("evening" as const),
+          startsAt: null,
+          stops: result.stops.map((s) => ({
+            // The anon payload is slug-keyed by design (it never carries
+            // catalogue ids), so the slug is the id here too. hydrateStops
+            // resolves by id first and falls back to slug, so this works
+            // either way once it reaches a catalogue.
+            venueId: s.slug,
+            slug: s.slug,
+            role: s.role as PlanRole,
+            dwellMins: s.dwellMins,
+            walkToNextMins: s.walkToNextMins,
+          })),
+          source: "anon" as const,
+          savedRowId: null,
+        });
+        if (np) writeActivePlan(null, np);
         stashed.current = json;
       }
     } catch {

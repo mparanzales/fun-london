@@ -155,6 +155,14 @@ export type AnalyticsEvent =
   | "plan_save" // user saved a generated plan to their account (funnel end)
   // The save split. "tapped" is intent, "succeeded" fires only after the
   // insert comes back clean, "failed" only after a real failed write.
+  // A restored/reopened night lost at least one stop because its venue is no
+  // longer in the catalogue (hidden, deleted, or re-slugged by an ingest run).
+  // The user still gets the surviving stops; this is how we find out it
+  // happened, since a night rendered short and silent looks fine.
+  // A night built signed-out was carried through sign-in and adopted by the
+  // new account. The conversion moment this whole transfer path exists for.
+  | "plan_anon_claimed"
+  | "plan_restored_partial"
   | "plan_save_tapped"
   | "plan_save_succeeded"
   | "plan_save_failed"

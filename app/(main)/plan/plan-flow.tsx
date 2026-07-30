@@ -49,6 +49,20 @@ import { recordSignal } from "@/lib/signals";
 import { googleMapsWalkingUrl } from "@/lib/plan-maps";
 import { PlanRouteMapLive } from "./plan-route-map-live";
 import { ANON_PLAN_STASH_KEY } from "./anon-plan-flow";
+import {
+  fromEnginePlan,
+  fromSavedRow,
+  toSavedSteps,
+  hydrateStops,
+  totalMins as nightTotalMins,
+  type NightPlan,
+} from "@/lib/night-plan";
+import {
+  readActivePlan,
+  writeActivePlan,
+  clearActivePlan,
+  claimAnonPlan,
+} from "@/lib/active-plan";
 import { SwipeStop } from "./swipe-stop";
 import {
   WhenPicker,
@@ -269,6 +283,12 @@ export function PlanFlow({
   const [now, setNow] = useState<Date | undefined>(undefined);
   useEffect(() => setNow(new Date()), []);
 
+  const venueBySlug = useMemo(() => {
+    const m = new Map<string, Venue>();
+    for (const v of venues) m.set(v.slug, v);
+    return m;
+  }, [venues]);
+
   const venueById = useMemo(() => {
     const m = new Map<string, Venue>();
     for (const v of venues) m.set(v.id, v);
@@ -389,12 +409,22 @@ export function PlanFlow({
       title: display.title,
       neighbourhood: display.area,
       why_it_works: `A ${computed.vibe.toLowerCase()} ${where} ${kind}: ${names}.`,
-      steps: display.steps.map((s) => ({
-        venueId: s.venue.id,
-        role: s.role,
-        dwellMins: s.dwellMins,
-        walkToNextMins: s.walkToNextMins,
-      })),
+      // Canonical adapter. Still an ARRAY with the same four legacy keys, plus
+      // `slug` — so a row written today is readable by anything that predates
+      // the model, including the account-data export. See lib/night-plan.ts.
+      steps: toSavedSteps(
+        fromEnginePlan(
+          {
+            ...computed,
+            area: display.area,
+            steps: display.steps.map((s) => ({
+              ...s,
+              arriveAt: s.arriveAt ?? null,
+            })),
+          },
+          { title: display.title },
+        ),
+      ),
     });
     if (error) {
       console.error("[plans] save failed:", error);
@@ -422,36 +452,124 @@ export function PlanFlow({
     void loadSavedPlans();
   };
 
+  // ── The active night ────────────────────────────────────────────────
+  //
+  // One path for every way a night arrives: generated, restored after a
+  // refresh, reopened from Saved, or claimed after signing in. They all become
+  // a NightPlan first (lib/night-plan.ts) and are hydrated against THIS
+  // catalogue, so there is a single place where a stale venue id is handled.
+  const owner = authUserId ?? null;
+
+  const activate = useCallback(
+    (np: NightPlan): boolean => {
+      const { stops, dropped } = hydrateStops<Venue>(np, {
+        byId: (id) => venueById.get(id),
+        bySlug: (slug) => venueBySlug.get(slug),
+      });
+      // A night whose venues have all left the catalogue is not a night.
+      if (stops.length === 0) return false;
+      if (dropped > 0) {
+        // Rendering a three-stop night with two stops and saying nothing is
+        // how a plan quietly becomes wrong. Surfaced for analytics; the user
+        // still gets the stops that survived.
+        track("plan_restored_partial", {
+          dropped,
+          kept: stops.length,
+          source: np.source,
+        });
+      }
+      setOpenedSaved({
+        title: np.title,
+        area: np.area,
+        daypart: np.daypart,
+        totalMins: nightTotalMins(np),
+        steps: stops,
+      });
+      // Seed the vibe/budget controls so the brief behind the night is what
+      // the user sees, and so "try again" regenerates something comparable
+      // rather than whatever the controls happened to be left on.
+      //
+      // The AREA control is deliberately NOT seeded. It is an AreaSel union
+      // (anywhere / nearYou / region / neighbourhood) and a NightPlan carries
+      // only the resolved area STRING, so mapping back would have to guess
+      // between "region" and "neighbourhood". Guessing wrong would silently
+      // change what the engine generates next, and preserving generation
+      // behaviour is a hard requirement here. The night itself still renders
+      // with its own area.
+      setVibe(np.vibe);
+      setBudget(np.budget);
+      setStep("result");
+      return true;
+    },
+    [venueById, venueBySlug],
+  );
+
   const openSaved = (row: SavedPlanRow) => {
-    const steps = row.steps
-      .map((s) => {
-        const venue = venueById.get(s.venueId);
-        return venue
-          ? {
-              venue,
-              role: s.role,
-              dwellMins: s.dwellMins,
-              walkToNextMins: s.walkToNextMins,
-            }
-          : null;
-      })
-      .filter((s): s is DisplayPlan["steps"][number] => s !== null);
-    if (steps.length === 0) return;
-    const totalMins = steps.reduce(
-      (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
-      0,
+    // Saved rows carry no vibe or budget (see lib/night-plan.ts), so the
+    // current control values stand in. They affect regeneration only.
+    const np = fromSavedRow(
+      {
+        id: row.id,
+        title: row.title,
+        neighbourhood: row.neighbourhood,
+        steps: row.steps,
+      },
+      { vibe, budget },
     );
-    setOpenedSaved({
-      title: row.title,
-      area: row.neighbourhood,
-      // Saved rows predate a stored daypart; infer it from the title we wrote
-      // ("… Day Out …" vs "… Night …") so the header label reads right.
-      daypart: row.title.includes("Day Out") ? "day" : "evening",
-      totalMins,
-      steps,
-    });
-    setStep("result");
+    if (!np) return;
+    activate(np);
   };
+
+  // ── Restore, and claim an anonymous night ───────────────────────────
+  //
+  // Runs once per owner. Two things happen here, in order:
+  //
+  //   1. If this browser has an anonymous night and the user has just signed
+  //      in, it is CLAIMED into their own slot. This is the "I built a night,
+  //      then signed up to save it" path — previously a bespoke one-shot
+  //      stash, now the same store as everything else.
+  //   2. Otherwise, whatever night this owner already had is restored.
+  //
+  // Owner-scoped keys mean a signed-out visitor can never restore the previous
+  // user's night on a shared browser (lib/active-plan.ts).
+  const restoredForRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    // Wait for the catalogue: hydrating against an empty list would drop every
+    // stop and look identical to "there was nothing saved".
+    if (venues.length === 0) return;
+    if (restoredForRef.current === owner) return;
+    restoredForRef.current = owner;
+
+    const claimed = owner ? claimAnonPlan(owner) : null;
+    if (claimed) {
+      anonOriginRef.current = true;
+      if (activate(claimed)) {
+        track("plan_anon_claimed", { stops: claimed.stops.length });
+        return;
+      }
+    }
+    const existing = readActivePlan(owner);
+    if (existing) activate(existing);
+  }, [owner, venues.length, activate]);
+
+  // Persist whatever is on screen, so a refresh, a tap through to a venue and
+  // the journey back, or the sign-in round trip all return to the same night.
+  useEffect(() => {
+    if (step !== "result") return;
+    const np = openedSaved
+      ? null
+      : fromEnginePlan(
+          {
+            ...computed,
+            steps: display.steps.map((s) => ({
+              ...s,
+              arriveAt: s.arriveAt ?? null,
+            })),
+          },
+          { title: display.title },
+        );
+    if (np) writeActivePlan(owner, np);
+  }, [step, openedSaved, computed, display, owner]);
 
   // Hydrate a night built while signed OUT. The anon /plan flow stashes its
   // result in localStorage before the sign-in round-trip (three navigations
