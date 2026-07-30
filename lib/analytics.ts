@@ -180,12 +180,20 @@ export type AnalyticsEvent =
   | "card_dismissed"
   | "feed_end_reached" // fires ONCE per feed session, not per observer entry
   | "near_you_result"
-  // Group-room security operations, from PR #187 (merged 2026-07-30). Kept
-  // VERBATIM through the rebase: payloads carry ONLY a one-way hashed room
-  // reference (lib/room-code.ts) — never a raw room code, display name, taste
-  // map, venue choice or coordinate. This branch deliberately did not define
-  // these three while #187 was open, precisely so this hunk would resolve by
-  // taking both sides rather than by choosing one.
+  // Group-room security operations, from PR #187 (merged 2026-07-30). This
+  // branch deliberately did not define these three while #187 was open,
+  // precisely so this hunk would resolve by taking both sides.
+  //
+  // Payloads carry ONLY `reason` (a closed category) and `room_id`, the opaque
+  // plan_rooms row uuid. Never a raw room code, a HASH of one, a display name,
+  // a taste map, a venue choice or a coordinate.
+  //
+  // 🧨 #187's own comment here said "a one-way hashed room reference
+  // (lib/room-code.ts)", and that was already false when it merged:
+  // room-code.ts records that hashRoomCode is NOT for analytics and not
+  // suitable for it, because the salt ships in the client bundle, so any hash
+  // is table-invertible back to a live code. Corrected rather than pinned, so
+  // nobody adds a fourth event carrying a "safe" hash.
   | "together_join_denied"
   | "together_room_expired"
   | "together_host_handoff";
@@ -269,8 +277,11 @@ const BLOCKED_KEY =
 
 // Bearer-shaped names, matched WHOLE. A Plan Together room code is a bearer
 // credential: possessing it is authorisation to join. It must never be a
-// property, and neither must a hash of it (the code is 4 characters, so any
-// hash is a rainbow table).
+// property, and neither must a hash of it: lib/room-code.ts records that its
+// HASH_SALT ships in the client bundle, so a table over the code space inverts
+// any hash back to a live code. (The space is 6 characters over a 32-character
+// alphabet since #187; the size is not what makes hashing unsafe here, the
+// shipped salt is.)
 //
 // `room_id` is deliberately NOT blocked. It is the opaque row uuid used by the
 // group-security work's own events, carries no join capability, and blocking it
@@ -314,21 +325,94 @@ function sanitizeProps(
 let pendingIdentify: string | null = null;
 
 /**
- * Remove `room=` from any URL-shaped analytics property.
+ * Remove a Plan Together room code from any analytics property.
  *
- * Applies to $current_url, $referrer, $pathname and anything else carrying a
- * query string. Replaced with a placeholder rather than dropped so funnels on
- * /plan/together still work.
+ * A room code is a BEARER CREDENTIAL: possessing it is authorisation to join.
+ * It lives in the URL (`/plan/together?room=CODE`), and PostHog attaches
+ * `$current_url`, `$referrer` and autocaptured element data to EVERY event, so
+ * without this hook a code lifted from the analytics feed is a working key to a
+ * live room, defeating the membership check PR #187 shipped.
+ *
+ * 🧨 THREE WAYS THE FIRST VERSION MISSED, all three verified by running it:
+ *
+ *  1. **Percent-encoding.** It tested `v.includes("room=")` against the raw
+ *     value, so `.../sign-in?return=%2Fplan%2Ftogether%3Froom%3DK4WP2X` sailed
+ *     straight through. That is not an exotic input: it is what the anon invite
+ *     flow produces, because the auth wall URL-encodes the whole return path.
+ *     It was the PRIMARY leak path, not an edge case.
+ *  2. **Nesting.** It looked only at top-level string values, so a code inside
+ *     the `$elements` ARRAY (which posthog-js sends whenever the project's
+ *     remote config has `elementsChainAsString` false, and each entry carries
+ *     `attr__href` verbatim) was copied through untouched.
+ *  3. **A greedy value match.** `[^&#]*` only stops at `&` or `#`, and an
+ *     elements chain contains neither, so redacting one href ate the entire
+ *     rest of the chain: every ancestor, every sibling, all the element text.
+ *     Silent data destruction that looks fine on a dashboard.
+ *
+ * So: match both encodings, recurse into arrays and objects, and bound the
+ * value to a real delimiter. Values are REPLACED rather than dropped so funnels
+ * on /plan/together keep working.
+ *
+ * Exported for tests. `sanitize_properties` is the posthog-js hook that calls
+ * it, applied inside the capture path for every event, so queued events flushed
+ * later are covered too.
  */
-function stripRoomCodes(
-  props: Record<string, unknown>,
-  _event: string,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...props };
-  for (const [k, v] of Object.entries(out)) {
-    if (typeof v === "string" && v.includes("room=")) {
-      out[k] = v.replace(/([?&]room=)[^&#]*/gi, "$1redacted");
+
+// Separator may be a literal `?`/`&` or its encoded form, because the param can
+// sit inside a nested, encoded URL. The value class stops at every delimiter an
+// elements chain or a query string can use, and at `%` so an encoded `%26`
+// terminates it. Room codes are alphanumeric, so nothing legitimate is eaten.
+const ROOM_PARAM_RE = /((?:[?&]|%3f|%26)room(?:=|%3d))[^&#"'\s;%\\]*/gi;
+
+// Nested-URL carriers. A `return`/`next` param is a whole URL by construction,
+// so it can hide anything at all, including a room code in a form the pattern
+// above has not thought of. Redacted wholesale: the destination is not a metric
+// we report on, and `entry_surface` already answers "where did they come from"
+// from a closed vocabulary.
+const NESTED_URL_PARAM_RE =
+  /((?:[?&]|%3f|%26)(?:return|returnto|next|redirect|redirect_uri|redirect_to)(?:=|%3d))[^&#"'\s;]*/gi;
+
+function redactRoomCodesInString(value: string): string {
+  return value
+    .replace(NESTED_URL_PARAM_RE, "$1redacted")
+    .replace(ROOM_PARAM_RE, "$1redacted");
+}
+
+// Depth cap: posthog's own property bags are shallow, and an unbounded walk over
+// a caller-supplied object is a denial-of-service waiting to happen inside a
+// hook that runs on every single event.
+const MAX_SANITIZE_DEPTH = 6;
+
+function redactRoomCodesDeep(value: unknown, depth: number): unknown {
+  if (typeof value === "string") return redactRoomCodesInString(value);
+  if (depth >= MAX_SANITIZE_DEPTH) return value;
+  if (Array.isArray(value)) {
+    return value.map((v) => redactRoomCodesDeep(v, depth + 1));
+  }
+  // Plain objects only. A Date, a RegExp or a class instance is returned as is:
+  // rebuilding one would change its type on the way out.
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    (Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null)
+  ) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactRoomCodesDeep(v, depth + 1);
     }
+    return out;
+  }
+  return value;
+}
+
+export function stripRoomCodes(
+  props: Record<string, unknown>,
+  _event?: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(props)) {
+    out[k] = redactRoomCodesDeep(v, 0);
   }
   return out;
 }

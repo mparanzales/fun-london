@@ -114,7 +114,11 @@ describe("fire-once semantics are latched by a ref, not an effect", () => {
   });
 
   it("the group swap emit is deduped per stop and target position", () => {
-    expect(groupResult).toContain("swapReportedRef");
+    // A pending-transition map, not a Set of (stop, position) keys: `pos`
+    // cycles modulo the alternative count, so a Set is exhausted after a few
+    // swaps of the same stop and later genuine swaps go uncounted.
+    expect(groupResult).toContain("swapPendingRef");
+    expect(groupResult).not.toContain("swapReportedRef");
   });
 });
 
@@ -222,30 +226,50 @@ describe("both branches' protections survived the rebase onto PR #187", () => {
     // bearer credential and it sits in the URL, so without this hook
     // capture_pageview + autocapture ship a working key to a live room in
     // $current_url on every captured click.
+    //
+    // The stripper's BEHAVIOUR is tested in analytics-room-code-strip.test.ts,
+    // against real percent-encoded URLs, a $elements array and an elements
+    // chain. This guard only pins that it is still WIRED. It deliberately does
+    // NOT assert the regex literal any more: the previous version did, three
+    // real leaks passed it anyway, and pinning the implementation meant fixing
+    // the bug broke the test, which invites loosening the test instead.
     expect(analyticsCode).toContain("sanitize_properties: stripRoomCodes");
-    expect(analyticsCode).toContain("function stripRoomCodes(");
-    expect(analyticsCode).toMatch(/room=\)\[\^&#\]\*\/gi/);
+    expect(analyticsCode).toContain("export function stripRoomCodes(");
   });
 
-  it("kept this branch's pending-event queue in the same init call", () => {
-    expect(analyticsCode).toContain("flushPendingEvents()");
+  it("flushes the pending queue from INSIDE the loaded callback", () => {
+    // Presence alone is not enough. Moving flushPendingEvents() above
+    // posthog.init would keep both strings in the file and silently destroy
+    // every queued event: capture() early-returns while __loaded is false, and
+    // the flush has already emptied the array. Ordering is the invariant.
+    const loadedAt = analyticsCode.indexOf("loaded: (ph) =>");
+    // The CALL, with its semicolon. Matching "flushPendingEvents()" bare finds
+    // the declaration `function flushPendingEvents(): void`, whose empty
+    // parameter list contains the same characters.
+    const flushAt = analyticsCode.indexOf("flushPendingEvents();");
+    const readyAt = analyticsCode.indexOf("posthogReady = true");
+    expect(loadedAt).toBeGreaterThan(-1); // positive controls
+    expect(flushAt).toBeGreaterThan(-1);
+    expect(readyAt).toBeGreaterThan(-1);
+    expect(loadedAt).toBeLessThan(flushAt);
+    expect(flushAt).toBeLessThan(readyAt);
     expect(analyticsCode).toContain("MAX_PENDING_EVENTS");
   });
 
-  it("does not drop the security events' own properties", () => {
-    // room_id is an opaque row uuid, not a join credential, and it is the only
-    // correlation property those events carry. The sanitizer's carve-out for it
-    // is load-bearing now that #187 is merged.
-    const keys = ["reason", "room_id"];
-    const blockedKey =
-      /(^|_)(lat|lng|lon|long|coord|coords|geo|geohash|email|phone|name|address|postcode|ip|token|device|user|session|password|secret)(_|$)/i;
-    const blockedExact =
-      /^(room_?code|invite_?code|join_?code|share_?link|room_?link|code)$/i;
-    for (const k of keys) {
-      expect(blockedKey.test(k) || blockedExact.test(k)).toBe(false);
-    }
-    // POSITIVE CONTROL: a real bearer-shaped name IS blocked.
-    expect(blockedExact.test("room_code")).toBe(true);
+  it("keeps the sanitizer's room_id carve-out, which the security events need", () => {
+    // room_id is the opaque plan_rooms row uuid, not a join credential, and it
+    // is the only correlation property two of the three together_* events have.
+    // Pin the SOURCE of the blocked-name list rather than a copy of it: the
+    // previous version re-declared both regexes inside the test body and
+    // asserted a property of its own copies, so it could not fail for any
+    // change to lib/analytics.ts. The real behavioural coverage is in
+    // analytics-contract.test.ts ("ALLOWS room_id").
+    const blockedExactLine = analyticsCode.match(
+      /BLOCKED_EXACT =[\s\S]{0,200}?;/,
+    )?.[0];
+    expect(blockedExactLine).toBeTruthy(); // positive control
+    expect(blockedExactLine).toContain("room_?code");
+    expect(blockedExactLine).not.toMatch(/room_\?id|room_id/);
   });
 
   it("keeps the deprecated plan_save name with its removal date", () => {

@@ -152,36 +152,56 @@ Verified as part of this work:
 | No exact location | Yes. `near_you_result` reports the outcome only. A source guard test asserts no explore event references `geo`, `lat`, `lng`, `distance` or the geo-bearing view key. |
 | No raw exception text | Yes. `lib/analytics-reasons.ts` maps codes and statuses only; a guard test asserts no `track()` call in either plan flow references `error.message`, `error.details`, `error.hint` or `String(err)`. |
 | No full plan payload, no alternatives | Yes. Save events carry the coarse bag only: no title, no `why_it_works`, no venue names or ids. `plan_open_maps` still sends a stop count, never the maps URL. |
-| No room code in pageview URLs | ✅ **Now covered, and verified live on production.** `sanitize_properties: stripRoomCodes` came in from [PR #187](https://github.com/mparanzales/fun-london/pull/187) and was kept verbatim through the rebase. Confirmed present in the deployed prod bundle. |
+| No room code in pageview URLs | ✅ **Now covered, and HARDENED.** `sanitize_properties: stripRoomCodes` arrived from [PR #187](https://github.com/mparanzales/fun-london/pull/187); the post-rebase privacy gate then found three ways it leaked anyway, all reproduced by running it. Rewritten here and covered by 18 behavioural tests. See below. |
 
-### The room-code gap: closed, and how
+### The room-code gap: closed, then found leaking, then actually closed
 
-`capture_pageview` plus `autocapture` attach `$current_url` to every event,
-including autocaptured clicks, and `/plan/together?room=CODE` puts a **bearer
-credential** in the address bar. A code lifted from the analytics feed is a
-working key to a live room.
+A room code is a **bearer credential**: possessing it is authorisation to join.
+It lives in the URL (`/plan/together?room=CODE`), and PostHog attaches
+`$current_url`, `$referrer` and autocaptured element data to **every** event.
 
-This branch deliberately did **not** write that fix, because it already existed on
-`fix/group-room-security`, in the same `posthog.init` call this branch edits. A
-second copy would have guaranteed a conflict and made no user safer while both
-branches were unmerged.
+[PR #187](https://github.com/mparanzales/fun-london/pull/187) shipped
+`sanitize_properties: stripRoomCodes` for exactly this, and this branch
+deliberately did not write a second copy. After the rebase the adversarial
+privacy gate went looking anyway, and **found three leaks, all reproduced by
+running the function**:
 
-**That branch merged on 2026-07-30 ([PR #187](https://github.com/mparanzales/fun-london/pull/187)), this branch was rebased onto it, and the
-resolution kept BOTH sides**: `sanitize_properties: stripRoomCodes` and this
-branch's pending-event queue now live in the same `posthog.init` call. Verified
-live: the stripper's replacement string is present in the deployed production
-bundle.
+| # | Leak | Verified |
+| --- | --- | --- |
+| 1 | **Percent-encoding.** It tested `v.includes("room=")` on the raw value, so `/sign-in?return=%2Fplan%2Ftogether%3Froom%3DCODE` passed straight through. | `LEAKS` |
+| 2 | **Nesting.** Only top-level strings were inspected, so a code inside the `$elements` array (each entry carries `attr__href` verbatim) passed through. | `LEAKS` |
+| 3 | **Greedy value match.** `[^&#]*` stops only at `&` or `#`, and an elements chain contains neither, so redacting one href **deleted the entire rest of the chain**. | confirmed |
 
-Two guards keep the resolution honest, because a careless future conflict in that
-exact hunk is precisely how one side's protection gets silently dropped:
-`analytics-instrumentation-guard.test.ts` asserts `sanitize_properties:
-stripRoomCodes` and `function stripRoomCodes(` are both present, that the three
-`together_*` event names survived, and that this branch's own ten survived too.
+Leak 1 is not an edge case. It is what the **anon invite flow produces**: an
+invitee opens a room link, the auth wall URL-encodes the whole return path into
+the sign-in link, and autocapture then attaches that URL to every subsequent
+click. It was the primary path, and it reached PostHog EU.
+
+⚠️ **All three were inherited from #187, which is merged and LIVE IN PRODUCTION.**
+The stripper's replacement string is present in the deployed prod bundle, so the
+hook is running and the two leaks are live until this branch merges.
+
+**The fix** (`lib/analytics.ts`): match both encodings and both separator forms,
+redact nested-URL carriers (`return`, `next`, `redirect`, …) wholesale because
+they are whole URLs by construction, recurse into arrays and plain objects with a
+depth cap, and bound the value to a real delimiter so nothing legitimate is eaten.
+
+**Why the old guard did not catch any of it, and what replaced it.** The guard
+asserted that the source text contained `sanitize_properties: stripRoomCodes` and
+that the regex literal matched a hard-coded shape. Three real leaks passed it with
+CI green, and the third assertion **pinned the buggy regex**, so fixing the bug
+would have broken the test and invited someone to loosen the test instead. That is
+the same failure mode as #187's own commit title, *"fix the gate meant to prove
+it"*. It is now `lib/__tests__/analytics-room-code-strip.test.ts`: 18 behavioural
+tests that call the function with real percent-encoded URLs, a `$elements` array,
+an elements chain and a 50-deep structure, and assert the code characters are
+**absent from the output**. The remaining source-text guard only pins that the
+hook is still wired, and says so.
 
 The `track()` key sanitizer protects **explicit event properties** independently,
-and its carve-out for `room_id` is now load-bearing: `together_room_expired` and
-`together_host_handoff` send `{ room_id }` as their only correlation property, and
-a broader block would have silently stripped them. A test pins that.
+and its carve-out for `room_id` is load-bearing: `together_room_expired` and
+`together_host_handoff` send `{ room_id }` as their only correlation property, so
+a broader block would have silently stripped them. Tested both ways.
 
 ## Merge order: steps 1 and 2 are DONE
 
@@ -208,7 +228,7 @@ not by trusting the PR's Merged badge.
 
 ## Verification
 
-- `pnpm check` green: **487 tests, 43 files** post-rebase (was 288 / 34 on the original base; the jump includes #187's own tests arriving via `main`).
+- `pnpm check` green: **505 tests, 44 files** (was 288 / 34 on the original base; the jump includes #187's own tests arriving via `main`, plus 18 new room-code tests).
 - `pnpm build` green.
 - `/anon/venue/[slug]` and `/anon/event/[id]` still prerender as SSG in the build
   output. This is the invariant most at risk from adding client code to the venue
