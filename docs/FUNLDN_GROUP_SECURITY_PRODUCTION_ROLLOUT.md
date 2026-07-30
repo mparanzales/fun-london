@@ -304,15 +304,23 @@ Existing no-cost alternatives, and why they are second choices:
 | Option | Cost | Assessment |
 |---|---|---|
 | Step in `maintenance.yml` (daily 03:00 UTC) | £0 | **Recommended.** Existing workflow, existing secret, existing failure alerting. |
-| `pg_cron` | £0 | Available but **not installed**. Database-native and needs no secret, but installing an extension is an infrastructure change and wants its own review. Would satisfy the function's `current_user` guard, since pg_cron runs as `postgres`. |
+| `pg_cron` | £0 | Available but **not installed**. Database-native and needs no secret, but installing an extension is an infrastructure change and wants its own review. (Note: `0004` removed that in-body `current_user` guard, because inside a definer function it can never refuse anyone. The GRANT is the control, and pg_cron running as `postgres` is unaffected by the change.) |
 | Supabase Edge Function + schedule | £0 on current plan | Requires deploying edge functions, which this project does not currently use. More surface for less benefit. |
 | Vercel Cron | £0 within Hobby limits | Needs a new API route, i.e. a new publicly-reachable endpoint guarding a destructive function. Worst option here. |
 
-**Decision required from Maria:** approve adding the purge step to `maintenance.yml`. It was
+**Decision required from Maria — now proposed in PR #190, still hers to approve:** adding the
+purge step to `maintenance.yml`. That PR implements it as its OWN job (own alerting, no Google
+key, no R2) rather than a step of the venue refresh. It was
 deliberately **not enabled** — it is a workflow change, so it belongs in a reviewed PR, not in a
 cutover. Until then, room and membership records accumulate indefinitely.
 
 ## Still open
+
+> **UPDATE, PR #190 (open, not merged).** All three bullets below are addressed on branch
+> `fix/room-hygiene`: the purge is scheduled in its own nightly job, the verification script
+> runs over a direct read-only Postgres connection with no SQL-execution RPC, and `0004`
+> closes the `create_plan_room` existence oracle. The backup note stands as written. Nothing
+> in that branch touches the Realtime policies this document records as shipped.
 
 - **`verify-room-security.ts` cannot run against production** until it takes a direct Postgres
   connection instead of the rejected RPC. The same change repairs `verify-plan.ts` and

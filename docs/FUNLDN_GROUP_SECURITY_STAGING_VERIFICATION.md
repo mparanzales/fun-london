@@ -1,6 +1,6 @@
 # Fun London — Group-Room Security: Staging Verification
 
-**Status: VERIFIED on an isolated live database. Not applied to production, not merged, not deployed.**
+**Status: VERIFIED on an isolated live database — and SINCE APPLIED. `0001`-`0003` were merged as `da88c2f` and applied to production on 2026-07-30; see `FUNLDN_GROUP_SECURITY_PRODUCTION_ROLLOUT.md`. This document is the pre-cutover verification record and is kept as written.**
 Date 2026-07-29 · branch `fix/group-room-security` · cost **£0**.
 
 The previous revision of this document said the work was blocked before Phase 2 because no
@@ -27,7 +27,7 @@ GoTrue accounts, real PostgREST, real Realtime WebSockets, on loopback, for noth
 | 13 | `supabase/manual/0003` applied (final) | **Verified** — exposure closed |
 | 14 | `EXPECT_STAGE=3 verify-room-security` | **Passes**, and provably fails when broken |
 | 15 | `pnpm staging:room-security` | **33 pass / 0 fail / 0 inconclusive** at commit `acc8368` (see note in the evidence file) |
-| 16 | Test suite, typecheck, lint, build, copy guard | **347 tests / 38 files pass**; build compiles |
+| 16 | Test suite, typecheck, lint, build, copy guard | **347 tests / 38 files pass** at the time of this run; build compiles |
 | 17 | Rollback | **Proved by execution**, both directions, twice |
 | 18 | supabase-guardian / code-reviewer gates | Both ran; **both found blockers; all fixed** (§5) |
 | 19 | Temporary rooms, members, accounts removed | **Verified by re-query**, not by trusting the delete |

@@ -177,7 +177,7 @@ describe("verification scripts run again, without a SQL-execution RPC", () => {
     expect(src).toContain("ALLOW_LOCAL");
   });
 
-  it("🧨 every script reaching the server-only admin client runs with the scripts tsconfig", () => {
+  it("🧨 every script DIRECTLY importing the server-only admin client runs with the scripts tsconfig", () => {
     // `lib/supabase/admin.ts` opens with `import "server-only"`, which plain
     // Node cannot resolve, so such a script dies at import unless it is run
     // with the alias. Assert the EXACT set rather than iterating whatever the
@@ -191,6 +191,13 @@ describe("verification scripts run again, without a SQL-execution RPC", () => {
       // comment and runs perfectly well. taste-feed is included because it
       // imports the admin client itself, so a script importing only taste-feed
       // inherits `server-only` and dies the same way.
+      //
+      // KNOWN LIMIT, stated rather than implied: DIRECT importers of those two
+      // modules only. lib/queries.ts, lib/plan-preview.ts, lib/venue-teaser.ts
+      // and lib/event-teaser.ts also reach `server-only`, so a future script
+      // importing one of those dies at MODULE_NOT_FOUND with this test green.
+      // Catching that needs real import-graph traversal; the remedy is the
+      // same one line in package.json either way.
       .filter((f) =>
         /^\s*import\b[^;]*["'][^"']*(supabase\/admin|taste-feed)["']/m.test(
           readFileSync(join(dir, f), "utf8"),

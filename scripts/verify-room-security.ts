@@ -55,6 +55,17 @@ async function main() {
   // variable is set at all it must name a real stage — and this has to run
   // BEFORE any query, or the script dies on something else first and the guard
   // never gets a turn.
+  // Same strictness for EXPECT_0004: `true`, `yes` or a trailing space would
+  // otherwise disarm the 0004 assertion silently and still exit 0.
+  const raw0004 = process.env.EXPECT_0004;
+  if (raw0004 !== undefined && raw0004.trim() !== "1") {
+    console.error(
+      `EXPECT_0004=${raw0004} is not 1. Refusing to run with a gate that would silently do nothing.`,
+    );
+    process.exit(1);
+  }
+  const require0004 = raw0004?.trim() === "1";
+
   const rawExpected = process.env.EXPECT_STAGE;
   if (
     rawExpected !== undefined &&
@@ -281,7 +292,7 @@ async function main() {
   // indistinguishable from "the hygiene migration has not landed yet".
   const create0004 =
     createFn.length === 1 && createFn[0].args.toLowerCase().includes("default");
-  if (create0004 || process.env.EXPECT_0004 === "1") {
+  if (create0004 || require0004) {
     check(
       create0004,
       "0004 applied: exactly one create_plan_room, with a DEFAULTed parameter",
@@ -299,11 +310,15 @@ async function main() {
         and p.proname = 'new_plan_room_code'`,
   );
   check(
-    codeGen.length === 0 || (!codeGen[0].anon && !codeGen[0].auth),
+    require0004
+      ? codeGen.length === 1 && !codeGen[0].anon && !codeGen[0].auth
+      : codeGen.length === 0 || (!codeGen[0].anon && !codeGen[0].auth),
     "the room-code generator is not executable by anon or authenticated",
     codeGen.length
       ? `anon=${codeGen[0].anon} auth=${codeGen[0].auth}`
-      : "absent (pre-0004)",
+      : require0004
+        ? "ABSENT — but EXPECT_0004=1 requires it"
+        : "absent (pre-0004)",
   );
 
   const anonExecutable = grants.filter((g) => g.anon).map((g) => g.fn);

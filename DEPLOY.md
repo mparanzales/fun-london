@@ -206,7 +206,8 @@ shipped. What is still absent:
   a project bootstrapped from `schema.sql` alone comes up without them.
 
 **Order for a fresh project:** `schema.sql`, then `supabase/migrations/` in filename order,
-then the owner-level Realtime policies in `supabase/manual/` (`0002`, then `0003`), then
+then `create extension if not exists pgcrypto with schema extensions;`, then the owner-level
+Realtime policies in `supabase/manual/` (`0002`, then `0003`), then
 `notify pgrst, 'reload schema';`.
 
 **For an existing project, applying `0004` is a required step BEFORE the room-hygiene

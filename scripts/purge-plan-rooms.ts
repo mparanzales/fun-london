@@ -82,10 +82,18 @@ async function main() {
   // The function returns a ROOM count, so a ledger sweep that silently stopped
   // working would print `throttle N -> N` and still exit 0. Count what should
   // go so the summary can be checked against what did.
-  const { count: staleLedger } = await sb
+  const { count: staleLedger, error: ledgerErr } = await sb
     .from("plan_room_join_attempts")
     .select("*", { head: true, count: "exact" })
     .lt("window_start", cutoff);
+  if (ledgerErr) {
+    // Swallowing this would make the FATAL below unreachable: a failed read
+    // returns a null count, which reads as "nothing was eligible".
+    console.error(
+      `could not count the throttle ledger: ${ledgerErr.code ?? "?"}`,
+    );
+    process.exit(1);
+  }
   console.log(
     `\n${n} room(s) and ${staleLedger ?? 0} throttle row(s) are more than 7 days past their window.`,
   );
@@ -142,17 +150,27 @@ async function main() {
     process.exit(1);
   }
   // Same rule for the ledger, which the return value cannot speak for.
-  if (
-    !DRY_RUN &&
-    (staleLedger ?? 0) > 0 &&
-    after &&
-    after.attempts >= before.attempts
-  ) {
-    console.error(
-      `\nFATAL: ${staleLedger} throttle row(s) were past the cutoff but the ledger did not shrink. ` +
-        `The sweep inside purge_expired_plan_rooms may have stopped working.`,
-    );
-    process.exit(1);
+  if (!DRY_RUN && (staleLedger ?? 0) > 0) {
+    // Re-count the STALE rows rather than comparing totals: a join arriving
+    // between the two counts would otherwise false-FATAL a nightly job, and a
+    // noisy alert is an alert that gets muted.
+    const { count: stillStale, error: recountErr } = await sb
+      .from("plan_room_join_attempts")
+      .select("*", { head: true, count: "exact" })
+      .lt("window_start", cutoff);
+    if (recountErr) {
+      console.error(
+        `could not re-count the throttle ledger: ${recountErr.code ?? "?"}`,
+      );
+      process.exit(1);
+    }
+    if ((stillStale ?? 0) > 0) {
+      console.error(
+        `\nFATAL: ${stillStale} throttle row(s) are still past the cutoff after the purge. ` +
+          `The sweep inside purge_expired_plan_rooms may have stopped working.`,
+      );
+      process.exit(1);
+    }
   }
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Purge complete."}`);
 }
