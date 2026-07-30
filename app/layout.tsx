@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { AuthUserProvider } from "@/components/auth-user-context";
 import { AuthedProviders } from "@/components/authed-providers";
 import { SITE_URL } from "@/lib/config";
+import { ROOM_INVITE_INLINE_SCRIPT } from "@/lib/room-invite";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -85,6 +86,22 @@ export default function RootLayout({
             __html:
               "(function(){try{var m=localStorage.getItem('fl.theme.v1');var t;if(m==='day'||m==='night'){t=m}else{var h=new Date().getHours();t=(h>=18||h<6)?'night':'day'}document.documentElement.dataset.theme=t}catch(e){}})();",
           }}
+        />
+        {/* 🧨 Take the room code OUT of the URL before anything else runs.
+            A Plan Together code is a bearer credential, and posthog-js reads
+            window.location.href on every event and freezes it once as
+            $initial_person_info, which it then posts on every /flags request.
+            /flags never passes through sanitize_properties, so no redaction
+            hook can reach it. The only real fix is for the code not to be in
+            the URL when PostHog starts.
+
+            This is parse-time, inline, before any app chunk loads and long
+            before AnalyticsGate's effect calls posthog.init. Source lives in
+            lib/room-invite.ts so this and the tests cannot drift. It is a
+            no-op on every route except /plan/together, so the cookie-free
+            layout and the ISR /anon twins are unaffected. */}
+        <script
+          dangerouslySetInnerHTML={{ __html: ROOM_INVITE_INLINE_SCRIPT }}
         />
         {/* One provider tree at root so every route (consumer (main) shell,
             splash, onboarding, /venue/[slug], /booking/[slug]/confirmed)
