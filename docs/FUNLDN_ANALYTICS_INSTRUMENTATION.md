@@ -1,6 +1,6 @@
 # Fun London analytics instrumentation
 
-**Branch:** `feat/analytics-foundation`, cut from `main` @ `0d35d47`.
+**Branch:** `feat/analytics-foundation`, **rebased onto `main` @ `da88c2f`** (which includes the merged group-room security work, [PR #187](https://github.com/mparanzales/fun-london/pull/187)). Originally cut from `0d35d47`.
 **Scope:** the measurement layer only. No dashboards, no keys, no migrations, no
 product behaviour changes beyond instrumentation and two defects found on the way.
 
@@ -152,40 +152,54 @@ Verified as part of this work:
 | No exact location | Yes. `near_you_result` reports the outcome only. A source guard test asserts no explore event references `geo`, `lat`, `lng`, `distance` or the geo-bearing view key. |
 | No raw exception text | Yes. `lib/analytics-reasons.ts` maps codes and statuses only; a guard test asserts no `track()` call in either plan flow references `error.message`, `error.details`, `error.hint` or `String(err)`. |
 | No full plan payload, no alternatives | Yes. Save events carry the coarse bag only: no title, no `why_it_works`, no venue names or ids. `plan_open_maps` still sends a stop count, never the maps URL. |
-| No room code in pageview URLs | ⚠️ **Not fixed on this branch, deliberately.** See below. |
+| No room code in pageview URLs | ✅ **Now covered, and verified live on production.** `sanitize_properties: stripRoomCodes` came in from [PR #187](https://github.com/mparanzales/fun-london/pull/187) and was kept verbatim through the rebase. Confirmed present in the deployed prod bundle. |
 
-### The room-code gap, and why it is not fixed here
+### The room-code gap: closed, and how
 
 `capture_pageview` plus `autocapture` attach `$current_url` to every event,
 including autocaptured clicks, and `/plan/together?room=CODE` puts a **bearer
 credential** in the address bar. A code lifted from the analytics feed is a
 working key to a live room.
 
-The fix (`sanitize_properties: stripRoomCodes`) **already exists on
-`fix/group-room-security`**, in the same `posthog.init` call this branch also
-edits. Adding a second copy would guarantee a conflict and would not make any
-user safer, since neither branch is merged. So it is documented here as a
-merge-order dependency instead.
+This branch deliberately did **not** write that fix, because it already existed on
+`fix/group-room-security`, in the same `posthog.init` call this branch edits. A
+second copy would have guaranteed a conflict and made no user safer while both
+branches were unmerged.
 
-The new key sanitizer in `track()` protects **explicit event properties**
-independently. The `$current_url` exposure is the security branch's fix.
+**That branch merged on 2026-07-30 ([PR #187](https://github.com/mparanzales/fun-london/pull/187)), this branch was rebased onto it, and the
+resolution kept BOTH sides**: `sanitize_properties: stripRoomCodes` and this
+branch's pending-event queue now live in the same `posthog.init` call. Verified
+live: the stripper's replacement string is present in the deployed production
+bundle.
 
-## Merge order
+Two guards keep the resolution honest, because a careless future conflict in that
+exact hunk is precisely how one side's protection gets silently dropped:
+`analytics-instrumentation-guard.test.ts` asserts `sanitize_properties:
+stripRoomCodes` and `function stripRoomCodes(` are both present, that the three
+`together_*` event names survived, and that this branch's own ten survived too.
 
-1. **`fix/group-room-security` first.** It owns the three `together_*` event
-   names, `lib/room-code.ts`, and the `sanitize_properties` room-code stripper.
-   It is pushed to origin at `4bbb77b`.
-2. **Then this branch, rebased onto it.** The expected conflict is small and
-   predictable: both add members to the `AnalyticsEvent` union in the same hunk,
-   and both edit `posthog.init`. Take **both** sets of union members and **keep
-   the security branch's `sanitize_properties` line**.
+The `track()` key sanitizer protects **explicit event properties** independently,
+and its carve-out for `room_id` is now load-bearing: `together_room_expired` and
+`together_host_handoff` send `{ room_id }` as their only correlation property, and
+a broader block would have silently stripped them. A test pins that.
+
+## Merge order: steps 1 and 2 are DONE
+
+1. ~~`fix/group-room-security` first.~~ **Merged 2026-07-30 as
+   [PR #187](https://github.com/mparanzales/fun-london/pull/187)** (`main` @ `da88c2f`).
+2. ~~Then this branch, rebased onto it.~~ **Done.** Two conflict hunks in
+   `lib/analytics.ts`, both resolved by taking **both sides**:
+   - the `AnalyticsEvent` union: #187's three `together_*` names **plus** this
+     branch's ten;
+   - `posthog.init`: #187's `sanitize_properties: stripRoomCodes` **plus** this
+     branch's `loaded` callback with the identify-then-flush ordering and the
+     consent re-check.
+   Neither branch lost a privacy protection. Five new guard assertions pin it.
 3. Product-foundation work (save idempotency, the `plans` UPDATE policy) is
-   independent of this branch and can land in any order. When save idempotency
-   ships, revisit the `plan_save_tapped` note above.
-4. `feat/posthog-read-and-dashboards` is independent: it touches only `scripts/`
-   and four `package.json` entries. Its dashboard 5 can be upgraded from proxy
-   panels to real latency and failure panels once this branch is live and the
-   new events have arrived.
+   independent. When save idempotency ships, revisit the `plan_save_tapped` note
+   above.
+4. `feat/posthog-read-and-dashboards` ([#186](https://github.com/mparanzales/fun-london/pull/186))
+   is independent: it touches only `scripts/` and four `package.json` entries.
 
 ⚠️ **This repo has a documented squash-merge hazard:** commits pushed to a branch
 after its PR was squash-merged never reach `main`. After merging, verify the
@@ -194,7 +208,7 @@ not by trusting the PR's Merged badge.
 
 ## Verification
 
-- `pnpm check` green: **423 tests, 39 files** (was 288 / 34).
+- `pnpm check` green: **487 tests, 43 files** post-rebase (was 288 / 34 on the original base; the jump includes #187's own tests arriving via `main`).
 - `pnpm build` green.
 - `/anon/venue/[slug]` and `/anon/event/[id]` still prerender as SSG in the build
   output. This is the invariant most at risk from adding client code to the venue

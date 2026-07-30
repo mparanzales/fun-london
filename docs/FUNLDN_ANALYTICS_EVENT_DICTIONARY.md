@@ -3,7 +3,7 @@
 **Source of truth:** the `AnalyticsEvent` union and the exported unions in
 `lib/analytics.ts`. A typo is a compile error; this file is the prose around it.
 
-**Branch:** `feat/analytics-foundation`. Last updated 2026-07-30.
+**Branch:** `feat/analytics-foundation`, rebased onto `main` @ `da88c2f`. Last updated 2026-07-30.
 
 Read the two rules at the top before using any number below.
 
@@ -281,17 +281,30 @@ the provider order was swapped, and `track()` now queues pre-init events.
 the raw text, no PII" for the other sink. It now sends `q_len` and `results`
 only. Any insight breaking down `search_query` by `q` will go blank.
 
-## Group events: NOT defined on this branch
+## Group events: now present, from the merged security work
 
-`together_join_denied`, `together_room_expired` and `together_host_handoff` are
-defined on **`fix/group-room-security`**, in the same union hunk, together with
-the `sanitize_properties` room-code stripper and `lib/room-code.ts`. They are
-deliberately absent here to avoid duplicate union members and a guaranteed merge
-conflict, and a test pins that absence.
+`together_join_denied`, `together_room_expired` and `together_host_handoff` were
+defined on `fix/group-room-security`, **merged 2026-07-30 as
+[PR #187](https://github.com/mparanzales/fun-london/pull/187)**. This branch was
+rebased onto it and the union now carries all three alongside this branch's own
+ten. They arrived verbatim; this branch did not author or alter them.
 
-Neither the room-expiry nor the host-handoff mechanism exists on `main` at all
-(no `plan_rooms` table, no `expires_at`, no promotion path), so instrumenting
-them here would measure an invented mechanism.
+Their payloads, and why they pass the sanitizer:
 
-**Merge order: `fix/group-room-security` lands first; this branch rebases onto
-it.** See `FUNLDN_ANALYTICS_INSTRUMENTATION.md`.
+| Event | Payload | Note |
+| --- | --- | --- |
+| `together_join_denied` | `{ reason }` | `lib/room-errors.ts` categories. No room identifier at all. |
+| `together_room_expired` | `{ room_id }` | Opaque row uuid, not a join credential. |
+| `together_host_handoff` | `{ room_id }` | Same. |
+
+🧨 **The sanitizer's `room_id` carve-out is load-bearing.** `room_id` is
+deliberately absent from the blocked-key patterns. A broader block (anything
+matching `room`) would have silently stripped the only correlation property two of
+these three events carry, which is exactly the class of silent thinning this
+repository has been burned by before. `room_code`, `invite_code`, `join_code`,
+`share_link` and bare `code` remain blocked whole, and a test asserts both halves.
+
+Also from #187 and kept verbatim through the rebase:
+`sanitize_properties: stripRoomCodes` in `posthog.init`, which removes `room=` from
+every URL-bearing property before anything leaves the browser. Verified present in
+the deployed production bundle.

@@ -183,22 +183,24 @@ describe("no location, route or venue identity on the new events", () => {
   });
 });
 
-describe("the group-security events are NOT redefined here", () => {
-  // They already exist on branch fix/group-room-security in this same union
-  // hunk, together with the sanitize_properties room-code stripper. Declaring
-  // them here as well produces duplicate union members and a guaranteed merge
-  // conflict. Merge order: that branch lands first, then this one rebases.
+describe("both branches' protections survived the rebase onto PR #187", () => {
+  // This branch deliberately did NOT define the three together_* events while
+  // fix/group-room-security was open, so the lib/analytics.ts union hunk would
+  // resolve by taking BOTH sides rather than by choosing one. #187 merged on
+  // 2026-07-30 and this branch was rebased onto it. These guards pin the
+  // resolution, because a careless future conflict resolution in this exact
+  // hunk is how one side's privacy protection gets silently dropped.
+  const unionOnly = analytics.split("type Props =")[0];
+
   it.each([
     ["together_join_denied"],
     ["together_room_expired"],
     ["together_host_handoff"],
-  ])("%s is left to the security branch", (name) => {
-    const unionOnly = analytics.split("type Props =")[0];
-    expect(unionOnly).not.toContain(`| "${name}"`);
+  ])("kept %s, which came from the merged security work", (name) => {
+    expect(unionOnly).toContain(`| "${name}"`);
   });
 
-  it("POSITIVE CONTROL: the union does declare this branch's own new events", () => {
-    const unionOnly = analytics.split("type Props =")[0];
+  it("kept this branch's own new events too", () => {
     for (const name of [
       "plan_setup_started",
       "plan_generate_failed",
@@ -213,6 +215,37 @@ describe("the group-security events are NOT redefined here", () => {
     ]) {
       expect(unionOnly).toContain(`| "${name}"`);
     }
+  });
+
+  it("kept the room-code stripper wired into posthog.init", () => {
+    // 🧨 The single most important line in the resolution. A room code is a
+    // bearer credential and it sits in the URL, so without this hook
+    // capture_pageview + autocapture ship a working key to a live room in
+    // $current_url on every captured click.
+    expect(analyticsCode).toContain("sanitize_properties: stripRoomCodes");
+    expect(analyticsCode).toContain("function stripRoomCodes(");
+    expect(analyticsCode).toMatch(/room=\)\[\^&#\]\*\/gi/);
+  });
+
+  it("kept this branch's pending-event queue in the same init call", () => {
+    expect(analyticsCode).toContain("flushPendingEvents()");
+    expect(analyticsCode).toContain("MAX_PENDING_EVENTS");
+  });
+
+  it("does not drop the security events' own properties", () => {
+    // room_id is an opaque row uuid, not a join credential, and it is the only
+    // correlation property those events carry. The sanitizer's carve-out for it
+    // is load-bearing now that #187 is merged.
+    const keys = ["reason", "room_id"];
+    const blockedKey =
+      /(^|_)(lat|lng|lon|long|coord|coords|geo|geohash|email|phone|name|address|postcode|ip|token|device|user|session|password|secret)(_|$)/i;
+    const blockedExact =
+      /^(room_?code|invite_?code|join_?code|share_?link|room_?link|code)$/i;
+    for (const k of keys) {
+      expect(blockedKey.test(k) || blockedExact.test(k)).toBe(false);
+    }
+    // POSITIVE CONTROL: a real bearer-shaped name IS blocked.
+    expect(blockedExact.test("room_code")).toBe(true);
   });
 
   it("keeps the deprecated plan_save name with its removal date", () => {
