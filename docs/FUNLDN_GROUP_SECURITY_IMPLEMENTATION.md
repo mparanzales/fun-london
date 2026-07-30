@@ -1,5 +1,19 @@
 # Fun London — Group-Room Security Implementation
 
+> ## ✅ SHIPPED — production cutover completed 2026-07-30
+>
+> All three migrations are applied to production. `realtime.messages` now carries **two**
+> policies, both membership-scoped; the broad `plan-%` policies are **gone**. Verified on
+> production with real accounts: an unrelated signed-in account went from `SUBSCRIBED` to
+> `CHANNEL_ERROR` while host and member sessions were unaffected and a vote broadcast still
+> delivered. Full record: `FUNLDN_GROUP_SECURITY_PRODUCTION_ROLLOUT.md`.
+>
+> Open follow-ups: `purge_expired_plan_rooms()` is still unscheduled, and
+> `verify-room-security.ts` cannot run against production until it uses a direct Postgres
+> connection instead of the rejected `exec_sql_readonly` RPC.
+
+
+
 Branch `fix/group-room-security`, off `main` @ `0d35d47`. Security and infrastructure only: **no interface redesign, no group-plan saving, no change to solo planning, navigation or identity.** Nothing is merged and nothing is deployed — the migrations are files in the repo, not applied to any database.
 
 ## 1. The previous exposure

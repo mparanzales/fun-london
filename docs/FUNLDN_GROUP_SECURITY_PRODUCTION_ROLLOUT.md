@@ -108,10 +108,13 @@ directions, twice** — it does not depend on a backup.
 | 2026-07-29 | Pre-flight (4 checks above) | All confirmed |
 | 2026-07-29 | Ownership probe on production | Succeeded; probe policy removed; production back to 2 policies |
 | 2026-07-29 | `0001_plan_rooms.sql` | **APPLIED and verified** — see below |
-| — | Merge + client deploy | **Founder action** — Claude does not merge |
-| — | `0002` dual-run | Blocked on the deploy |
-| — | Soak | Blocked on 0002 |
-| — | `0003` close the exposure | Blocked on the soak |
+| 2026-07-30 | Merge (#187) + client deploy | **Merged by Maria** as `da88c2f`; Vercel `dpl_vU5Ca…` READY on `funldn.com` |
+| 2026-07-30 | Dual-run baseline on production | 11 pass / 1 fail — the 1 is the exposure, reproduced |
+| 2026-07-30 | `0002` applied | 4 policies: 2 scoped + 2 broad |
+| 2026-07-30 | Dual-run battery | 11 pass / 1 fail — **identical**; nothing broken, nothing yet closed |
+| 2026-07-30 | `0003` applied | **Exposure closed** — 2 policies, both membership-scoped |
+| 2026-07-30 | Final battery | **12 pass / 0 fail** |
+| 2026-07-30 | Cleanup | Verified by re-query: 16 users (unchanged), 0 room rows |
 
 ## Applied: 0001, 2026-07-29
 
@@ -154,3 +157,171 @@ checked rather than waved through:
   about the caller only.
 
 Nothing else regressed: no pre-existing table, policy or grant was touched.
+
+
+# The cutover, 2026-07-30
+
+## What was deployed
+
+PR #187 merged by Maria as `da88c2f8e3ef38e18941a2b22aedf64db8dc1c2d`. Confirmed **by content**,
+not by the merged badge — `origin/main` and the reviewed tree are byte-identical across
+`supabase/`, `scripts/` and `lib/`, and the rotation SQL `(m.joined_at, m.user_id) >` is present
+in main at `0001_plan_rooms.sql:349`. (The squash-merge stranding trap has bitten this repo
+twice before; the badge is not evidence.)
+
+Production deployment `dpl_vU5Ca1mX81CobtActnMYUKJXasiQ`, target `production`, state `READY`,
+commit `da88c2f`, region `lhr1`, aliased to `funldn.com` and `www.funldn.com`.
+
+## Method
+
+Three disposable accounts (A host, B member, C unrelated) exercised the **real deployed RPCs and
+real Realtime private channels** on production. No service-role key was handled by the tooling:
+the accounts were seeded through a privileged SQL session and signed in with the public anon key,
+so the only secret in play was a throwaway password for accounts that no longer exist.
+
+The battery ran **three times** — before 0002, after 0002, after 0003 — because a run that only
+ever happens after the fix cannot tell you whether it measured the fix or measured a broken
+channel.
+
+| Check | before 0002 | dual-run | after 0003 |
+|---|---|---|---|
+| host creates room + membership row | PASS | PASS | PASS |
+| member joins, membership row written | PASS | PASS | PASS |
+| host subscribes (positive control) | PASS | PASS | PASS |
+| member subscribes (positive control) | PASS | PASS | PASS |
+| vote broadcast reaches the member | PASS | PASS | PASS |
+| **unrelated account subscribe** | **SUBSCRIBED — the exposure** | **SUBSCRIBED** | **CHANNEL_ERROR** |
+| unrelated account reads room rows | 0 rows | 0 rows | 0 rows |
+| non-host cannot close | PASS | PASS | PASS |
+| host can close | PASS | PASS | PASS |
+| signed-out refused by grant | `42501` | `42501` | `42501` |
+| **totals** | 11 / 1 fail | 11 / 1 fail | **12 / 0** |
+
+Dual-run being *identical* to baseline is the point: permissive policies OR together, so 0002
+could not close anything, and it demonstrably broke nothing for real host and member sessions.
+
+## Final policy state, from `pg_policies`
+
+| Condition | Result |
+|---|---|
+| Broad topic-prefix-only policies remaining | **NONE** |
+| Realtime READ requires membership | true |
+| Realtime WRITE requires membership | true |
+| Predicate denies **closed** rooms | true (`closed_at is null`) |
+| Predicate denies **expired** rooms | true (`expires_at > now()`) |
+| Policies granting `anon` on `realtime.messages` | **NONE** |
+| `anon` SELECT grant on any room table | **NONE** |
+| Anon-executable room functions | **NONE** |
+| Total policies on `realtime.messages` | **2**, both membership-scoped |
+
+## `EXPECT_STAGE=3 pnpm tsx scripts/verify-room-security.ts`
+
+Ran, and **failed closed** — as designed:
+
+```
+Target: fxfuzabrivuianfwdopc.supabase.co (key names project fxfuzabrivuianfwdopc)
+verification error: Could not find the function public.exec_sql_readonly(q) in the schema cache
+```
+
+Two things worth noting. The new guard works: the script **names the database it is inspecting**
+before doing anything, so it can no longer certify one database while you believe it certified
+another. And it aborts rather than reporting success, because the RPC it depends on was
+deliberately **rejected** as unsafe. The checks it would have run were executed directly over a
+privileged SQL session instead, and are the table above.
+
+The durable fix is to give that script a direct Postgres connection rather than an RPC. Until
+then, the production gate is the catalog queries, not the script.
+
+## Realtime and runtime errors
+
+Vercel runtime errors for the project, 3-hour window spanning the cutover: **none**. The only
+`CHANNEL_ERROR` observed anywhere was the intended one — the unrelated account being refused
+after 0003. Host and member sockets stayed up throughout, and a broadcast vote was delivered
+end to end on every run including the final one.
+
+## Cleanup
+
+Verified by re-query, not by trusting the deletes:
+
+| | |
+|---|---|
+| Cutover accounts remaining | **0** |
+| `auth.users` total | **16** — exactly the pre-cutover count |
+| `plan_rooms` / `plan_room_members` / `plan_room_join_attempts` rows | **0 / 0 / 0** |
+| Orphaned `profiles` rows from test accounts | **0** |
+
+## Rollback
+
+**Not used.** No legitimate-member test failed at any stage.
+
+## Advisor review — all nine functions, individually
+
+Eight of these are the WARN-flagged ones; `purge_expired_plan_rooms` is included for
+completeness. Read directly from `pg_proc` after the cutover.
+
+| Function | DEFINER intentional | `search_path` pinned | identity / membership check | anon EXECUTE | authenticated EXECUTE |
+|---|---|---|---|---|---|
+| `create_plan_room` | yes | `""` | `auth.uid()` | **no** | yes |
+| `join_plan_room` | yes | `""` | `auth.uid()` + throttle | **no** | yes |
+| `close_plan_room` | yes | `""` | `auth.uid()` = host | **no** | yes |
+| `leave_plan_room` | yes | `""` | `auth.uid()` | **no** | yes |
+| `touch_plan_room_host` | yes | `""` | `auth.uid()` = host | **no** | yes |
+| `promote_plan_room_host` | yes | `""` | `auth.uid()` must be a member | **no** | yes |
+| `is_plan_room_member` | yes | `""` | `auth.uid()` | **no** | yes |
+| `is_plan_room_participant` | yes | `""` | `auth.uid()` | **no** | yes |
+| `purge_expired_plan_rooms` | yes | `""` | `current_user` must be service role | **no** | **no** |
+
+Every one is intentional: `SECURITY DEFINER` is the mechanism that lets clients hold **no table
+grants at all** while still creating and joining rooms. No function takes a user id, so a caller
+cannot act as someone else. The two predicates *must* be executable by `authenticated` or the
+RLS policies that call them fail outright. `anon` can execute nothing.
+
+The remaining INFO lint, `rls_enabled_no_policy` on `plan_room_join_attempts`, is the intended
+design: RLS on, zero policies, all grants revoked — deny-all for clients. Adding a policy would
+weaken it.
+
+## Purge scheduling — analysis, no change made
+
+`purge_expired_plan_rooms()` deletes rooms more than **7 days past expiry** (members and join
+attempts follow by CASCADE). Rooms expire ~6 hours after creation, so effective retention is
+about a week. It still has **no caller**.
+
+**Expected growth.** The bytes are irrelevant; the exposure is the social graph. Each room is one
+`plan_rooms` row plus one `plan_room_members` row per participant plus one
+`plan_room_join_attempts` row per joining account. At today's 16 accounts this is a few hundred
+rows a month, well under a megabyte a year. At a 500-user beta with one room per user per week
+it is roughly 2,000 rooms and 6,000 member rows a week — still trivial on disk, but it is a
+permanent record of **who planned a night with whom, and when**, growing forever. That is the
+reason to schedule it, not storage.
+
+**Recommended: add a step to `.github/workflows/maintenance.yml`.** It already runs daily at
+03:00 UTC, already holds the service-role secret, already has the alert-on-failure step, and
+already runs Node 22 with pnpm. A purge step is a few lines in an existing workflow: **£0, no new
+service, no new infrastructure, no new attack surface.**
+
+Existing no-cost alternatives, and why they are second choices:
+
+| Option | Cost | Assessment |
+|---|---|---|
+| Step in `maintenance.yml` (daily 03:00 UTC) | £0 | **Recommended.** Existing workflow, existing secret, existing failure alerting. |
+| `pg_cron` | £0 | Available but **not installed**. Database-native and needs no secret, but installing an extension is an infrastructure change and wants its own review. Would satisfy the function's `current_user` guard, since pg_cron runs as `postgres`. |
+| Supabase Edge Function + schedule | £0 on current plan | Requires deploying edge functions, which this project does not currently use. More surface for less benefit. |
+| Vercel Cron | £0 within Hobby limits | Needs a new API route, i.e. a new publicly-reachable endpoint guarding a destructive function. Worst option here. |
+
+**Decision required from Maria:** approve adding the purge step to `maintenance.yml`. It was
+deliberately **not enabled** — it is a workflow change, so it belongs in a reviewed PR, not in a
+cutover. Until then, room and membership records accumulate indefinitely.
+
+## Still open
+
+- **`verify-room-security.ts` cannot run against production** until it takes a direct Postgres
+  connection instead of the rejected RPC. The same change repairs `verify-plan.ts` and
+  `verify-feed-rank.ts`.
+- **Purge is unscheduled** (above).
+- **`create_plan_room` is an unthrottled existence oracle.** It takes the code from the caller and
+  relies on the unique constraint, so `23505` reveals whether a code exists, at unlimited rate,
+  bypassing the 20-per-10-minutes join throttle. Not practically exploitable at 32^6 with 6-hour
+  rooms, but the throttle is the stated enumeration perimeter and there is a door beside it.
+- **Backups: better than recorded earlier.** `.github/workflows/backup-db.yml` backs the database
+  up to private R2 every Sunday at 04:00 UTC. The pre-flight recorded this as an unverified manual
+  check; it is in fact covered. PITR remains a separate paid add-on and is still not enabled.
