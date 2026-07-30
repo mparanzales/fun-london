@@ -72,13 +72,43 @@ as everything else and is not recorded here.
 
 ### Revocation confirmation
 
-Deleting the provisioning key is not complete until it is **proven dead**:
+Deleting the provisioning key is not complete until it is **proven dead by a real
+HTTP round trip**:
 
 ```bash
+export POSTHOG_REVOKED_KEY='the key you just deleted'
+pnpm posthog:revoked-check
+```
+
+Three outcomes, deliberately distinguished:
+
+| Exit | Meaning |
+| --- | --- |
+| **0** | PostHog rejected the key with 401/403. **Confirmed dead.** |
+| **1** | 🔴 PostHog **accepted** it. The key is still live. Delete it and re-run. |
+| **2** | Nothing was proven (no key supplied, or the request never got there). **Not a pass.** |
+
+🧨 **The previous documented proof could not fail correctly, and it is worth
+knowing why.** It was:
+
+```
 POSTHOG_PERSONAL_API_KEY="$POSTHOG_PROVISIONING_API_KEY" pnpm posthog:verify
 ```
 
-A revoked key must return **401**. A success means the key is still live.
+The provisioning key lives in `.env.local`, and a shell does not source
+`.env.local`, so `$POSTHOG_PROVISIONING_API_KEY` expanded to the **empty
+string**. The prefix assignment still set the variable in the child environment,
+and dotenv will not fill a key that is already present, so the script saw `""`,
+printed "not set" and exited 1 **without making a single request**. Exit 1 is
+also what a revoked key produces, so the operator would have read "never
+contacted PostHog" as "confirmed revoked". Had the deletion not taken, a key
+carrying `dashboard:write` and `insight:write` would have stayed live on a public
+repo's project, certified dead by a check that never ran.
+
+That is the repo's own recorded landmine: **a missing secret is `""`, not
+`undefined`**, so the check goes quiet instead of failing. The new script reads
+the key from the **shell**, not `.env.local` (a revoked key should not be in
+`.env.local` at all), and refuses to treat "no key" as a pass.
 
 ## Commands
 
@@ -88,6 +118,7 @@ pnpm posthog:verify -- --days=90 # wider window
 pnpm posthog:verify:all          # the whole AnalyticsEvent union
 pnpm posthog:dashboards:dry      # print the 6 dashboards + 26 insights, OFFLINE
 pnpm posthog:dashboards          # create or update them, idempotently
+pnpm posthog:revoked-check       # prove a deleted key is actually dead
 ```
 
 `posthog:dashboards:dry` is deliberately **offline**: it needs no key, so the six
@@ -108,7 +139,9 @@ rather than "did it run?".
 4. Re-run it. The second run must report `dashboards_reused: 6` and
    `insights_updated: 26`, with **zero** created. That is the idempotency proof.
 5. Open each dashboard and check the names against the manifest.
-6. Delete the provisioning key, then run the revocation check above.
+6. Delete the provisioning key, then `export POSTHOG_REVOKED_KEY=...` and run
+   `pnpm posthog:revoked-check`. It must exit **0**. Exit 2 means nothing was
+   tested, which is not the same thing.
 7. Keep only the permanent read-only key.
 
 Matching is **by name**. Renaming an insight in the PostHog UI will make the next

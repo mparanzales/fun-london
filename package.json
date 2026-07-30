@@ -77,7 +77,8 @@
     "posthog:verify": "tsx scripts/posthog-verify-events.ts",
     "posthog:verify:all": "tsx scripts/posthog-verify-events.ts --all",
     "posthog:dashboards:dry": "tsx scripts/posthog-provision-dashboards.ts --dry-run",
-    "posthog:dashboards": "tsx scripts/posthog-provision-dashboards.ts"
+    "posthog:dashboards": "tsx scripts/posthog-provision-dashboards.ts",
+    "posthog:revoked-check": "tsx scripts/posthog-revoked-check.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

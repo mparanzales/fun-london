@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readUnionEvents } from "../posthog-events";
 
 // Guards for the PostHog provisioning + verification scripts.
 //
@@ -22,24 +23,18 @@ function src(rel: string): string {
 
 const provision = src("posthog-provision-dashboards.ts");
 const verify = src("posthog-verify-events.ts");
+const events = src("posthog-events.ts");
 
 const analytics = readFileSync(
   fileURLToPath(new URL("../../lib/analytics.ts", import.meta.url)),
   "utf8",
 );
 
-// The same parse the verifier does, kept here so a drift between the two is a
-// test failure rather than a silent under-report.
-function unionEvents(): string[] {
-  const start = analytics.indexOf("export type AnalyticsEvent =");
-  const body = analytics
-    .slice(start)
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
-  return [...body.slice(0, body.indexOf(";")).matchAll(/\|\s*"([^"]+)"/g)].map(
-    (m) => m[1],
-  );
-}
+// THE REAL IMPLEMENTATION, imported rather than re-implemented. A previous
+// version of this file kept its own copy of the parse, which meant deleting the
+// comment-stripping line from the verifier would have dropped it to 22 of 33
+// events with all 12 of these tests still green.
+const unionEvents = readUnionEvents;
 
 describe("the verifier checks every event, not a hand-maintained list", () => {
   it("derives its event list from the union at runtime", () => {
@@ -48,11 +43,14 @@ describe("the verifier checks every event, not a hand-maintained list", () => {
     // union members, so --all silently reported on 20 and said nothing about
     // the rest.
     expect(verify).toContain("readUnionEvents");
-    expect(verify).toContain("export type AnalyticsEvent =");
     expect(verify).not.toContain("Kept in sync by hand");
+    // And the shared module is the one doing it, so this test and the script
+    // cannot drift apart.
+    expect(verify).toContain('from "./posthog-events"');
   });
 
   it("strips comments before finding the end of the union", () => {
+    // Runs the REAL parse, so removing the comment-stripping line fails here.
     // A comment inside the union ends in a semicolon ("...ships to move;"),
     // which truncated the first version of this parse at 22 of 33 events.
     const parsed = unionEvents();
@@ -77,7 +75,10 @@ describe("the verifier checks every event, not a hand-maintained list", () => {
   });
 
   it("fails loudly rather than checking a truncated list", () => {
-    expect(verify).toMatch(/implausible|refuses to check/i);
+    // The guard lives in the shared module now, which is the point: one
+    // implementation, used by the script and exercised by this file.
+    expect(events).toMatch(/implausible|refuses to check/i);
+    expect(events).toContain("throw new Error");
   });
 
   it("still hard-fails on a required event that never fired", () => {
@@ -126,8 +127,16 @@ describe("fl_probe_manual can never reach a dashboard", () => {
     (m) => m[0],
   );
 
-  it("found the HogQL queries to check", () => {
-    expect(hogqlQueries.length).toBeGreaterThan(0); // positive control
+  it("sees EVERY HogQL query, not just the ones its regex happens to match", () => {
+    // A query written in a shape the regex misses would be silently exempted
+    // from the scoping check below. Tie the count to the table() call sites.
+    // `function table(` is the declaration, not a call site. Excluding it was
+    // the first thing this assertion caught, which is a fair advertisement for
+    // tying a positive control to a real count instead of to "greater than 0".
+    const tableCalls = [...provision.matchAll(/(?<!function )\btable\(/g)]
+      .length;
+    expect(tableCalls).toBeGreaterThan(0); // positive control
+    expect(hogqlQueries.length).toBe(tableCalls);
   });
 
   it("scopes every HogQL query to explicit event names", () => {
