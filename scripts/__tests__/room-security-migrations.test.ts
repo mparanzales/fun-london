@@ -261,14 +261,29 @@ describe("post-review hardening (findings from supabase-guardian, 2026-07-29)", 
       expect(r).toContain("from public, anon, authenticated");
   });
 
-  it("purge is service_role-granted AND self-guards on current_user", () => {
+  it("🧨 purge is protected by the GRANT — the in-body role check was theatre", () => {
+    // This used to also assert `current_user not in ('service_role', ...)` in
+    // the body, calling it "belt AND braces". It is neither: inside a SECURITY
+    // DEFINER function `current_user` is the function OWNER, not the caller, so
+    // that condition is unconditionally satisfied however the function is
+    // reached. Our own REJECTED-exec_sql_readonly.sql notes exactly this. A
+    // test pinning a check that cannot fire is worse than no test, so it now
+    // pins the control that actually refuses callers: the grant.
     expect(sql).toMatch(
       /grant execute on function public\.purge_expired_plan_rooms\(\)\s+to service_role;/,
     );
-    const fn = sql.slice(
-      sql.indexOf("function public.purge_expired_plan_rooms"),
+    expect(sql).toMatch(
+      /revoke all on function public\.purge_expired_plan_rooms\(\)\s+from public, anon, authenticated;/,
     );
-    expect(fn).toContain("current_user not in ('service_role'");
+    // and 0004, which replaces the body, must not reinstate the theatre
+    const m4 = readFileSync(
+      join(process.cwd(), "supabase/migrations/0004_server_side_room_codes.sql"),
+      "utf8",
+    )
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("--"))
+      .join("\n");
+    expect(m4).not.toContain("current_user not in");
   });
 
   it("the join throttle lives in the DATABASE (the RPC is directly reachable)", () => {

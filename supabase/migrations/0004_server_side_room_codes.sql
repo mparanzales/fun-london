@@ -43,11 +43,14 @@
 --   -- then re-run 0001's create_plan_room body AND its grants:
 --   --   revoke all on function public.create_plan_room(text) from public, anon, authenticated;
 --   --   grant execute on function public.create_plan_room(text) to authenticated;
+--   -- and restore 0001's purge body, which this migration also replaced:
+--   --   create or replace function public.purge_expired_plan_rooms() ... (0001)
 --   drop function public.new_plan_room_code();
 --
--- Forward application is unaffected. This migration adds one function and
--- replaces one; it drops nothing and touches no table, policy or grant outside
--- the room set.
+-- Forward application is unaffected. This migration ADDS one function
+-- (new_plan_room_code) and REPLACES two (create_plan_room,
+-- purge_expired_plan_rooms); it drops nothing and touches no table, policy or
+-- grant outside the room set.
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- 🧨 PRECONDITION. plpgsql resolves function calls at RUN time, so without
@@ -160,8 +163,24 @@ grant execute on function public.create_plan_room(text) to authenticated;
 -- This moves INTO the function on purpose. It previously lived in the calling
 -- script as a JavaScript date, which meant the retention window was editable
 -- in two places and the script performed a destructive write of its own. Now
--- every delete in this feature is inside one SECURITY DEFINER function that
--- refuses any caller but the service role, and the script writes nothing.
+-- every delete in this feature is inside one function, and the script writes
+-- nothing.
+--
+-- 🧨 THE GRANT IS THE CONTROL — and it is the ONLY control. 0001's body carried
+-- `if current_user not in ('service_role','postgres','supabase_admin')` labelled
+-- "belt AND braces". That check cannot refuse anyone: inside a SECURITY DEFINER
+-- function `current_user` is the function OWNER (postgres), not the caller, so
+-- the condition is unconditionally satisfied however the function is reached.
+-- Our own rejection note spells this out —
+-- docs/funldn-group-security-staging-evidence/REJECTED-exec_sql_readonly.sql
+-- observed that `current_user` inside the call chain is postgres "which
+-- satisfies purge_expired_plan_rooms's own guard". It is removed here rather
+-- than left in place looking like defence in depth.
+--
+-- `session_user` would not help either: PostgREST authenticates as
+-- `authenticator` for service-role requests too. What actually refuses callers
+-- is `revoke ... from public, anon, authenticated` plus `grant execute ... to
+-- service_role`, asserted from the catalog by scripts/verify-room-security.ts.
 create or replace function public.purge_expired_plan_rooms()
 returns integer
 language plpgsql
@@ -170,10 +189,6 @@ set search_path = ''
 as $$
 declare v_n int;
 begin
-  if current_user not in ('service_role', 'postgres', 'supabase_admin') then
-    raise exception 'service role required' using errcode = '42501';
-  end if;
-
   delete from public.plan_rooms
    where expires_at < now() - interval '7 days';
   get diagnostics v_n = row_count;

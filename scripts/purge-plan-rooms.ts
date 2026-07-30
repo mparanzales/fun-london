@@ -79,7 +79,16 @@ async function main() {
     process.exit(1);
   }
   const n = doomed?.length ?? 0;
-  console.log(`\n${n} room(s) are more than 7 days past expiry.`);
+  // The function returns a ROOM count, so a ledger sweep that silently stopped
+  // working would print `throttle N -> N` and still exit 0. Count what should
+  // go so the summary can be checked against what did.
+  const { count: staleLedger } = await sb
+    .from("plan_room_join_attempts")
+    .select("*", { head: true, count: "exact" })
+    .lt("window_start", cutoff);
+  console.log(
+    `\n${n} room(s) and ${staleLedger ?? 0} throttle row(s) are more than 7 days past their window.`,
+  );
   if (DRY_RUN && n) {
     console.log(`hashed ids: ${doomed!.map((r) => handle(r.id)).join(", ")}`);
   }
@@ -129,6 +138,19 @@ async function main() {
     console.error(
       `\nFATAL: ${n} room(s) were past the cutoff but the function purged 0. ` +
         `Check the service-role grant on purge_expired_plan_rooms.`,
+    );
+    process.exit(1);
+  }
+  // Same rule for the ledger, which the return value cannot speak for.
+  if (
+    !DRY_RUN &&
+    (staleLedger ?? 0) > 0 &&
+    after &&
+    after.attempts >= before.attempts
+  ) {
+    console.error(
+      `\nFATAL: ${staleLedger} throttle row(s) were past the cutoff but the ledger did not shrink. ` +
+        `The sweep inside purge_expired_plan_rooms may have stopped working.`,
     );
     process.exit(1);
   }

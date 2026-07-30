@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 // Guard tests for the room-hygiene follow-up, in the house style: pin the
@@ -64,6 +64,13 @@ describe("0004 — the room-code existence oracle is closed", () => {
     expect(fn).toMatch(/values\s*\(v_code,/);
   });
 
+  it("🧨 the migration fails loudly when pgcrypto is absent", () => {
+    // plpgsql binds late, so without this the migration applies cleanly against
+    // a database lacking pgcrypto and then 500s on every room creation.
+    expect(M4_SQL).toMatch(/to_regprocedure\('extensions\.gen_random_bytes/);
+    expect(M4_SQL).toContain("raise exception");
+  });
+
   it("codes come from a CSPRNG, not random()", () => {
     // A predictable PRNG would let a room be guessed rather than brute-forced.
     expect(M4_SQL).toContain("extensions.gen_random_bytes");
@@ -106,6 +113,26 @@ describe("0004 — the room-code existence oracle is closed", () => {
     expect(action).not.toMatch(/rpc\(\s*["']create_plan_room["']\s*,/);
     expect(action).toMatch(/rpc\(\s*["']create_plan_room["']\s*\)/);
     expect(action).not.toContain("randomRoomCode");
+    // Repo-wide: nothing outside room-code's own tests may mint a code, or a
+    // component could render one that is not the room's.
+    const offenders: string[] = [];
+    const walk = (d: string) => {
+      for (const e of readdirSync(join(process.cwd(), d), {
+        withFileTypes: true,
+      })) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const rel = `${d}/${e.name}`;
+        if (e.isDirectory()) walk(rel);
+        else if (
+          /\.tsx?$/.test(e.name) &&
+          !/room-code\.(test\.)?ts$/.test(e.name)
+        ) {
+          if (read(rel).includes("randomRoomCode")) offenders.push(rel);
+        }
+      }
+    };
+    for (const root of ["lib", "app", "components"]) walk(root);
+    expect(offenders).toEqual([]);
     // and it must not have kept a client-side 23505 retry, which only made
     // sense while the caller owned the code
     expect(action).not.toContain("23505");
@@ -160,7 +187,15 @@ describe("verification scripts run again, without a SQL-execution RPC", () => {
     const dir = join(process.cwd(), "scripts");
     const importers = readdirSync(dir)
       .filter((f) => f.endsWith(".ts"))
-      .filter((f) => /supabase\/admin/.test(readFileSync(join(dir, f), "utf8")))
+      // An IMPORT, not a mention: verify-taste.ts names taste-feed in a
+      // comment and runs perfectly well. taste-feed is included because it
+      // imports the admin client itself, so a script importing only taste-feed
+      // inherits `server-only` and dies the same way.
+      .filter((f) =>
+        /^\s*import\b[^;]*["'][^"']*(supabase\/admin|taste-feed)["']/m.test(
+          readFileSync(join(dir, f), "utf8"),
+        ),
+      )
       .sort();
     expect(importers).toEqual(["verify-feed-rank.ts", "verify-plan.ts"]);
     for (const f of importers) {
@@ -188,9 +223,11 @@ describe("verification scripts run again, without a SQL-execution RPC", () => {
       ) as { compilerOptions?: { paths?: Record<string, string[]> } };
 
     const scripts = parse("tsconfig.scripts.json");
-    expect(scripts.compilerOptions?.paths?.["server-only"]).toEqual([
-      "./test/server-only-stub.ts",
-    ]);
+    const target = scripts.compilerOptions?.paths?.["server-only"];
+    expect(target).toEqual(["./test/server-only-stub.ts"]);
+    // …and the stub must exist. Deleting it would leave this green while both
+    // scripts died at MODULE_NOT_FOUND — the bug this branch exists to fix.
+    expect(existsSync(join(process.cwd(), target![0]))).toBe(true);
 
     // Putting it in tsconfig.json would let Next read it and could silently
     // disable the client-bundle guard for the whole app.
@@ -239,7 +276,15 @@ describe("the purge is scheduled, bounded and privacy-conscious", () => {
     // which put the retention window in two editable places and made this
     // script destructive. Both deletes now live in the definer function.
     expect(scriptCode).toContain('rpc("purge_expired_plan_rooms")');
-    expect(scriptCode).not.toMatch(/\.delete\(\)/);
+    // The header promises it writes NOTHING. Check the PostgREST chain rather
+    // than bare verb names — `createHash(...).update(...)` is a Node API, not a
+    // write.
+    for (const verb of ["delete", "update", "upsert", "insert"]) {
+      expect(
+        scriptCode,
+        `purge script must not .${verb}() through PostgREST`,
+      ).not.toMatch(new RegExp(`from\\([^)]+\\)[\\s\\S]{0,120}?\\.${verb}\\(`));
+    }
     // and the function owns BOTH sweeps
     expect(M4_SQL).toContain("delete from public.plan_rooms");
     expect(M4_SQL).toContain("delete from public.plan_room_join_attempts");

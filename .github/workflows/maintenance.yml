@@ -286,6 +286,7 @@ jobs:
               repo: context.repo.repo,
               state: 'open',
               labels: 'cron-failure',
+              per_page: 100,
             });
             const existing = open.data.find((i) => i.title === title);
             const body = `Plan Together room purge failed — retention did NOT run: ${runUrl}`;

@@ -104,8 +104,19 @@ No client-facing write policy exists on either new table by design.
 
 ### Rollback for 0004
 
-`create or replace` the previous bodies from git history. It drops nothing and
-touches no table, policy or grant, so there is no data to restore.
+🧨 **`create or replace` alone does NOT work.** 0004 gives `create_plan_room` a
+DEFAULTed parameter, and Postgres refuses to remove a default that way
+(`cannot remove parameter defaults from existing function`). The sequence is:
+
+```sql
+drop function public.create_plan_room(text);
+-- re-run 0001's create_plan_room body AND its grants
+-- restore 0001's purge_expired_plan_rooms body (0004 replaced it too)
+drop function public.new_plan_room_code();
+```
+
+It drops nothing and touches no table, policy or grant, so there is no data to
+restore. 0004 adds ONE function and replaces TWO.
 
 ## 5b. Review findings and what changed because of them
 
@@ -239,12 +250,32 @@ not be repaired by editing the scripts; they now run under a separate
 stub. That alias is deliberately absent from `tsconfig.json`, because Next
 reads that file and it could silently disable the client-bundle guard.
 
+### Recommended next: make the gate a nightly alarm
+
+`scripts/verify-room-security.ts` is now runnable, but nothing runs it, so
+enforcement of step 5a (and of the anon table-grant moat, which no behavioural
+test can see) is "somebody remembers". Adding a `SUPABASE_DB_URL` repository
+secret — the **direct** connection on 5432, not the transaction pooler — and one
+step to the `purge-plan-rooms` job would turn the whole gate into a nightly
+alarm:
+
+```yaml
+      - name: Verify room security invariants
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: EXPECT_STAGE=3 EXPECT_0004=1 pnpm verify-room-security
+```
+
+Deliberately NOT added in this branch: without the secret the step fails every
+night, and a cron that cries wolf gets muted, which is worse than no cron. Add
+the secret first, then the step.
+
 ## 8. Remaining limitations (honest)
 
 1. **Member-to-member impersonation inside a real roster is still possible.** Broadcast payloads are client-authored, so member A can still stamp a payload with member B's user id, and other devices cannot cryptographically disprove it. What is now impossible is *inflating the group beyond its real membership* — both the voter set and the majority denominator are server-owned. Closing this fully requires server-authoritative votes (writes to the database instead of broadcast), which is a product change, not a security patch. **Do not describe voting as tamper-proof in any copy.**
 2. **Presence is still self-reported** — a member can appear/disappear at will; the roster bounds who counts, not who is genuinely looking at the screen.
 3. **`leaveRoom` is best-effort** (`pagehide`); a hard crash leaves a stale membership row until expiry. Host handoff tolerates this via the liveness stamp.
-4. **`purge_expired_plan_rooms()` has no scheduler yet** — it is `service_role`-only and ready for a cron; rooms simply stop working at expiry regardless.
+4. **`purge_expired_plan_rooms()` has scheduled nightly in its own `maintenance.yml` job** — it is `service_role`-only and ready for a cron; rooms simply stop working at expiry regardless.
 5. **The verification script needs a read-only SQL helper RPC** (`exec_sql_readonly`) or the equivalent queries run by hand in the SQL editor; it does not create one, because adding a SQL-executing RPC is itself a security decision for the founder.
 6. **Group results still cannot be saved** — deliberately out of scope for this track (decision register #11).
 7. **The client and database host rules are related, not identical.** The client knows who is *present* and decides when a handoff is needed; the database knows who has not written `left_at` and decides *who gets it*. They can disagree for a member who is recorded but not watching; the database's answer wins and every device reads it back. Making them identical needs per-member `last_seen_at` heartbeats (follow-up).

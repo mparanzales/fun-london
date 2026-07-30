@@ -276,12 +276,22 @@ async function main() {
        from pg_proc p where p.pronamespace = 'public'::regnamespace
         and p.proname = 'create_plan_room'`,
   );
-  check(
-    createFn.length === 1 &&
-      createFn[0].args.toLowerCase().includes("default"),
-    "0004 applied: exactly one create_plan_room, with a DEFAULTed parameter",
-    createFn.map((f) => f.args || "(no args)").join(" | ") || "absent",
-  );
+  // Report, but only FAIL when 0004 is actually expected. Otherwise this gate
+  // exits 1 on every pre-0004 database and "the exposure regressed" becomes
+  // indistinguishable from "the hygiene migration has not landed yet".
+  const create0004 =
+    createFn.length === 1 && createFn[0].args.toLowerCase().includes("default");
+  if (create0004 || process.env.EXPECT_0004 === "1") {
+    check(
+      create0004,
+      "0004 applied: exactly one create_plan_room, with a DEFAULTed parameter",
+      createFn.map((f) => f.args || "(no args)").join(" | ") || "absent",
+    );
+  } else {
+    console.log(
+      `${INFO}0004 not applied yet (create_plan_room: ${createFn.map((f) => f.args || "(no args)").join(" | ") || "absent"}). Set EXPECT_0004=1 to require it.`,
+    );
+  }
   const codeGen = await q<{ anon: boolean; auth: boolean }>(
     `select has_function_privilege('anon', p.oid, 'execute') as anon,
             has_function_privilege('authenticated', p.oid, 'execute') as auth
@@ -291,7 +301,9 @@ async function main() {
   check(
     codeGen.length === 0 || (!codeGen[0].anon && !codeGen[0].auth),
     "the room-code generator is not executable by anon or authenticated",
-    codeGen.length ? `anon=${codeGen[0].anon} auth=${codeGen[0].auth}` : "absent (pre-0004)",
+    codeGen.length
+      ? `anon=${codeGen[0].anon} auth=${codeGen[0].auth}`
+      : "absent (pre-0004)",
   );
 
   const anonExecutable = grants.filter((g) => g.anon).map((g) => g.fn);
