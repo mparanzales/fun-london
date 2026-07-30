@@ -15,6 +15,7 @@
 
 import * as dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
+import { tidyText } from "@/lib/text";
 
 dotenv.config({ path: ".env.local" });
 
@@ -40,6 +41,13 @@ const EMAIL_FROM = process.env.EMAIL_FROM || "Fun London <hello@funldn.com>";
 const NEW_VENUE_DAYS = 7;
 const MAX_VENUES = 6;
 const MAX_EVENTS = 6;
+
+// The brand's single violet, matching --fl-primary in app/globals.css.
+// This email had drifted to a second, bluer violet (hsl(233 70% 55%)) for its
+// section headings and button while the masthead used the real one, so the two
+// sat side by side in the same message looking like a mistake. The brand
+// system is explicit that there is ONE solid violet.
+const BRAND_VIOLET = "hsl(250 70% 50%)";
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   console.error("Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
@@ -161,18 +169,21 @@ async function recipients(): Promise<Recipient[]> {
 
 // ── Email HTML ────────────────────────────────────────────────────────────
 
-// em/en dash + " -- " → ", ", mirroring tidyDashes in lib/queries.ts so the
-// no-dashes brand rule holds in email too (DB editorial copy can contain them).
-const DASH_RE = /\s*[—–]\s*/g;
-const DBL_HYPHEN_RE = / -{2} /g;
-
+// Shares lib/text.ts with the website, so a title reads the same in the inbox
+// as it does on the page. That helper applies the no-dashes brand rule AND
+// repairs provider mojibake: this digest is where the Ticketmaster corruption
+// actually surfaced, going out to real subscribers as a row of boxes.
+//
+// Quotes are escaped too. Several of these values land inside HTML attributes
+// (img src, anchor href) and one stray quote in a provider image URL would
+// break out of the attribute.
 function esc(s: string): string {
-  return s
-    .replace(DASH_RE, ", ")
-    .replace(DBL_HYPHEN_RE, ", ")
+  return tidyText(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function venueCard(v: VenueLite): string {
@@ -219,7 +230,7 @@ function section(title: string, rows: string): string {
   if (!rows) return "";
   return `<tr><td style="padding-top:20px;">
     <div style="font-size:12px;font-weight:800;letter-spacing:0.08em;
-      text-transform:uppercase;color:hsl(233 70% 55%);">${title}</div>
+      text-transform:uppercase;color:${BRAND_VIOLET};">${title}</div>
     <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
   </td></tr>`;
 }
@@ -237,7 +248,36 @@ function buildHtml(
     "On this week",
     events.map(eventRow).join(""),
   );
-  return `<!doctype html><html><body style="margin:0;background:#f0eee9;
+  // <head> is load bearing, and its absence was a live bug waiting on the
+  // calendar. With no charset declared, mail clients fall back to Latin-1 and
+  // render every multi-byte character as mojibake. 97 venue names carry
+  // accents (Abraco, ALAIA, Cafe Kitsune, Berbere, Blabar, Arome), so the
+  // first week one of those was new, every subscriber would have seen
+  // gibberish. It had simply never fired: the run that exposed this shipped
+  // 0 new venues.
+  //
+  // format-detection + the x-apple-data-detectors rules stop iOS Mail
+  // auto-linking times and street addresses. Left alone it underlines
+  // "7:00 PM" and "64 Brick Lane" in its own blue, which is what made the
+  // layout read as broken and unstyled.
+  return `<!doctype html><html lang="en"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light only">
+  <meta name="format-detection" content="telephone=no,date=no,address=no,email=no">
+  <title>This week in independent London</title>
+  <style>
+    a[x-apple-data-detectors] {
+      color: inherit !important;
+      text-decoration: none !important;
+      font-size: inherit !important;
+      font-family: inherit !important;
+      font-weight: inherit !important;
+      line-height: inherit !important;
+    }
+    img { border: 0; outline: none; text-decoration: none; }
+  </style>
+  </head><body style="margin:0;background:#f0eee9;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0eee9;padding:24px 0;">
     <tr><td align="center">
@@ -245,7 +285,7 @@ function buildHtml(
         style="max-width:440px;background:#ffffff;border-radius:18px;
         padding:24px;border:1px solid #e3ddd2;">
         <tr><td>
-          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:hsl(250 70% 50%);">This week in independent London</div>
+          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:${BRAND_VIOLET};">This week in independent London</div>
           <div style="font-size:22px;font-weight:800;color:#1a1409;margin-top:4px;">Fun London</div>
           <div style="font-size:14px;color:#645c50;margin-top:4px;">
             No chains. No sponsored slots. Here is what is new this week.</div>
@@ -254,7 +294,7 @@ function buildHtml(
         ${eventsBlock}
         <tr><td style="padding-top:24px;">
           <a href="${SITE_URL}/explore"
-            style="display:inline-block;background:hsl(233 70% 55%);color:#fff;
+            style="display:inline-block;background:${BRAND_VIOLET};color:#fff;
             font-weight:800;font-size:14px;text-decoration:none;
             padding:12px 22px;border-radius:12px;">Open Fun London</a>
         </td></tr>

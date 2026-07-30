@@ -18,6 +18,7 @@
 import { requestMemo as reactCache } from "@/lib/request-memo";
 import { createClient } from "@/lib/supabase/server";
 import { createStaticAnonClient } from "@/lib/supabase/static";
+import { tidyText } from "@/lib/text";
 import { haversineKm } from "@/lib/geo";
 import { rankRowsByTaste } from "@/lib/taste-feed";
 import { createServiceClient } from "@/lib/supabase/admin";
@@ -111,21 +112,21 @@ type EventRow = {
 
 // ── Mappers ─────────────────────────────────────────────────────────────
 
-// Tidy typographic dashes (— –) and spaced double hyphens out of copy that
-// comes from the DATABASE (venue/event editorial written by curators or the
+// Tidy typographic dashes and spaced double hyphens out of copy that comes
+// from the DATABASE (venue/event editorial written by curators or the
 // discovery robot). The source-code dash guard can't see DB content, so this
 // keeps the brand's "no dashes" rule consistent on cards and detail pages,
 // for every existing row and every future one, with no re-import.
-// Built via RegExp from an escaped string so the literal em/en dash characters
-// never appear in this source file (the dash guard scans lib/ and would
-// otherwise flag its own helper).
-const DASH_RE = new RegExp("\\s*[\\u2014\\u2013]\\s*", "g"); // em / en dash
-const DBL_HYPHEN_RE = / -{2} /g;
-
-function tidyDashes<T extends string | null | undefined>(s: T): T {
-  if (s == null) return s;
-  return s.replace(DASH_RE, ", ").replace(DBL_HYPHEN_RE, ", ") as T;
-}
+//
+// It now also repairs provider mojibake, because a third-party feed can put
+// unprintable control characters straight onto a live page. See lib/text.ts:
+// Ticketmaster served an event title containing U+0080 and U+0093 where an en
+// dash belonged, and it rendered as boxes for every reader. Doing the repair
+// here means every existing row is fixed on read, with no migration and no
+// re-import, exactly as the dash rule already worked.
+//
+// Kept as a local alias so the call sites below read unchanged.
+const tidyDashes = tidyText;
 
 function mapVenue(r: VenueRow): Venue {
   return {
