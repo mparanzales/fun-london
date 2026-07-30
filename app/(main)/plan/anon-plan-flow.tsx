@@ -299,7 +299,13 @@ export function AnonPlanFlow({
           nowMs + 7 * 24 * 60 * 60 * 1000,
         ),
       );
-      tracksClockRef.current = t.tracksClock;
+      // 🧨 If the clamp RAISED the start to now, the night effectively starts
+      // now however the resolver labelled it — "Today" picked after 17:00
+      // resolves to 1pm, and max(…, now) then moves it forward. Pinning that
+      // stamp would re-date a day out into the evening on restore, so the
+      // clamp's verdict wins over the resolver's.
+      tracksClockRef.current =
+        t.tracksClock || startsAt.getTime() !== Date.parse(t.whenISO);
       setStartISO(startsAt.toISOString());
       setStartLabel(
         startsAt
@@ -449,8 +455,11 @@ export function AnonPlanFlow({
         // to re-pick an area.
         const a = brief.areaSel;
         if (
+          // No "nearYou": this surface mounts AreaPicker without that option,
+          // so no anon build can emit it, and restoring one leaves the Where
+          // group with nothing highlighted while builds fall through to
+          // Anywhere.
           a?.kind === "anywhere" ||
-          a?.kind === "nearYou" ||
           (a?.kind === "region" && REGIONS.includes(a.region)) ||
           (a?.kind === "neighbourhood" &&
             typeof a.name === "string" &&
@@ -466,11 +475,21 @@ export function AnonPlanFlow({
           setReshuffles(brief.reshuffles);
       }
       setResult(payload);
-      setStartLabel(saved.startLabel ?? null);
+      setStartLabel(
+        typeof saved.startLabel === "string" ? saved.startLabel : null,
+      );
       // Same reasoning as the brief: unparseable here makes parseNightPlan
       // reject the canonical write below, which is swallowed, so the claim
       // finds nothing while the screen looks perfect.
-      tracksClockRef.current = brief?.tracksClock === true;
+      // Entries written before the field existed still parse (the version is
+      // unchanged), so fall back to the brief's own `when`. Defaulting to
+      // false would pin a pre-deploy "Right now" night to its build stamp —
+      // the exact under-detection this replaced — for the TTL window after
+      // deploy.
+      tracksClockRef.current =
+        typeof brief?.tracksClock === "boolean"
+          ? brief.tracksClock
+          : brief?.when === "now";
       setStartISO(
         typeof saved.startISO === "string" &&
           Number.isFinite(Date.parse(saved.startISO))

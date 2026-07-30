@@ -877,17 +877,10 @@ export function PlanFlow({
         },
       ),
     );
-    // `offset` is already implied by `computed` (computePlan takes it), but
-    // listed so the persisted reshuffle position cannot silently go stale if
-    // that ever stops being true.
-    // `offset` and `when` are both already implied by `computed` (computePlan
-    // takes the offset, and `timing` derives from the when choice), but listed
-    // so the persisted reshuffle position and clock intent cannot silently go
-    // stale if that ever stops being true.
-    // `offset` and `timing` are both already implied by `computed`
-    // (computePlan takes the offset, and derives from the same timing), but
-    // listed so the persisted reshuffle position and clock intent cannot
-    // silently go stale if that ever stops being true.
+    // `offset` and `timing` are both already implied by `computed` (it takes
+    // the offset and derives from the same timing), but listed so the
+    // persisted reshuffle position and clock intent cannot silently go stale
+    // if that ever stops being true.
   }, [step, active, computed, display, owner, offset, timing]);
 
   // Hydrate a night built while signed OUT. The anon /plan flow stashes its
