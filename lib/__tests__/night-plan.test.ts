@@ -18,6 +18,9 @@ import {
   claimAnonPlan,
   memoryStorage,
   type StorageLike,
+  clearAnonPlanKeys,
+  ANON_PLAN_STASH_KEY,
+  ANON_RESULT_KEY,
 } from "@/lib/active-plan";
 
 const plan = (over: Partial<NightPlan> = {}): NightPlan => ({
@@ -497,9 +500,30 @@ describe("claimAnonPlan · sign in and keep the night you just built", () => {
   });
 
   it("🧨 leaves NO copy behind for the next person on this browser", () => {
+    // Asserted over EVERY anon-scoped key, not just the store's own slot.
+    // The narrow version of this test passed while a second anon key — added
+    // elsewhere, for the signed-out result screen — survived the claim, the
+    // sign-out, and was rehydrated onto the next visitor. A guard that only
+    // checks the key it owns cannot see the key it does not.
     writeActivePlan(null, plan(), store);
+    store.setItem(ANON_PLAN_STASH_KEY, '{"stops":[]}');
+    store.setItem(ANON_RESULT_KEY, '{"v":1,"payload":{}}');
     claimAnonPlan("user-a", store);
     expect(readActivePlan(null, store)).toBeNull();
+    for (const k of [ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+      expect(store.getItem(k), `${k} survived the claim`).toBeNull();
+    }
+  });
+
+  it("🧨 clearAnonPlanKeys wipes every anon key, for sign-out", () => {
+    writeActivePlan(null, plan(), store);
+    store.setItem(ANON_PLAN_STASH_KEY, '{"stops":[]}');
+    store.setItem(ANON_RESULT_KEY, '{"v":1,"payload":{}}');
+    clearAnonPlanKeys(store);
+    expect(readActivePlan(null, store)).toBeNull();
+    for (const k of [ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+      expect(store.getItem(k), `${k} survived sign-out`).toBeNull();
+    }
   });
 
   it("🧨 the anonymous night WINS over an older one in the owner slot", () => {

@@ -31,6 +31,26 @@ import { parseNightPlan, type NightPlan } from "@/lib/night-plan";
 
 const PREFIX = "fl:active-plan:v1";
 
+/**
+ * 🧨 EVERY KEY THAT CAN HOLD THE ANONYMOUS BROWSER'S NIGHT, IN ONE PLACE.
+ *
+ * The owner-scoped key below makes bleed impossible for the store's OWN slot.
+ * It says nothing about a key the store has never heard of — and that is
+ * exactly how this bug came back. A second anon key was added elsewhere for
+ * the signed-out result screen, nothing cleared it on claim or on sign-out,
+ * and so: A builds a night and signs in (canonical + legacy copies destroyed,
+ * the third survives) -> A signs out -> B opens /plan and A's night rehydrates
+ * onto B's screen, is re-persisted into the anon slot from there, and is then
+ * claimed into B's account, firing a false conversion and letting B save A's
+ * night as their own row. That is the PR #129 bug class through a new door.
+ *
+ * So the list lives HERE, next to the invariant it serves, and the owners of
+ * these keys import them rather than declaring their own. Adding an anon key
+ * anywhere else is the mistake; adding it to this list is the fix.
+ */
+export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
+export const ANON_RESULT_KEY = "fl.anonresult.v1";
+
 /** `null` owner = the anonymous browser. */
 export type PlanOwner = string | null;
 
@@ -150,6 +170,20 @@ export function clearActivePlan(
  * one they are asking to keep. Discarding it loses the exact night they
  * created an account to save.
  */
+/** Wipe the anonymous browser's night in every form it can take. Safe to call
+ *  when there is nothing there. */
+export function clearAnonPlanKeys(store?: StorageLike | null): void {
+  const s = store ?? defaultStorage();
+  if (!s) return;
+  for (const k of [activePlanKey(null), ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+    try {
+      s.removeItem(k);
+    } catch {
+      /* nothing to do */
+    }
+  }
+}
+
 export function claimAnonPlan(
   owner: string,
   store?: StorageLike | null,
@@ -157,7 +191,8 @@ export function claimAnonPlan(
   const s = store ?? defaultStorage();
   const anon = readActivePlan(null, s);
   if (!anon) return null;
-  clearActivePlan(null, s);
+  // ALL of them, not just the slot we read from. See ANON_PLAN_KEYS above.
+  clearAnonPlanKeys(s);
   const claimed: NightPlan = { ...anon, source: "anon" };
   writeActivePlan(owner, claimed, s);
   return claimed;

@@ -48,7 +48,7 @@ import { writePlanHandoff, writeSignInTrigger } from "@/lib/analytics-keys";
 import { recordSignal } from "@/lib/signals";
 import { googleMapsWalkingUrl } from "@/lib/plan-maps";
 import { PlanRouteMapLive } from "./plan-route-map-live";
-import { ANON_PLAN_STASH_KEY } from "./anon-plan-flow";
+
 import {
   fromEnginePlan,
   fromSavedRow,
@@ -63,6 +63,8 @@ import {
   writeActivePlan,
   clearActivePlan,
   claimAnonPlan,
+  ANON_PLAN_STASH_KEY,
+  ANON_RESULT_KEY,
 } from "@/lib/active-plan";
 import { SwipeStop } from "./swipe-stop";
 import {
@@ -536,10 +538,24 @@ export function PlanFlow({
       // relinkSteps recomputes arrivals from the start, and — the reason it
       // was already called on the dropped path — keeps walk times honest when
       // a stop has left the catalogue.
-      const steps = relinkSteps(
-        stops,
-        np.startsAt ? new Date(np.startsAt) : undefined,
-      );
+      // 🧨 ...but only while the night is still ahead of us. Restoring a
+      // 2pm day-out at 10pm rendered "arrive ~2:00 pm" under "Today, the
+      // plan:" — confidently wrong, where showing nothing is merely vague. If
+      // the whole night has already finished, drop the clock and keep the
+      // stops. A night still IN PROGRESS keeps its times: the remaining stops
+      // are the point.
+      const start = np.startsAt ? new Date(np.startsAt) : undefined;
+      let steps = relinkSteps(stops, start);
+      if (start) {
+        const endsAt =
+          start.getTime() +
+          steps.reduce(
+            (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+            0,
+          ) *
+            60_000;
+        if (endsAt < Date.now()) steps = relinkSteps(stops, undefined);
+      }
       if (dropped > 0) {
         track("plan_restored_partial", {
           dropped,
@@ -565,12 +581,16 @@ export function PlanFlow({
       // the user sees, and so "try again" regenerates something comparable
       // rather than whatever the controls happened to be left on.
       //
-      // The AREA control is deliberately NOT seeded. It is an AreaSel union
-      // (anywhere / nearYou / region / neighbourhood) and a NightPlan carries
-      // only the resolved area STRING, so mapping back would have to guess
-      // between "region" and "neighbourhood". Guessing wrong would silently
-      // change what the engine generates next, and preserving generation
-      // behaviour is a hard requirement here.
+      // 🧨 The AREA control IS seeded now, as a neighbourhood. It deliberately
+      // was not, on the reasoning that a NightPlan carries only the resolved
+      // area STRING so mapping back has to guess between "region" and
+      // "neighbourhood". That reasoning was sound while nothing on a restored
+      // night could regenerate. "Try another combination" is on every night
+      // now, so NOT guessing is itself a guess — and the worse one: reopening
+      // "A Lively Night in Shoreditch" and tapping it returned a night
+      // anywhere in London, which is not another take on THIS night at all.
+      // A wrong guess widens the pool and the engine still returns a night; no
+      // guess changes the brief out from under the user.
       setVibe(np.vibe);
       setBudget(np.budget);
       // The night's own daypart, so "Try another combination" regenerates
@@ -580,6 +600,11 @@ export function PlanFlow({
       // onto the daypart; the AREA control still cannot be mapped back (see
       // above), which is why this is a partial re-seed rather than a full one.
       setWhen(np.daypart);
+      setAreaSel(
+        np.area && np.area !== ANYWHERE
+          ? { kind: "neighbourhood", name: np.area }
+          : { kind: "anywhere" },
+      );
       setStep("result");
 
       // 🧨 A REOPENED SAVED ROW IS NOT PERSISTED HERE. The active slot holds
@@ -589,7 +614,13 @@ export function PlanFlow({
       // landed on a night with no Save, no Try another and no per-stop
       // Change, and the only way out was Edit -> Build. Glancing at a saved
       // night should not take the surface hostage.
-      if (np.source === "saved") return true;
+      if (np.source === "saved") {
+        // Entries written by the build BEFORE this rule existed are still in
+        // people's browsers, and returning early would leave them there —
+        // read-only stickiness for another 12 hours post-deploy.
+        clearActivePlan(owner);
+        return true;
+      }
 
       // Re-persist from the HYDRATED venues, so an anon-origin night (whose
       // ids are slugs) is re-keyed to real catalogue ids, and so a night that
@@ -645,6 +676,19 @@ export function PlanFlow({
     if (restoredForRef.current === owner) return;
     restoredForRef.current = owner;
 
+    // 🧨 The signed-out result screen is anon-scoped and must not survive into
+    // a signed-in session — otherwise it is still there after sign-out, ready
+    // to rehydrate onto the next person on this browser. claimAnonPlan clears
+    // it when there is something to claim; this covers the case where there
+    // was not (a failed canonical write, an older build), so no path leaves it
+    // behind.
+    if (owner) {
+      try {
+        window.localStorage.removeItem(ANON_RESULT_KEY);
+      } catch {
+        /* private mode */
+      }
+    }
     const claimed = owner ? claimAnonPlan(owner) : null;
     if (claimed) {
       // The canonical claim has won. Drop the legacy one-shot stash so the

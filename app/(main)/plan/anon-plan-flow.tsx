@@ -79,10 +79,12 @@ import {
   NIGHT_PLAN_VERSION,
   type NightPlan,
 } from "@/lib/night-plan";
-import { writeActivePlan } from "@/lib/active-plan";
+import {
+  writeActivePlan,
+  ANON_PLAN_STASH_KEY,
+  ANON_RESULT_KEY,
+} from "@/lib/active-plan";
 import type { PlanRole } from "@/lib/plan-engine";
-
-export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
 
 // The signed-out night, kept so it survives a refresh and a tap through to a
 // venue page and back.
@@ -101,11 +103,12 @@ export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
 // then spends one of the 12 builds an hour the server allows, so a visitor who
 // checked all three stops could be shown the sign-up wall for running out of
 // builds we made them spend.
-const ANON_RESULT_KEY = "fl.anonresult.v1";
 // One hour, matching the legacy stash rather than the canonical 12h: this
 // payload carries server-computed `isOpenNow` booleans, and a stale "open now"
 // is a wrong claim about a real business.
 const ANON_RESULT_TTL_MS = 60 * 60 * 1000;
+// Bump when the stored shape changes in a way an old reader cannot tolerate.
+const ANON_RESULT_VERSION = 1;
 
 // Mirrors plan-flow's resolveTiming for the anon brief —
 // deliberately NOT imported from there: plan-flow drags in the supabase
@@ -266,7 +269,15 @@ export function AnonPlanFlow({
     if (res.ok) {
       setResult(res);
       if (offset === 1) setReshuffles(1);
-      setStartISO(t.whenISO);
+      // 🧨 CLAMP, exactly as the server does (lib/plan-preview.ts). At 22:00
+      // "Today" resolves to 13:00 client-side, but the server plans from
+      // max(chosen, now) — so storing the raw value made the banner read
+      // "from 1:00 pm" over stops arriving at 10:00 pm, and the CLAIMED night
+      // was then relinked from 13:00. The night someone made an account to
+      // keep came back with different times than the one they were looking at.
+      setStartISO(
+        new Date(Math.max(Date.parse(t.whenISO), Date.now())).toISOString(),
+      );
       setStartLabel(
         new Date(t.whenISO)
           .toLocaleTimeString("en-GB", {
@@ -338,21 +349,47 @@ export function AnonPlanFlow({
       const raw = window.localStorage.getItem(ANON_RESULT_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw) as {
+        v?: number;
         payload?: AnonPlanPayload;
         startLabel?: string | null;
         startISO?: string | null;
         savedAt?: number;
       };
-      if (!saved?.savedAt || Date.now() - saved.savedAt > ANON_RESULT_TTL_MS) {
+      // 🧨 `age >= 0` as well as `<= TTL`. A device clock nudged forward makes
+      // a plain "now - savedAt > TTL" test false forever, so the night becomes
+      // immortal rather than expiring. Same clause as isFresh().
+      const savedAt = saved?.savedAt;
+      const age = typeof savedAt === "number" ? Date.now() - savedAt : NaN;
+      if (
+        saved?.v !== ANON_RESULT_VERSION ||
+        typeof savedAt !== "number" ||
+        !(age >= 0 && age <= ANON_RESULT_TTL_MS)
+      ) {
         window.localStorage.removeItem(ANON_RESULT_KEY);
         return;
       }
       const payload = saved.payload;
-      // Shape check, not a trust check: this is our own payload in our own
-      // browser, but a half-written or hand-edited entry must not render as a
-      // night with no stops.
-      if (!Array.isArray(payload?.stops) || payload.stops.length === 0) return;
-      resultStamp.current = { src: payload, at: saved.savedAt };
+      // 🧨 VALIDATE THE STOPS, not just that some exist. The result screen does
+      // `s.rating.toFixed(1)`, so one shapeless stop — a truncated write, a
+      // field renamed across a deploy — throws during render on EVERY mount
+      // for the next hour, turning signed-out /plan into a permanent error
+      // screen for that browser. Anything we cannot render, we drop.
+      if (
+        !Array.isArray(payload?.stops) ||
+        payload.stops.length === 0 ||
+        !payload.stops.every(
+          (s) =>
+            s &&
+            typeof s.slug === "string" &&
+            typeof s.name === "string" &&
+            typeof s.rating === "number" &&
+            typeof s.dwellMins === "number",
+        )
+      ) {
+        window.localStorage.removeItem(ANON_RESULT_KEY);
+        return;
+      }
+      resultStamp.current = { src: payload, at: savedAt };
       setResult(payload);
       setStartLabel(saved.startLabel ?? null);
       setStartISO(saved.startISO ?? null);
@@ -396,6 +433,7 @@ export function AnonPlanFlow({
         window.localStorage.setItem(
           ANON_RESULT_KEY,
           JSON.stringify({
+            v: ANON_RESULT_VERSION,
             payload: result,
             startLabel,
             startISO,
