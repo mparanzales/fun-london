@@ -91,21 +91,42 @@ export async function ph<T = Json>(
 }
 
 // The numeric project id. Maria should never have to go hunting for it in the
-// URL bar, so we resolve it from the key itself unless it is pinned in env.
+// URL bar, so it is resolved from the key itself unless pinned in env.
+//
+// 🧨 TWO SCOPE LESSONS, both learned by running it against a real key rather
+// than by reading the docs:
+//
+//  1. This used to call /api/users/@me/, which needs `user:read` — a scope that
+//     hands over the account holder's own profile and has nothing to do with
+//     reading analytics. A read-only analytics key must not need it.
+//  2. A key restricted to specific PROJECTS (the tightest, correct setting) is
+//     refused by every LISTING endpoint: /api/projects/, /api/organizations/
+//     and /api/environments/ all return 403 "API keys with scoped projects are
+//     only supported on project-based endpoints."
+//
+// /api/projects/@current/ is a project-based endpoint, so it works with exactly
+// the scoping we want: project-restricted, `project:read`, nothing more.
 export async function resolveProjectId(): Promise<number> {
   const pinned = process.env.POSTHOG_PROJECT_ID;
-  if (pinned) return Number(pinned);
-  const me = await ph<{
-    team?: { id: number; name: string };
-    organization?: { name: string };
-  }>("/api/users/@me/");
-  if (!me.team?.id) {
+  if (pinned) {
+    const n = Number(pinned);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new Error(
+        `POSTHOG_PROJECT_ID must be a positive integer, got "${pinned}".`,
+      );
+    }
+    return n;
+  }
+
+  const current = await ph<{ id?: number }>("/api/projects/@current/");
+  if (typeof current.id !== "number") {
     throw new Error(
-      "Could not resolve a project from this key. Set POSTHOG_PROJECT_ID in\n" +
-        ".env.local (the number in the PostHog URL: /project/<id>/…).",
+      "Could not resolve a project from this key.\n" +
+        "Give it `project:read`, or pin POSTHOG_PROJECT_ID in .env.local " +
+        "(the number in the PostHog URL: /project/<id>/...).",
     );
   }
-  return me.team.id;
+  return current.id;
 }
 
 // HogQL is the stable read surface: one shape, no insight-filter dialect.

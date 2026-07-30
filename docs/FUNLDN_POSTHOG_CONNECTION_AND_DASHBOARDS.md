@@ -47,7 +47,24 @@ Claude cannot create them; they require the account owner's console.
 | Lifetime | Permanent |
 
 This is all the verification path ever needs. It **cannot** create a dashboard,
-update an insight, delete anything, or change a project setting.
+update an insight, delete anything, or change a project setting. **Proven, not
+assumed** (2026-07-30): a POST to `/dashboards/` and a POST to `/insights/` both
+came back `403 permission_denied` naming the missing `dashboard:write` /
+`insight:write` scope, and nothing was created.
+
+🧨 **Set "Organization & project access" to PROJECTS and pick the one project.**
+That is the tightest setting and it is also the one that changes which endpoints
+work: a project-scoped key is refused by every LISTING endpoint with
+*"API keys with scoped projects are only supported on project-based endpoints"* —
+`/api/projects/`, `/api/organizations/` and `/api/environments/` all 403. Only
+project-based endpoints such as `/api/projects/@current/` work, which is what
+`resolveProjectId()` uses.
+
+🧨 **Do NOT add `user:read`.** An earlier version of `resolveProjectId()` called
+`/api/users/@me/`, which needs it. That scope returns the account holder's own
+profile and has nothing to do with reading analytics, so the resolver was changed
+rather than the key widened. If anything ever asks for `user:read` again, fix the
+caller.
 
 ### Temporary provisioning key
 
@@ -157,10 +174,12 @@ What has actually been checked, and what has not. Nothing below is inferred.
 | PR #189 landed on `main` | ✅ | Verified **by content**, not by the Merged badge: `export function stripRoomCodes`, `NESTED_URL_PARAM_RE`, `MAX_SANITIZE_DEPTH`, `plan_setup_started`, `flushPendingEvents` and `first_control` are all present on `origin/main` @ `3ff37ed`. This repo has a documented squash-merge hazard, so the badge is not evidence. |
 | Production is running the #189 sanitizer | ✅ | The deployed bundle carries the new stripper's distinctive markers (`%3f`, `redirect_uri`, the `return\|returnto\|next` alternation) that the old version did not have, AND it was confirmed **functionally**: a percent-encoded room URL on prod was captured leaving the browser as `$current_url = "https://www.funldn.com/sign-in?return=redacted"`, with a positive control proving payloads were being captured at all. |
 | A residual leak in the same area | 🔴 → fixed in [PR #192](https://github.com/mparanzales/fun-london/pull/192) | The same capture showed the code still present in `$heatmap_data`, whose object is **keyed by the page URL**. #189 sanitised values, not keys. Heatmaps are enabled by the PostHog project's remote config, so no code review could have found it. |
-| `venue_save`, `venue_unsave` | ✅ | Observed reaching the capture endpoint on prod, signed out (2026-07-29). |
-| `together_room_create`, `together_room_join` | ⏳ | The secure environment now exists in prod (#187 merged and verified live). What remains is a signed-in session, or one run of `pnpm posthog:verify`. |
-| #189's ten new events | ⏳ | Code- and test-verified; **arrival unconfirmed**, which needs the read key. |
-| Permanent read-only key | ⏳ | **Absent.** Checked by name in `.env.local` and the shell; no value was ever printed. |
+| Permanent key is read-only | ✅ **proven** | POST to `/dashboards/` and `/insights/` both `403 permission_denied`, naming the missing write scopes. Nothing created. |
+| `venue_save`, `venue_unsave` | ✅ **counted** | Real counts read back from the project on 2026-07-30, not just observed on the wire. |
+| `together_room_create`, `together_room_join` | ✅ **counted** | Both firing, confirmed by `pnpm posthog:verify` on 2026-07-30 against the post-#187 secure environment. **No room code was exposed doing it:** the verifier counts events and never reads a property. This closes the item that was pending staging verification. |
+| #189's ten new events | ⏳ **all zero, as expected** | Checked over 90 days on 2026-07-30: every one reads `never`. #189 merged the same afternoon, so production has not yet had traffic through those paths. This is why Dashboard 5 stays on proxies. Re-run `pnpm posthog:verify -- --all` in a few days. |
+| `sign_in_complete` | 🔎 **0 over 90 days** | Empirical confirmation of the bug #189 fixed: `SignInTracker` mounted before `AnalyticsGate`, so the event was dropped before PostHog initialised. It has literally never arrived. Expect it to start appearing now. |
+| Permanent read-only key | ✅ **created and working** | Created 2026-07-30. Never printed, never committed. |
 | Temporary provisioning key | ⏳ | **Never created**, so nothing to revoke. |
 | Dashboards provisioned | ⏳ | Not run. Dry run: 6 dashboards, 26 insights, offline. |
 | `fl_probe_manual` excluded | ✅ by construction | Every one of the 26 insights is scoped to explicit event names, so an unnamed event cannot be swept in. Pinned by `scripts/__tests__/posthog-dashboards.test.ts`. A project-level filter is still worth adding in the PostHog UI for ad-hoc exploration. |
