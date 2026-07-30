@@ -336,7 +336,8 @@ function sanitizeProps(
 let pendingIdentify: string | null = null;
 
 /**
- * Remove a Plan Together room code from any analytics property.
+ * Remove a Plan Together room code from any analytics property, at any depth,
+ * in object VALUES and object KEYS alike.
  *
  * A room code is a BEARER CREDENTIAL: possessing it is authorisation to join.
  * It lives in the URL (`/plan/together?room=CODE`), and PostHog attaches
@@ -359,6 +360,11 @@ let pendingIdentify: string | null = null;
  *     elements chain contains neither, so redacting one href ate the entire
  *     rest of the chain: every ancestor, every sibling, all the element text.
  *     Silent data destruction that looks fine on a dashboard.
+ *  4. **Object KEYS.** Fixing 1-3 still left this one, and it was caught only by
+ *     capturing a real payload off production: PostHog's `$heatmap_data` is an
+ *     object keyed by the page URL, so the code sat in the KEY while every
+ *     value was clean. Heatmaps are switched on by the project's REMOTE CONFIG,
+ *     so no amount of reading this repository would have revealed it.
  *
  * So: match both encodings, recurse into arrays and objects, and bound the
  * value to a real delimiter. Values are REPLACED rather than dropped so funnels
@@ -410,7 +416,16 @@ function redactRoomCodesDeep(value: unknown, depth: number): unknown {
   ) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = redactRoomCodesDeep(v, depth + 1);
+      // 🧨 REDACT THE KEY TOO, not just the value. PostHog's heatmap payload is
+      // `$heatmap_data`, an object KEYED BY THE PAGE URL:
+      //
+      //   { "$heatmap_data": { "https://funldn.com/...?room=CODE": [ ... ] } }
+      //
+      // Sanitising values alone left the room code sitting in the key, and it
+      // shipped. Found by capturing a real $$heatmap payload off production,
+      // not by reading the code: heatmaps are enabled by the PostHog project's
+      // remote config, so nothing in this repository says they are on.
+      out[redactRoomCodesInString(k)] = redactRoomCodesDeep(v, depth + 1);
     }
     return out;
   }

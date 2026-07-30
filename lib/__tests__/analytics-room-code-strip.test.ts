@@ -130,6 +130,46 @@ describe("nested values: missed by v1, which only looked at top-level strings", 
   });
 });
 
+describe("object KEYS, the leak that survived the first hardening", () => {
+  // Caught by capturing a real $$heatmap payload off production, not by reading
+  // the code. PostHog's heatmap data is an object KEYED BY THE PAGE URL, and
+  // heatmaps are switched on by the project's REMOTE CONFIG, so nothing in this
+  // repository says they are enabled at all.
+  it("redacts a room code sitting in a $heatmap_data key", () => {
+    const props = {
+      $heatmap_data: {
+        [`https://funldn.com/sign-in?return=%2Fplan%2Ftogether%3Froom%3D${CODE}`]:
+          [{ x: 10, y: 20, target_fixed: false, type: "click" }],
+      },
+    };
+    expect(leaks(props)).toBe(false);
+  });
+
+  it("keeps the heatmap entry usable rather than dropping it", () => {
+    const out = stripRoomCodes({
+      $heatmap_data: {
+        [`https://funldn.com/plan/together?room=${CODE}`]: [{ x: 1, y: 2 }],
+      },
+    }) as { $heatmap_data: Record<string, unknown> };
+    const keys = Object.keys(out.$heatmap_data);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toContain("/plan/together"); // the page is still identifiable
+    expect(keys[0]).toContain("redacted");
+    expect(out.$heatmap_data[keys[0]]).toEqual([{ x: 1, y: 2 }]); // data intact
+  });
+
+  it("redacts keys at depth, not just at the top", () => {
+    expect(leaks({ a: { b: { [`?room=${CODE}`]: { c: 1 } } } })).toBe(false);
+  });
+
+  it("leaves ordinary keys untouched", () => {
+    const props = {
+      $heatmap_data: { "https://funldn.com/explore": [{ x: 1 }] },
+    };
+    expect(stripRoomCodes(props)).toEqual(props);
+  });
+});
+
 describe("the greedy match no longer destroys the payload", () => {
   it("redacts the code in an elements chain WITHOUT eating the rest", () => {
     const chain =
