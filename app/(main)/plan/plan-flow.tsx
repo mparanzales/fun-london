@@ -255,28 +255,30 @@ export function PlanFlow({
   // (absent = keep the original). Reset whenever the base plan changes.
   const [swaps, setSwaps] = useState<Record<number, number>>({});
 
-  // When set, the result view shows a re-opened saved plan instead of the
-  // live-computed one. Cleared whenever the user edits inputs / tries again.
-  const [openedSaved, setOpenedSaved] = useState<DisplayPlan | null>(null);
-  // 🧨 WHERE the night on screen came from — NOT the same question as
-  // "is `openedSaved` set".
+  // The night on screen INSTEAD of the live-computed one: restored from the
+  // store, claimed from an anonymous session, or re-opened from the Saved
+  // list. Null means "show whatever the engine just computed".
   //
-  // Both gates caught this: overloading `openedSaved` to mean both "reopened
-  // from the Saved list" and "the active night" made every RESTORED night
-  // inert. An anon visitor tapped "Save this night", signed in, had their
-  // night faithfully restored, and found no Save button — the exact
-  // conversion the transfer path exists for. Same for anyone who tapped a
-  // stop and came back.
+  // 🧨 ONE state, not two. The night and WHERE IT CAME FROM are a single fact,
+  // and the first version of this stored them apart — `openedSaved` for the
+  // plan, `activeSource` for its origin. Three call sites cleared the plan and
+  // left the source behind, so after Reopen saved -> Edit -> Build the screen
+  // showed a freshly generated night still locked read-only: no Save, no Try
+  // another, no per-stop Change. Adding a fourth clear would have fixed that
+  // instance and left the next one to be discovered the same way. Held in one
+  // object, the desync is unrepresentable.
   //
   // Only a night reopened from a saved ROW is read-only. A restored generated
   // or claimed night keeps Save and Try-another; per-stop swaps stay hidden in
   // all three cases, because `computed.alternatives[i]` is relative to a
   // different set of stops and offering them could produce a night that is no
   // longer walkable.
-  const [activeSource, setActiveSource] = useState<NightPlanSource | null>(
-    null,
-  );
-  const isReopenedSaved = activeSource === "saved";
+  const [active, setActive] = useState<{
+    display: DisplayPlan;
+    source: NightPlanSource;
+  } | null>(null);
+  const openedSaved = active?.display ?? null;
+  const isReopenedSaved = active?.source === "saved";
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
     "idle",
@@ -293,6 +295,16 @@ export function PlanFlow({
   // through the sign-in round trip. Replaces a SaveMode value that could never
   // be produced (the Save button is unmounted for a restored plan).
   const anonOriginRef = useRef(false);
+  // 🧨 Freshness is measured from GENERATION, not from the last write. The
+  // effect below re-persists on every swap, and stamping a fresh createdAt
+  // there would push the 12h window out each time the user fiddled with a
+  // stop — a Friday night would still read as fresh on Sunday. Keyed on the
+  // engine result's identity, so it survives swaps and resets exactly when the
+  // engine actually produces a different night.
+  const genStampRef = useRef<{ src: Plan | null; at: string }>({
+    src: null,
+    at: "",
+  });
   // Whether the saved-plans list actually loaded. loadSavedPlans swallows its
   // error, so without this a failed load would make every save look like "new".
   const savedListLoadedRef = useRef(false);
@@ -395,18 +407,33 @@ export function PlanFlow({
           ? "resave_after_reshuffle"
           : "new";
     const attempt = ++saveAttemptRef.current;
+    // 🧨 PROVENANCE. `display` is the night being saved; `computed` is the
+    // night the engine last generated. For a live plan they are the same. For
+    // a RESTORED one they are not — a restored generated or claimed night is
+    // savable (that is the whole conversion path), and the engine has kept
+    // running behind it against controls that were only partly re-seeded: the
+    // area deliberately is not, so `computed.daypart` can read "day" under an
+    // evening night. So everything describing the saved night comes from
+    // `display` or from the controls the user can see, and the pool statistics
+    // — which describe a generation that did not produce this night — are null
+    // rather than borrowed. A wrong dimension is worse than a missing one; a
+    // dashboard will happily break down by it.
+    const live = active === null;
     const saveProps = {
       area: display.area,
-      vibe: computed.vibe,
-      budget: computed.budget,
-      daypart: computed.daypart,
+      vibe,
+      budget,
+      daypart: display.daypart,
       stops: display.steps.length, // legacy spelling, kept for continuity
       stop_count: display.steps.length,
       swapped: swapCount,
-      poolStage: computed.poolStage, // legacy spelling
-      pool_stage: computed.poolStage,
-      poolSize: computed.poolSize, // legacy spelling
-      pool_size: computed.poolSize,
+      poolStage: live ? computed.poolStage : null, // legacy spelling
+      pool_stage: live ? computed.poolStage : null,
+      poolSize: live ? computed.poolSize : null, // legacy spelling
+      pool_size: live ? computed.poolSize : null,
+      // live | generated | anon | saved — lets the null pool stats above be
+      // read as "not applicable" rather than "instrumentation broke".
+      plan_origin: active?.source ?? "live",
       mode,
       attempt,
       anon_origin: anonOriginRef.current,
@@ -421,14 +448,14 @@ export function PlanFlow({
     // Save what's ON SCREEN — i.e. with any per-stop swaps applied (`display`).
     const names = display.steps.map((s) => s.venue.name).join(" → ");
     const where = display.area === ANYWHERE ? "London" : display.area;
-    const kind = computed.daypart === "day" ? "day out" : "night";
+    const kind = display.daypart === "day" ? "day out" : "night";
     // `status` is destructured purely to bucket a failure (0 = never left the
     // device, 401/403 = expired session, 429 = throttled, 5xx = server).
     const { error, status } = await supabase.from("plans").insert({
       user_id: authUserId,
       title: display.title,
       neighbourhood: display.area,
-      why_it_works: `A ${computed.vibe.toLowerCase()} ${where} ${kind}: ${names}.`,
+      why_it_works: `A ${vibe.toLowerCase()} ${where} ${kind}: ${names}.`,
       // Canonical adapter. Still an ARRAY with the same four legacy keys, plus
       // `slug` — so a row written today is readable by anything that predates
       // the model, including the account-data export. See lib/night-plan.ts.
@@ -504,17 +531,19 @@ export function PlanFlow({
         });
       }
 
-      setOpenedSaved({
-        title: np.title,
-        area: np.area,
-        daypart: np.daypart,
-        totalMins: steps.reduce(
-          (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
-          0,
-        ),
-        steps,
+      setActive({
+        display: {
+          title: np.title,
+          area: np.area,
+          daypart: np.daypart,
+          totalMins: steps.reduce(
+            (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+            0,
+          ),
+          steps,
+        },
+        source: np.source,
       });
-      setActiveSource(np.source);
       // Seed the vibe/budget controls so the brief behind the night is what
       // the user sees, and so "try again" regenerates something comparable
       // rather than whatever the controls happened to be left on.
@@ -618,20 +647,33 @@ export function PlanFlow({
   // the journey back, or the sign-in round trip all return to the same night.
   useEffect(() => {
     if (step !== "result") return;
-    const np = openedSaved
-      ? null
-      : fromEnginePlan(
-          {
-            ...computed,
-            steps: display.steps.map((s) => ({
-              ...s,
-              arriveAt: s.arriveAt ?? null,
-            })),
-          },
-          { title: display.title },
-        );
-    if (np) writeActivePlan(owner, np);
-  }, [step, openedSaved, computed, display, owner]);
+    // A restored, claimed or re-opened night was already persisted by
+    // `activate`, in its hydrated and relinked form. Re-persisting from
+    // `computed` here would overwrite it with an unrelated night.
+    if (active) return;
+    if (genStampRef.current.src !== computed) {
+      genStampRef.current = { src: computed, at: new Date().toISOString() };
+    }
+    writeActivePlan(
+      owner,
+      fromEnginePlan(
+        {
+          ...computed,
+          // 🧨 `display.area`, not `computed.area`. toDisplay re-derives the
+          // area from the FIRST STOP, so once a swap changes stop 1 the header
+          // reads "Soho" while the engine's resolved pocket still says
+          // "Fitzrovia". Persisting the engine's value made a restored night
+          // rename itself on reload.
+          area: display.area,
+          steps: display.steps.map((s) => ({
+            ...s,
+            arriveAt: s.arriveAt ?? null,
+          })),
+        },
+        { title: display.title, createdAt: genStampRef.current.at },
+      ),
+    );
+  }, [step, active, computed, display, owner]);
 
   // Hydrate a night built while signed OUT. The anon /plan flow stashes its
   // result in localStorage before the sign-in round-trip (three navigations
@@ -684,12 +726,16 @@ export function PlanFlow({
         0,
       );
       const daypart = stash.daypart === "day" ? "day" : "evening";
-      setOpenedSaved({
-        title: `${stash.area || "London"} ${daypart === "day" ? "Day Out" : "Night"}`,
-        area: stash.area || "London",
-        daypart,
-        totalMins,
-        steps,
+      setActive({
+        display: {
+          title: `${stash.area || "London"} ${daypart === "day" ? "Day Out" : "Night"}`,
+          area: stash.area || "London",
+          daypart,
+          totalMins,
+          steps,
+        },
+        // The legacy stash only ever held an anonymous preview.
+        source: "anon",
       });
       setStep("result");
       // This night came from an anonymous preview. Recorded as a boolean on the
@@ -733,7 +779,7 @@ export function PlanFlow({
         first_control: control,
       });
     }
-    setOpenedSaved(null);
+    setActive(null);
     setSaveState("idle");
     setSwaps({});
     fn();
@@ -943,7 +989,7 @@ export function PlanFlow({
               const duration_ms = Math.round(performance.now() - t0);
               setOffset(0);
               setSwaps({});
-              setOpenedSaved(null);
+              setActive(null);
               setStep("result");
               recordSignal("plan_started", { surface: "plan" });
               const genProps = {
@@ -1034,7 +1080,7 @@ export function PlanFlow({
         <button
           type="button"
           onClick={() => {
-            setOpenedSaved(null);
+            setActive(null);
             setStep("setup");
           }}
           className="h-11 px-5 rounded-2xl bg-primary text-white font-extrabold text-[15px]"
@@ -1106,22 +1152,21 @@ export function PlanFlow({
               <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase">
                 {s.role}
               </div>
-              {!isReopenedSaved &&
-                (computed.alternatives[i]?.length ?? 0) > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onSwap(i, 1, "button")}
-                    aria-label={`Change the ${s.role} stop`}
-                    className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
-                  >
-                    <RotateCw
-                      className="w-3.5 h-3.5"
-                      strokeWidth={2}
-                      aria-hidden
-                    />
-                    Change
-                  </button>
-                )}
+              {!openedSaved && (computed.alternatives[i]?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onSwap(i, 1, "button")}
+                  aria-label={`Change the ${s.role} stop`}
+                  className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
+                >
+                  <RotateCw
+                    className="w-3.5 h-3.5"
+                    strokeWidth={2}
+                    aria-hidden
+                  />
+                  Change
+                </button>
+              )}
             </div>
             <SwipeStop
               enabled={
@@ -1251,6 +1296,12 @@ export function PlanFlow({
               const duration_ms = Math.round(performance.now() - t0);
               setSaveState("idle");
               setSwaps({});
+              // 🧨 Stand down the restored night. Without this the button was
+              // visible but inert on any restored or claimed night: `display`
+              // kept returning the stored plan while `computed` moved on, so
+              // the screen never changed and plan_reshuffle fired anyway —
+              // counting a reshuffle the user never saw.
+              setActive(null);
               setOffset(nextOffset);
               const reshuffleProps = {
                 area: result.area, // resolved walkable pocket

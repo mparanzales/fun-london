@@ -157,12 +157,64 @@ describe("anon plan client stays outside the moat", () => {
     ),
     "utf8",
   );
+  // Comments in the file mention module paths; only real import statements
+  // count. (A guard that reads its own explanatory prose is a guard that
+  // cannot fail — this suite has been bitten by that twice.)
+  const imported = [
+    ...src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "")
+      .matchAll(/\bfrom\s+"([^"]+)"/g),
+  ].map((m) => m[1]);
+
+  it("imports nothing outside the allowlist", () => {
+    // 🧨 ALLOWLIST, not a denylist. The previous version named three forbidden
+    // modules, so it had no opinion on any module nobody had thought of — and
+    // it stayed green while this branch added two new imports to this exact
+    // file. The invariant is "3 card-level stops from the server action and
+    // nothing else", which is a statement about what MAY be imported. Adding
+    // a line here is a deliberate act; forgetting to forbid one is not.
+    const allowed = new Set([
+      "react",
+      "next/link",
+      "next/image",
+      "lucide-react",
+      "@/components/auth-wall",
+      "./plan-controls",
+      "./plan-together-card",
+      "@/lib/plan-preview-action",
+      "@/lib/plan-preview-shape",
+      "@/lib/plan-engine",
+      "@/lib/analytics",
+      "@/lib/analytics-keys",
+      "@/lib/analytics-reasons",
+      // Canonical night model + the owner-scoped active-plan store. Both are
+      // pure shape/localStorage modules: no queries, no supabase client.
+      "@/lib/night-plan",
+      "@/lib/active-plan",
+    ]);
+    expect(imported.length).toBeGreaterThan(5);
+    for (const m of imported) {
+      expect(
+        [...allowed],
+        `anon-plan-flow imports "${m}", which is not on the allowlist. If it is genuinely moat-safe, add it here on purpose.`,
+      ).toContain(m);
+    }
+  });
+
   it("never imports the supabase browser client, signals, or queries", () => {
-    // The anon flow receives 3 card-level stops from the server action and
-    // must never grow a direct data path (code-reviewer gate).
-    expect(src).not.toMatch(/from "@\/lib\/supabase\/client"/);
-    expect(src).not.toMatch(/from "@\/lib\/signals"/);
-    expect(src).not.toMatch(/from "@\/lib\/queries"/);
+    // Guards the ALLOWLIST itself: these three are the specific direct data
+    // paths this flow must never grow, so adding one by mistake above still
+    // fails here.
+    for (const banned of [
+      "@/lib/supabase/client",
+      "@/lib/signals",
+      "@/lib/queries",
+    ]) {
+      expect(imported, `anon flow must not import ${banned}`).not.toContain(
+        banned,
+      );
+    }
   });
 
   it("plan-preview.ts is server-only", () => {

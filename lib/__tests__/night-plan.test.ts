@@ -379,6 +379,38 @@ describe("hydrateStops", () => {
     expect(stops).toHaveLength(1);
     expect(dropped).toBe(1);
   });
+
+  it("🧨 never looks a LEGACY empty slug up, it drops the stop", () => {
+    // Rows written before `slug` was added to plans.steps adapt to slug: "".
+    // Without the guard in hydrateStops that empty string reaches bySlug, and
+    // a Map seeded from a catalogue where any venue has an empty slug — or any
+    // lookup that treats "" as "first match" — resolves the WRONG VENUE into
+    // someone's saved night, silently and with dropped === 0 so nothing warns.
+    const calls: string[] = [];
+    const { stops, dropped } = hydrateStops(
+      plan({
+        stops: [
+          {
+            venueId: "long-gone",
+            slug: "",
+            role: "Start",
+            dwellMins: 30,
+            walkToNextMins: null,
+          },
+        ],
+      }),
+      {
+        byId: (id: string) => catalogue.get(id),
+        bySlug: (slug: string) => {
+          calls.push(slug);
+          return { id: "wrong", name: "Wrong Venue" };
+        },
+      },
+    );
+    expect(calls).toEqual([]);
+    expect(stops).toHaveLength(0);
+    expect(dropped).toBe(1);
+  });
 });
 
 describe("isFresh · a stale night must not be presented as tonight", () => {

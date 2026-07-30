@@ -313,8 +313,13 @@ export function AnonPlanFlow({
         // completed against the NEW code — is not stranded. The reader in
         // plan-flow keeps handling it. Remove once a deploy cycle has passed.
         window.localStorage.setItem(ANON_PLAN_STASH_KEY, json);
-        // Canonical store. This is what survives a refresh on the anon side
-        // and what claimAnonPlan() hands to the account after sign-in.
+        // Canonical store. WRITE-ONLY on this side, deliberately: this is
+        // what claimAnonPlan() hands to the account after sign-in, and
+        // nothing here reads it back. Anon-side refresh restore is NOT
+        // possible from a NightPlan alone — it holds ids and slugs only (the
+        // moat), and this component has no catalogue to hydrate them
+        // against; it would need a second server round-trip. Out of scope
+        // here rather than half-built.
         const np = parseNightPlan({
           version: NIGHT_PLAN_VERSION,
           createdAt: new Date().toISOString(),
@@ -354,6 +359,11 @@ export function AnonPlanFlow({
     } catch {
       /* private mode — the night just won't survive sign-in */
     }
+    // `result` ONLY. vibe/budget are read here but must not re-trigger it:
+    // they describe the brief that PRODUCED this night, and re-stashing when
+    // the user moves a control without rebuilding would file the night under
+    // a brief that never generated it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
 
   const signInHref = "/sign-in?return=%2Fplan";
