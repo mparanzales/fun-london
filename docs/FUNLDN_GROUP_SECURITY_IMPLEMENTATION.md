@@ -8,13 +8,23 @@
 > `CHANNEL_ERROR` while host and member sessions were unaffected and a vote broadcast still
 > delivered. Full record: `FUNLDN_GROUP_SECURITY_PRODUCTION_ROLLOUT.md`.
 >
-> Open follow-ups: `purge_expired_plan_rooms()` is still unscheduled, and
-> `verify-room-security.ts` cannot run against production until it uses a direct Postgres
-> connection instead of the rejected `exec_sql_readonly` RPC.
+> Both follow-ups this banner used to list — the unscheduled purge, and a verification
+> script that could not run against production — are closed by the **room-hygiene** work
+> below (§7b), which also removes the `create_plan_room` existence oracle.
+>
+> ## 🧨 ONE DATABASE STEP IS REQUIRED BEFORE THAT BRANCH MERGES
+>
+> `0004_server_side_room_codes.sql` must be applied **before** the hygiene client ships.
+> The branch calls `create_plan_room()` with **no argument**; the defaulted parameter
+> protects old-client/new-DB, **not** new-client/old-DB. Against a database without `0004`
+> every create is `PGRST202` and room creation is dead for everyone. Exact order in §3
+> step 5a.
 
+Security and infrastructure only: **no interface redesign, no group-plan saving, no change to solo planning, navigation or identity.**
 
-
-Branch `fix/group-room-security`, off `main` @ `0d35d47`. Security and infrastructure only: **no interface redesign, no group-plan saving, no change to solo planning, navigation or identity.** Nothing is merged and nothing is deployed — the migrations are files in the repo, not applied to any database.
+The original track (`fix/group-room-security`, off `main` @ `0d35d47`) is **merged as
+`da88c2f` and applied to production** — `0001` through `0003`. The room-hygiene follow-up
+(§7b) adds `0004`, which is **not** applied yet.
 
 ## 1. The previous exposure
 
@@ -80,8 +90,55 @@ Practical consequences:
 | 2 | *(deploy the client)* | The app starts creating/joining membership records, so the new predicate has rows to match. | Rooms work as before; new rows appear in `plan_rooms` |
 | 3 | `supabase/manual/0002_…` | **Adds** membership-scoped read+write policies **alongside** the broad ones. Postgres ORs permissive policies, so this cannot break a live room — it is the dual-run checkpoint. | Script reports **stage 2 (DUAL-RUN)**; two-account test passes (§6) |
 | 4 | `supabase/manual/0003_…` | **Drops** the two broad `plan-%` policies. This is the only step that removes access. | `EXPECT_STAGE=3 pnpm tsx scripts/verify-room-security.ts` exits 0 — it asserts the stage reached, that **no** unscoped policy of any name remains, and the function grants |
-| 5a | 🧨 **`0004_server_side_room_codes.sql` — APPLY BEFORE MERGING THE CLIENT** | The branch client calls `create_plan_room()` with **no argument**. Against a database without 0004 that is `PGRST202` and room creation is dead for everyone. The shim protects old-client/new-DB, **not** new-client/old-DB. Apply to production *and* the dev project (PR previews point at dev), and let PostgREST reload its schema cache, before the merge. | Gate below reports `0004 applied: exactly one create_plan_room, with a DEFAULTed parameter` |
+| 5a | 🧨 **`0004` — APPLY BEFORE MERGING PR #190** | The exact order is below the table. The branch client calls `create_plan_room()` with no argument; the shim protects old-client/new-DB, **not** new-client/old-DB. | `EXPECT_STAGE=3 EXPECT_0004=1 pnpm verify-room-security` exits 0 |
 | 5b | `0004_server_side_room_codes.sql` (what it does) | **Hygiene, post-cutover.** Moves room-code generation into the database so a collision can no longer answer "does this room exist?". Additive: adds one function, replaces two, drops nothing. | Guard tests in `scripts/__tests__/room-hygiene.test.ts`; behaviour proven on a throwaway Postgres |
+
+### Step 5a in full — the order for PR #190
+
+Do these in order. Steps 1 to 3 are database and take a few minutes; step 4 is the merge.
+
+**1. Apply `0004_server_side_room_codes.sql` to production AND dev.**
+Both, because PR previews point at the dev project, so a preview will fail in exactly the
+same way if dev is skipped. Apply it through a privileged SQL session (the same route used
+for `0002`/`0003`). It is additive and idempotent: one new function, two replaced, nothing
+dropped. It aborts loudly if `pgcrypto` is missing rather than applying clean and failing at
+runtime.
+
+**2. Reload the PostgREST schema cache.**
+PostgREST caches function signatures. Until it reloads, a no-argument call still resolves
+against the OLD signature and returns `PGRST202`, so the migration alone is not enough.
+Either way works:
+
+```sql
+notify pgrst, 'reload schema';
+```
+
+or restart the API from the Supabase dashboard. A settings change also triggers it.
+
+**3. Verify `create_plan_room()` works with no argument.** Do not skip this — it is the
+one check that distinguishes "applied" from "applied and visible to the API". As a
+signed-in user, or over SQL with a JWT claim set:
+
+```sql
+select (public.create_plan_room()).code is not null as ok;   -- expect t
+```
+
+and confirm the catalog agrees:
+
+```
+EXPECT_STAGE=3 EXPECT_0004=1 SUPABASE_DB_URL=… pnpm verify-room-security
+```
+
+which asserts exactly one `create_plan_room` with a DEFAULTed parameter, that the code
+generator is unreachable by `anon` and `authenticated`, and that the shipped Realtime
+policies are still membership-scoped. Delete the probe room afterwards.
+
+**4. Merge PR #190.** Vercel then deploys the client that calls with no argument. Because
+step 1 kept the parameter, the currently deployed client keeps working throughout — there
+is no window in which either client is broken.
+
+**If step 3 fails**, stop and do not merge: the deployed client is fine (it still sends a
+code, which `0004` ignores), so there is no urgency and nothing to roll back.
 
 ## 4. Policies (after step 4)
 

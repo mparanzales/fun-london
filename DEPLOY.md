@@ -199,8 +199,19 @@ shipped. What is still absent:
   applying.
 - **Automated publication** — `pnpm ingest:from-pending` is run by hand after a human
   approves candidates at `/admin/candidates`.
-🧨 **OUT OF DATE.** `supabase/migrations/` now exists and is NOT optional: `0001_plan_rooms.sql` and `0004_server_side_room_codes.sql` create the Plan Together room tables, their RLS and the `revoke ... from anon` that keeps signed-out callers off them. `supabase/schema.sql` does NOT contain those objects, so a project bootstrapped from schema.sql alone comes up without them. Apply the migrations too, then the owner-level policies in `supabase/manual/`. See docs/FUNLDN_GROUP_SECURITY_IMPLEMENTATION.md.
-  by hand.
+- 🧨 **~~A migrations directory~~ — OUT OF DATE.** `supabase/migrations/` now exists and is
+  **not** optional. `0001_plan_rooms.sql` and `0004_server_side_room_codes.sql` create the
+  Plan Together room tables, their RLS, and the `revoke ... from anon` that keeps
+  signed-out callers off them. `supabase/schema.sql` does **not** contain those objects, so
+  a project bootstrapped from `schema.sql` alone comes up without them.
+
+**Order for a fresh project:** `schema.sql`, then `supabase/migrations/` in filename order,
+then the owner-level Realtime policies in `supabase/manual/` (`0002`, then `0003`), then
+`notify pgrst, 'reload schema';`.
+
+**For an existing project, applying `0004` is a required step BEFORE the room-hygiene
+client merges** — it changes `create_plan_room`'s signature and the new client calls it with
+no argument. Full order in `docs/FUNLDN_GROUP_SECURITY_IMPLEMENTATION.md` §3 step 5a.
 
 ---
 
