@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { writeSignInTrigger, type SignInTrigger } from "@/lib/analytics-keys";
 import { usePathname } from "next/navigation";
 import { Users, ArrowLeft } from "lucide-react";
 import { LegalLinks } from "@/components/legal-links";
@@ -25,8 +26,13 @@ export function AuthWall({
   backHref,
   backLabel = "Keep browsing",
   returnTo,
+  trigger = "unknown",
 }: {
   signedIn: boolean;
+  // Which door this wall is. Armed in localStorage on the CTA click so
+  // sign_in_complete can report it after the auth round trip. Allow-listed;
+  // never travels in the URL.
+  trigger?: SignInTrigger;
   title?: string;
   body?: string;
   // Where to land after sign-in. Defaults to the current path (usePathname),
@@ -159,12 +165,14 @@ export function AuthWall({
 
         <Link
           href={href}
+          onClick={() => writeSignInTrigger(trigger)}
           className="mt-6 flex h-[52px] w-full items-center justify-center rounded-2xl bg-primary text-[15px] font-extrabold text-primary-fg shadow-soft"
         >
           Sign up free
         </Link>
         <Link
           href={href}
+          onClick={() => writeSignInTrigger(trigger)}
           className="mt-3 inline-block text-[13px] font-semibold text-muted-fg underline underline-offset-2 hover:text-fg"
         >
           Already have an account? Log in

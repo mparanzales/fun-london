@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Event, Venue } from "@/lib/types";
 import type { Member, Room, StopReaction } from "@/lib/realtime/room";
 import { averageTasteMaps } from "@/lib/group-taste";
@@ -175,6 +175,16 @@ export function Result({
   // majority. If the host has left, no device has isHost, so a reached majority
   // simply doesn't apply (a graceful no-op for an ephemeral room). Departed
   // members' votes are pruned in room.ts, so a leave can't cross the threshold.
+  // stop index -> the target position whose broadcast we are still waiting for.
+  //
+  // 🧨 NOT a Set of `${i}:${pos}` keys, which is what this was first. `pos`
+  // cycles modulo alts.length + 1, so a Set is exhausted after a few swaps of
+  // the same stop and every later genuine swap of it emits nothing. That would
+  // under-report group swaps on exactly the most-rejected stops, which is the
+  // opposite of what stop_role was added to measure. A pending-transition map
+  // suppresses the broadcast round trip (the reason the dedupe exists) without
+  // permanently consuming a key.
+  const swapPendingRef = useRef<Map<number, number>>(new Map());
   useEffect(() => {
     if (!room.isHost || total === 0) return;
     plan.alternatives.forEach((alts, i) => {
@@ -183,7 +193,33 @@ export function Result({
         const len = alts.length + 1;
         const pos = ((((room.swaps[i] ?? -1) + 2) % len) + len) % len;
         room.sendSwap(i, pos - 1);
-        track("plan_swap", { stop: i, dir: 1 });
+        // Report each (stop, target position) pair once. sendSwap deliberately
+        // does NOT optimistically update room.swaps, so this effect re-runs
+        // inside the broadcast round trip and would otherwise emit the same
+        // swap several times. The swap itself is idempotent and untouched.
+        const target = pos - 1;
+        const pending = swapPendingRef.current.get(i);
+        // Clear a stale entry once the swap it was waiting for has landed, so
+        // the next genuine swap of this stop is reported.
+        if (pending !== undefined && (room.swaps[i] ?? -1) === pending) {
+          swapPendingRef.current.delete(i);
+        }
+        if (swapPendingRef.current.get(i) !== target) {
+          swapPendingRef.current.set(i, target);
+          track("plan_swap", {
+            stop: i, // legacy spelling
+            stop_index: i,
+            // Group roles are filtered by the room's hearted moods, so index 0
+            // here is NOT necessarily the opener. Without the role, group and
+            // solo swaps merge into a wrong conclusion about which stop people
+            // reject.
+            stop_role: plan.steps[i]?.role ?? null,
+            dir: 1,
+            // Not "swipe" and not "button": the deciding vote can arrive over
+            // Realtime from another device, so no local gesture describes it.
+            method: "group_veto",
+          });
+        }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

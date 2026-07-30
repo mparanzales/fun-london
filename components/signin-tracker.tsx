@@ -12,6 +12,7 @@
 
 import { useEffect } from "react";
 import { track, identifyUser } from "@/lib/analytics";
+import { consumeSignInTrigger } from "@/lib/analytics-keys";
 
 export function SignInTracker({
   authUserId = null,
@@ -26,7 +27,17 @@ export function SignInTracker({
     try {
       const url = new URL(window.location.href);
       if (url.searchParams.get("signedin") !== "1") return;
-      track("sign_in_complete");
+      // Which door they came through. Read from localStorage, one-shot, allow
+      // listed at read time. NOT from the URL: lib/safe-redirect.ts passes any
+      // site-internal path through with its query string intact, so a
+      // query-string trigger would be caller-controllable, and PostHog
+      // attaches $current_url to every event.
+      //
+      // Always send the property (never omit it): "unknown" is the measurable
+      // carrier-loss bucket for a magic link opened in a different browser or
+      // on a different device, and for the server-side sign-in doors that
+      // cannot arm a trigger at all.
+      track("sign_in_complete", { trigger: consumeSignInTrigger() });
       url.searchParams.delete("signedin");
       window.history.replaceState(
         null,

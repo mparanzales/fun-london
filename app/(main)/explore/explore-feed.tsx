@@ -27,6 +27,7 @@ import {
 import { searchCatalog } from "@/lib/search-action";
 import { loadFeedPage } from "@/lib/feed-action";
 import { recordSignal } from "@/lib/signals";
+import { track } from "@/lib/analytics";
 import type { FeedFilter, FeedSort } from "@/lib/queries";
 import {
   FEED_PAGE_SIZE,
@@ -292,11 +293,15 @@ export function ExploreFeed({
   // one. requestUserGeo retries once on a slow/cold timeout (the root of the
   // "sometimes works, sometimes doesn't" flakiness) and persists on success, so
   // the next call is instant.
-  async function enableNearest() {
+  async function enableNearest(entry: "pill" | "sheet") {
     const stored = userGeo ?? readFreshUserGeo();
     if (stored) {
       if (!userGeo) setUserGeo(stored);
       setFilters((f) => ({ ...f, sort: "nearest" }));
+      // A cached fix is still a granted outcome from the visitor's point of
+      // view, and separating it from a fresh prompt is what makes the denial
+      // rate readable.
+      track("near_you_result", { result: "granted", source: "cache", entry });
       return;
     }
     setGeoStatus("locating");
@@ -305,16 +310,31 @@ export function ExploreFeed({
       setUserGeo(r.geo);
       setFilters((f) => ({ ...f, sort: "nearest" }));
       setGeoStatus("idle");
+      // NEVER r.geo. The outcome only.
+      track("near_you_result", { result: "granted", source: "prompt", entry });
     } else {
       setGeoStatus(r.reason === "denied" ? "denied" : "unavailable");
+      // Read the reason BEFORE the UI collapses timeout into unavailable, so a
+      // slow cold fix is distinguishable from a device that cannot locate.
+      track("near_you_result", {
+        result:
+          r.reason === "denied"
+            ? "denied"
+            : r.reason === "timeout"
+              ? "error"
+              : "unavailable",
+        source: "prompt",
+        entry,
+      });
     }
   }
 
   // "Near you" pill: toggle nearest on/off. Turning it off returns to the
   // default "for-you" sort (not "top-rated", which only the sheet sets).
   function toggleNearest() {
+    // Turning nearest OFF is not a permission outcome and emits nothing.
     if (nearestFirst) setFilters((f) => ({ ...f, sort: "for-you" }));
-    else enableNearest();
+    else void enableNearest("pill");
   }
 
   // Apply the sheet's draft. Price / area / open-now are set directly; a
@@ -322,8 +342,24 @@ export function ExploreFeed({
   // (which flips sort itself once a fix lands).
   function applyFilters(next: ExploreFilters) {
     const wantsNearest = next.sort === "nearest";
+    // Read from `next`, never from `filters`: the state setter below has not
+    // committed yet in this tick, so `filters` is one apply behind.
+    //
+    // category_count is 0 or 1 by construction: the category chips are
+    // SINGLE-select on this surface, and "for-you" is the unfiltered default.
+    // Price and area are the genuinely multi-select dimensions and they are
+    // reported by has_price / has_area. Documented so a flat "1" is not read as
+    // a bug. No free-form search term and no tag string is ever sent here.
+    track("explore_filter_applied", {
+      category: selectedFilter,
+      category_count: selectedFilter === "for-you" ? 0 : 1,
+      has_area: next.regions.length > 0,
+      has_price: next.price.length > 0,
+      has_open_now: next.openNow === true,
+      sort: next.sort,
+    });
     setFilters({ ...next, sort: wantsNearest ? sort : next.sort });
-    if (wantsNearest && !nearestFirst) enableNearest();
+    if (wantsNearest && !nearestFirst) void enableNearest("sheet");
     setFiltersOpen(false);
   }
 
@@ -439,6 +475,38 @@ export function ExploreFeed({
     sort === "nearest" ? "nearest" : sort === "top-rated" ? "rating" : "taste";
   const priceKey = [...price].sort().join(",");
   const regionKey = [...regions].sort().join(",");
+
+  // feed_end_reached fires ONCE per distinct feed view. The key is deliberately
+  // GEO-FREE: viewKey() embeds lat/lng to 3 decimals, and putting that anywhere
+  // near an analytics payload is a trilateration risk. Category + sort + the
+  // three filter dimensions identify a view well enough for this counter.
+  const endFiredRef = useRef<Set<string>>(new Set());
+
+  // Fire feed_end_reached at most once per distinct feed view.
+  //
+  // 🧨 Deliberately NOT hung off the IntersectionObserver sentinel. That
+  // observer re-arms by design (3000px rootMargin, deps include loaded.length)
+  // and the back-navigation scroll restore parks the visitor at max scroll, so
+  // an observer-driven event would fire on essentially every return from a
+  // venue page and the number would mean nothing.
+  const markFeedEnd = useCallback(
+    (how: "first_page" | "paginated", count: number) => {
+      const key = `${selectedFilter}|${serverSort}|${priceKey}|${regionKey}|${openNow ? 1 : 0}`;
+      if (endFiredRef.current.has(key)) return;
+      endFiredRef.current.add(key);
+      track("feed_end_reached", {
+        category: selectedFilter,
+        sort: serverSort,
+        how,
+        // Coarse count of what the visitor got through. No ids, no distances.
+        loaded_count: count,
+        has_area: regions.length > 0,
+        has_price: price.length > 0,
+        has_open_now: openNow === true,
+      });
+    },
+    [selectedFilter, serverSort, priceKey, regionKey, openNow, regions, price],
+  );
   // Refinements active (for the Filters pill badge). "Nearest" is excluded — it
   // has its own pill — so this only counts what lives inside the sheet.
   const refineCount =
@@ -494,6 +562,9 @@ export function ExploreFeed({
         if (myReq !== reqIdRef.current) return;
         setLoaded(res.venues);
         setFeedHasMore(res.hasMore);
+        // A first page that is already the last page: the whole feed for this
+        // filter combination fits on one screen. Counted, once.
+        if (res.hasMore === false) markFeedEnd("first_page", res.venues.length);
       })
       .finally(() => {
         if (myReq === reqIdRef.current) loadingRef.current = false;
@@ -730,7 +801,12 @@ export function ExploreFeed({
         // of the stable sort tiebreaker.
         setLoaded((prev) => {
           const seen = new Set(prev.map((v) => v.id));
-          return [...prev, ...res.venues.filter((v) => !seen.has(v.id))];
+          const merged = [
+            ...prev,
+            ...res.venues.filter((v) => !seen.has(v.id)),
+          ];
+          if (res.hasMore === false) markFeedEnd("paginated", merged.length);
+          return merged;
         });
         setFeedHasMore(res.hasMore);
       })
@@ -740,6 +816,7 @@ export function ExploreFeed({
   }, [
     signedIn,
     feedHasMore,
+    markFeedEnd,
     selectedFilter,
     serverSort,
     userGeo,
@@ -991,7 +1068,9 @@ export function ExploreFeed({
           {/* Anon: never a dead-end — an empty filtered view still keeps the
               sign-up push. No "Just looking" here (revealing more can't fill an
               empty filter), just the end-cap wall. */}
-          {!signedIn && <SignupWall returnTo="/explore" />}
+          {!signedIn && (
+            <SignupWall returnTo="/explore" trigger="explore_wall" />
+          )}
         </>
       ) : (
         <>
@@ -1014,6 +1093,7 @@ export function ExploreFeed({
                   variant="wide"
                   surface="explore"
                   onDismissed={signedIn ? onCardDismissed : undefined}
+                  position={index}
                   showCategoryTag={showCategoryTag}
                   priority={index === 0}
                   distanceLabel={
@@ -1064,6 +1144,7 @@ export function ExploreFeed({
               last of the bounded cards. */}
           {!signedIn && (
             <SignupWall
+              trigger="explore_wall"
               returnTo="/explore"
               onJustLooking={
                 justLooking ? undefined : () => setJustLooking(true)
@@ -1096,6 +1177,7 @@ export function ExploreFeed({
           puts sign-in on top, with a "Keep browsing" back out. */}
       {!signedIn && wallFor && (
         <AuthWall
+          trigger="explore_wall"
           signedIn={false}
           mainShell
           title={WALL_TITLES[wallFor]}
@@ -1108,6 +1190,7 @@ export function ExploreFeed({
           and re-arms the timer. */}
       {!signedIn && justLooking && reWalled && (
         <AuthWall
+          trigger="explore_wall"
           signedIn={false}
           mainShell
           title="Seen something you like? Sign up to see all of London."

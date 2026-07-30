@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Heart, X } from "lucide-react";
 import { useSaved } from "@/components/saved-context";
 import { recordSignal, type SignalSurface } from "@/lib/signals";
+import { track, positionBucket } from "@/lib/analytics";
+import { writeEntrySurface, isEntrySurface } from "@/lib/analytics-keys";
 import { sizedImageUrl, isGooglePlacesUrl } from "@/lib/img";
 import type { Venue } from "@/lib/types";
 
@@ -40,6 +42,12 @@ type Props = {
    * signed-in discovery surfaces (recordSignal no-ops for anon anyway).
    */
   onDismissed?: (venueId: string) => void;
+  /**
+   * 0-based index of this card in its feed. Analytics only, and only ever sent
+   * as a BUCKET: a raw index is a fingerprinting nudge and a useless dashboard
+   * breakdown.
+   */
+  position?: number;
 };
 
 export function VenueCard({
@@ -50,6 +58,7 @@ export function VenueCard({
   distanceLabel,
   surface = "feed",
   onDismissed,
+  position,
 }: Props) {
   const { isSaved, toggleSaved } = useSaved();
   const saved = isSaved(venue.slug);
@@ -82,7 +91,13 @@ export function VenueCard({
   };
 
   // `open` (step 0.4): the user tapped into the venue detail from this surface.
-  const onOpen = () => recordSignal("open", { surface, venueId: venue.id });
+  const onOpen = () => {
+    recordSignal("open", { surface, venueId: venue.id });
+    // Remember where they came FROM, so a booking on the venue page can be
+    // attributed. `surface` is already correctly plumbed by every caller; the
+    // guard keeps a SignalSurface value that has no EntrySurface twin out.
+    if (isEntrySurface(surface)) writeEntrySurface(surface);
+  };
 
   // "Not for me": the strongest negative taste signal, then let the surface
   // remove the card (optimistic; the ranking effect lands via the signal).
@@ -90,6 +105,16 @@ export function VenueCard({
     e.preventDefault();
     e.stopPropagation();
     recordSignal("dismiss", { surface, venueId: venue.id });
+    // No venue identifier here. recordSignal already carries venueId to our own
+    // DB for the taste vector; the third-party analytics event only needs to
+    // know that a dismissal happened, roughly where in the feed, and on which
+    // surface. card_type is always "venue": EventCard has no dismiss control,
+    // so a 0% event-dismiss rate is structural, not a product signal.
+    track("card_dismissed", {
+      card_type: "venue",
+      position_bucket: positionBucket(position),
+      surface,
+    });
     onDismissed?.(venue.id);
   };
 

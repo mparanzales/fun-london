@@ -18,6 +18,7 @@ export default async function ProfilePage() {
       <>
         <ProfileTeaser />
         <AuthWall
+          trigger="profile"
           signedIn={false}
           title="Sign up to make it yours"
           body="Save your spots, keep your bookings across devices, and tune your picks to your taste. Free."

@@ -25,6 +25,7 @@ export default async function SavedPage() {
           <>
             <SavedTeaser />
             <AuthWall
+              trigger="saved_screen"
               signedIn={false}
               title="Sign up to save your spots"
               body="Tap the heart on any place and it lands here. Plus your bookings, on every device. Free."

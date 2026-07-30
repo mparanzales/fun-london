@@ -20,6 +20,7 @@ import { isGooglePlacesUrl } from "@/lib/img";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { track } from "@/lib/analytics";
+import { writeEntrySurface } from "@/lib/analytics-keys";
 import { recordSignal } from "@/lib/signals";
 import { normalize, scoreMatch, compareHits } from "@/lib/search-match";
 import type { SearchHit } from "@/lib/search-match";
@@ -134,7 +135,15 @@ export function SearchOverlay({
     const q = query.trim();
     if (q.length < 2) return;
     const t = setTimeout(() => {
-      track("search_query", { q, results: results.length });
+      // 🧨 PRIVACY FIX. This sent the RAW user-typed query (`{ q }`) to PostHog
+      // EU and Vercel, two lines above a comment promising "never the raw text
+      // no PII" for the other sink. A search box is free text: people type
+      // names, addresses and worse into it. Only the length leaves now, which
+      // is what the Kind C signal below has always done.
+      //
+      // This DROPS a property. If a PostHog insight breaks down search_query by
+      // `q`, it will go blank; use `q_len` instead.
+      track("search_query", { q_len: q.length, results: results.length });
       // Kind C: send only the query LENGTH (never the raw text — no PII).
       recordSignal("search", {
         surface: "search_results",
@@ -252,7 +261,12 @@ function ResultRow({
     <li>
       <Link
         href={href}
-        onClick={onNavigate}
+        onClick={() => {
+          // Without this every search -> venue -> reserve conversion is
+          // attributed to "direct". The surface name only, never the query.
+          writeEntrySurface("search_results");
+          onNavigate();
+        }}
         prefetch={false}
         className="flex items-center gap-3 py-2.5 border-b border-border last:border-0"
       >

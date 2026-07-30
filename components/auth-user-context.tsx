@@ -16,13 +16,21 @@
 // and already re-hydrate when it changes (their designed sign-in/out
 // transition), so null → uuid on first session resolve is handled safely.
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
+import { clearSignInTrigger } from "@/lib/analytics-keys";
+import { isSignOutTransition } from "@/lib/auth-transition";
 
 const AuthUserIdContext = createContext<string | null>(null);
 
 export function AuthUserProvider({ children }: { children: React.ReactNode }) {
   const [authUserId, setAuthUserId] = useState<string | null>(null);
+  // Previous id, so the sign-OUT transition can be detected here rather than
+  // relying on the two profile buttons. A session that expires, a sign-out in
+  // another tab, or cleared cookies all reach this subscription and none of
+  // them reach those buttons.
+  const prevIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -33,7 +41,23 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUserId(session?.user?.id ?? null);
+      const nextId = session?.user?.id ?? null;
+
+      // Feed the analytics layer the COARSE state only. The uuid stays here;
+      // PostHog learns the identity through identifyUser(), never as an event
+      // property.
+      setAnalyticsAuthState(nextId ? "signed_in" : "anon");
+
+      // Sign-out: drop the PostHog person identity and any armed sign-in
+      // trigger, so the next account on this browser starts clean. Same helper
+      // the saved/bookings contexts use, so all three stay in exact parity.
+      if (isSignOutTransition(prevIdRef.current, nextId)) {
+        resetAnalyticsIdentity();
+        clearSignInTrigger();
+      }
+
+      prevIdRef.current = nextId;
+      setAuthUserId(nextId);
     });
     return () => subscription.unsubscribe();
   }, []);

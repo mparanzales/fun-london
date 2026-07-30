@@ -1,0 +1,128 @@
+import { describe, it, expect } from "vitest";
+import {
+  saveFailReason,
+  planFailReasonFromServer,
+  throwFailReason,
+} from "@/lib/analytics-reasons";
+
+// The failure-category mappers. The invariant these protect is narrow and
+// absolute: NOTHING that came out of an error object may become an event
+// property. A PostgREST message can echo a row value, and on the network path
+// postgrest-js puts a full stack trace in `details`.
+//
+// So every test here asserts two things at once: the right bucket, and that the
+// return value is one of a small fixed set.
+
+const SAVE_REASONS = [
+  "rls_denied",
+  "auth_expired",
+  "schema_mismatch",
+  "constraint",
+  "rate_limited",
+  "network",
+  "server",
+  "unknown",
+];
+
+const PLAN_REASONS = [
+  "no_result",
+  "invalid_input",
+  "rate_limited",
+  "network",
+  "server",
+  "timeout",
+  "unknown",
+];
+
+describe("saveFailReason buckets a Supabase insert failure", () => {
+  it.each([
+    ["42501", 403, "rls_denied"],
+    ["23505", 409, "constraint"],
+    ["23503", 409, "constraint"],
+    ["42703", 400, "schema_mismatch"],
+    ["PGRST204", 400, "schema_mismatch"],
+  ])("code %s status %i maps to %s", (code, status, expected) => {
+    expect(saveFailReason(code as string, status as number)).toBe(expected);
+  });
+
+  it("reads status when there is no SQLSTATE", () => {
+    expect(saveFailReason(undefined, 401)).toBe("auth_expired");
+    expect(saveFailReason(undefined, 403)).toBe("auth_expired");
+    expect(saveFailReason(undefined, 429)).toBe("rate_limited");
+    expect(saveFailReason(undefined, 500)).toBe("server");
+    expect(saveFailReason(undefined, 503)).toBe("server");
+  });
+
+  it("treats a missing status with no code as a network failure", () => {
+    // supabase-js reports a request that never left the device this way.
+    expect(saveFailReason(undefined, 0)).toBe("network");
+    expect(saveFailReason(undefined, undefined)).toBe("network");
+    expect(saveFailReason(null, null)).toBe("network");
+  });
+
+  it("never returns anything outside the closed set", () => {
+    const hostile: unknown[] = [
+      "'; DROP TABLE plans; --",
+      "duplicate key value violates unique constraint on user_id=abc@example.com",
+      "x".repeat(5000),
+      "",
+      "  ",
+      "42501; extra",
+      "\u0000",
+    ];
+    for (const h of hostile) {
+      for (const st of [undefined, 0, 200, 400, 401, 429, 500]) {
+        const out = saveFailReason(h as string, st);
+        expect(SAVE_REASONS).toContain(out);
+      }
+    }
+  });
+
+  it("never echoes the input back", () => {
+    const secret = "SENTINEL_ROW_VALUE_9f3a";
+    expect(saveFailReason(secret, 500)).not.toContain("SENTINEL");
+  });
+});
+
+describe("planFailReasonFromServer maps the server vocabulary", () => {
+  it.each([
+    ["limited", "rate_limited"],
+    ["empty", "no_result"],
+    ["invalid", "invalid_input"],
+    ["unavailable", "server"],
+    ["error", "server"],
+  ])("%s maps to %s", (raw, expected) => {
+    expect(planFailReasonFromServer(raw as string)).toBe(expected);
+  });
+
+  it("buckets anything unrecognised as unknown rather than forwarding it", () => {
+    const hostile = [
+      undefined,
+      null,
+      "",
+      "TypeError: Cannot read properties of undefined",
+      "SENTINEL_LEAK_9f3a",
+      "limited ",
+      "LIMITED",
+    ];
+    for (const h of hostile) {
+      const out = planFailReasonFromServer(h as string);
+      expect(PLAN_REASONS).toContain(out);
+      if (h && h !== "limited") expect(out).toBe("unknown");
+    }
+  });
+});
+
+describe("throwFailReason never inspects the error", () => {
+  it("reports network only when the device says it is offline", () => {
+    expect(throwFailReason(false)).toBe("network");
+    expect(throwFailReason(true)).toBe("server");
+    expect(throwFailReason(undefined)).toBe("server");
+  });
+
+  it("returns a value from the closed set", () => {
+    for (const v of [true, false, undefined]) {
+      expect(PLAN_REASONS).toContain(throwFailReason(v));
+    }
+  });
+});

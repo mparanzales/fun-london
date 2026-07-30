@@ -39,6 +39,7 @@ export function DetailAuthWall({
 
   return (
     <AuthWall
+      trigger="venue_teaser_readmore"
       signedIn={false}
       title={title}
       onBack={() => {

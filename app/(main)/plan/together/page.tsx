@@ -32,6 +32,7 @@ export default async function PlanTogetherPage({
       <div className="pt-4 pb-6">
         <TogetherTeaser />
         <AuthWall
+          trigger="together"
           signedIn={false}
           title="Sign up to plan together"
           body="Start a room, invite your friends, and the plan tunes itself to everyone's taste. Free."
