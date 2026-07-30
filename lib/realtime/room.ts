@@ -1,9 +1,23 @@
 "use client";
 
 // Plan Together — real multiplayer over Supabase Realtime (Presence +
-// Broadcast). No DB tables: a room is an ephemeral channel keyed by a short
-// code. Presence = who's here (live). Broadcast = phase, host settings,
-// votes, and stop-swaps.
+// Broadcast). A room is a channel keyed by a 6-char code AND backed by
+// plan_rooms / plan_room_members: the DB owns identity, membership, expiry
+// and the host role; Realtime carries the live traffic.
+// Presence = who's here (live). Broadcast = phase, host settings, votes,
+// stop-swaps.
+//
+// SECURITY MODEL (see docs/FUNLDN_GROUP_SECURITY_IMPLEMENTATION.md):
+//   · member id === authenticated user id (never client-minted);
+//   · the roster comes from the database, and every inbound payload is
+//     checked against it (lib/room-roster.ts) — invented members cannot
+//     inflate a vote majority;
+//   · the channel's RLS requires a membership row for THIS room that is not
+//     departed, expired or closed;
+//   · the client picks the earliest-joined PRESENT member and asks the DB to
+//     hand over; the DB decides who actually gets it by rotating forward from
+//     the outgoing host, via a conditional UPDATE with a server-clamped 30s
+//     staleness window (lib/room-host.ts, promote_plan_room_host).
 //
 // Late-join caveat: Broadcast has no replay, so a joiner who arrives after
 // the host set the plan would miss it. The host re-broadcasts settings +
@@ -16,6 +30,15 @@ import type { PlanArea } from "@/lib/regions";
 import type { PlanBudget } from "@/lib/plan-engine";
 import type { TasteMap } from "@/lib/group-taste";
 import { pruneReactions } from "@/lib/group-veto";
+import {
+  acceptsPayload,
+  filterPresence,
+  type RosterGuard,
+} from "@/lib/room-roster";
+import { shouldClaimHost, type RosterEntry } from "@/lib/room-host";
+import { failureFromStatus, type RoomFailure } from "@/lib/room-errors";
+import { loadRoomState, promoteHost, touchHost } from "@/lib/room-action";
+import { track } from "@/lib/analytics";
 
 export type Member = {
   id: string;
@@ -55,6 +78,8 @@ export type Room = {
   code: string;
   me: Member;
   isHost: boolean;
+  /** Non-null when the room could not be opened (see lib/room-errors.ts). */
+  failure: RoomFailure | null;
   members: Member[];
   phase: Phase;
   settings: RoomSettings | null;
@@ -101,38 +126,86 @@ function hash(s: string): number {
   return h;
 }
 
-function randomId(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
-export function makeMember(rawName: string): Member {
-  const id = randomId();
-  const h = hash(id);
+/**
+ * A member, derived from the AUTHENTICATED session.
+ *
+ * `userId` is auth.uid() — the same value plan_room_members stores and the
+ * Realtime policy checks. The old makeMember() minted crypto.randomUUID(),
+ * which is exactly what let one client claim to be several members.
+ */
+export function memberFromSession(userId: string, rawName: string): Member {
+  const h = hash(userId);
   const name =
     rawName && rawName.toLowerCase() !== "guest"
       ? rawName
       : `Guest ${ANIMALS[h % ANIMALS.length]}`;
-  return {
-    id,
-    name,
-    color: COLORS[h % COLORS.length],
-  };
-}
-
-export function randomRoomCode(): string {
-  const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous chars
-  let c = "";
-  for (let i = 0; i < 4; i++) c += A[Math.floor(Math.random() * A.length)];
-  return c;
+  return { id: userId, name, color: COLORS[h % COLORS.length] };
 }
 
 // ── The hook ──────────────────────────────────────────────────────────────
 
-export function useRoom(code: string, me: Member, isHost: boolean): Room {
+export function useRoom(
+  code: string,
+  me: Member,
+  roomId: string,
+  initialHostUserId: string,
+): Room {
   const [members, setMembers] = useState<Member[]>([me]);
+  const [failure, setFailure] = useState<RoomFailure | null>(null);
+  // Server-owned roster (plan_room_members). Payloads from anyone not on it
+  // are dropped, so an extra "member" cannot be conjured into a vote count.
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [hostUserId, setHostUserId] = useState<string>(initialHostUserId);
+  const [hostSeenAt, setHostSeenAt] = useState<string | null>(null);
+  const isHost = hostUserId === me.id;
+  // 🧨 The roster arrives asynchronously (loadRoomState). Until it does, the
+  // gate must NOT be applied — filtering presence against a roster of just
+  // {me} would drop every other member, and nothing would re-filter when the
+  // roster landed: the last joiner would sit alone in a room that still looked
+  // live, building a DIFFERENT plan and satisfying the "everyone's done"
+  // barrier by themselves. `rosterLoaded` is the switch: gate closed only once
+  // we actually know who belongs.
+  const [rosterLoaded, setRosterLoaded] = useState(false);
+  const guardRef = useRef<RosterGuard>({
+    memberIds: new Set([me.id]),
+    myUserId: me.id,
+  });
+  const rawPresenceRef = useRef<Member[]>([me]);
+  guardRef.current = {
+    memberIds: new Set(roster.map((r) => r.userId)),
+    myUserId: me.id,
+  };
+  const rosterLoadedRef = useRef(false);
+  rosterLoadedRef.current = rosterLoaded;
+  // Expiry is terminal; the event must fire once, not every poll.
+  const expiredFiredRef = useRef(false);
+  // Keys of payloads I actually sent, so the self-spoof check is real: a
+  // payload stamped with MY id that I did not send is dropped. Bounded and
+  // short-lived (broadcast self-echo returns within a tick).
+  const sentKeysRef = useRef<Set<string>>(new Set());
+  const noteSent = useCallback((key: string) => {
+    const s = sentKeysRef.current;
+    s.add(key);
+    if (s.size > 200) s.delete(s.values().next().value as string);
+  }, []);
+  const wasSentByMe = useCallback((key: string) => {
+    return sentKeysRef.current.delete(key);
+  }, []);
+  const meIdRef = useRef(me.id);
+  meIdRef.current = me.id;
+  const hostIdRef = useRef(initialHostUserId);
+  hostIdRef.current = hostUserId;
+  // A host-authored broadcast (settings / swap / swaps / variant) changes the
+  // plan for EVERYONE, so it is accepted only from the DB-recorded host. The
+  // sender stamps `from`; a member forging another member's id still cannot
+  // pass this unless that member is the host (see room-roster.ts's honest
+  // limit note).
+  const isHostAuthored = useCallback(
+    (from: unknown) => typeof from === "string" && from === hostIdRef.current,
+    [],
+  );
+  const isHostRef = useRef(isHost);
+  isHostRef.current = isHost;
   const [phase, setPhase] = useState<Phase>("lobby");
   const [settings, setSettings] = useState<RoomSettings | null>(null);
   const [votes, setVotes] = useState<Vote[]>([]);
@@ -154,9 +227,13 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
   // has no replay). Unlike settings/swaps/variant this is per-member, so EVERY
   // member re-emits their own, not just the host.
   const myTasteRef = useRef<TasteMap | null>(null);
+  // Presence changes constantly; the 10s host-handoff tick must read the
+  // LATEST list, not the one captured when its effect first ran.
+  const membersRef = useRef<Member[]>([me]);
   settingsRef.current = settings;
   swapsRef.current = swaps;
   variantRef.current = variant;
+  membersRef.current = members;
 
   useEffect(() => {
     const supabase = createClient();
@@ -185,12 +262,19 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
           }
         }
       }
-      if (list.length > 0) {
-        setMembers(list);
+      rawPresenceRef.current = list;
+      // Before the roster is known, trust presence as-is (the channel's own
+      // RLS already requires membership); after, apply the roster gate.
+      const vetted = rosterLoadedRef.current
+        ? filterPresence(guardRef.current, list)
+        : list;
+      if (vetted.length > 0) {
+        setMembers(vetted);
+        const seenVetted = new Set(vetted.map((m) => m.id));
         // A member who left must not keep a vote: reactions drive a majority
         // swap measured against the live group, so prune departed voters (no-op
         // ref when nobody left → no needless re-render).
-        setReactions((prev) => pruneReactions(prev, seen));
+        setReactions((prev) => pruneReactions(prev, seenVetted));
       }
     });
 
@@ -205,26 +289,26 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
           payload: { memberId: me.id, taste: myTasteRef.current },
         });
       }
-      if (!isHost) return;
+      if (!isHostRef.current) return;
       if (settingsRef.current) {
         channel.send({
           type: "broadcast",
           event: "settings",
-          payload: settingsRef.current,
+          payload: { ...settingsRef.current, from: me.id },
         });
       }
       if (Object.keys(swapsRef.current).length > 0) {
         channel.send({
           type: "broadcast",
           event: "swaps",
-          payload: swapsRef.current,
+          payload: { map: swapsRef.current, from: me.id },
         });
       }
       if (variantRef.current > 0) {
         channel.send({
           type: "broadcast",
           event: "variant",
-          payload: { variant: variantRef.current },
+          payload: { variant: variantRef.current, from: me.id },
         });
       }
     });
@@ -238,10 +322,25 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
       if (p === "settings") setReactions({});
     });
     channel.on("broadcast", { event: "settings" }, ({ payload }) => {
-      setSettings(payload as RoomSettings);
+      // Host-authored: only the DB-recorded host may set the group's
+      // logistics. Without this any member could rewrite when/where/budget
+      // for everyone from the console.
+      const p = payload as RoomSettings & { from?: string };
+      if (!isHostAuthored(p.from)) return;
+      setSettings(p);
     });
     channel.on("broadcast", { event: "vote" }, ({ payload }) => {
       const v = payload as Vote;
+      // Roster gate: only real, current members may cast a vote, and only I
+      // may cast mine (self-echo aside). See lib/room-roster.ts.
+      if (
+        !acceptsPayload(
+          guardRef.current,
+          v?.memberId,
+          wasSentByMe(`vote:${v?.qIdx}:${v?.value}`),
+        )
+      )
+        return;
       setVotes((prev) => [
         ...prev.filter(
           (x) => !(x.memberId === v.memberId && x.qIdx === v.qIdx),
@@ -251,13 +350,19 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     });
     channel.on("broadcast", { event: "done" }, ({ payload }) => {
       const id = (payload as { memberId: string }).memberId;
+      if (!acceptsPayload(guardRef.current, id, wasSentByMe("done"))) return;
       setDoneIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     });
     channel.on("broadcast", { event: "swap" }, ({ payload }) => {
-      const { stepIdx, altIdx } = payload as {
+      const { stepIdx, altIdx, from } = payload as {
         stepIdx: number;
         altIdx: number;
+        from?: string;
       };
+      // Host-authored: a swap changes the plan for the whole room, so it must
+      // come from the host. The majority-veto path reaches this by the host
+      // acting on counted reactions, not by a member broadcasting directly.
+      if (!isHostAuthored(from)) return;
       setSwaps((prev) => ({ ...prev, [stepIdx]: altIdx }));
       // A swapped stop is a fresh venue — its old keep/veto reactions no longer
       // apply, so clear them (and the majority that triggered the swap resets).
@@ -269,10 +374,14 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
       });
     });
     channel.on("broadcast", { event: "swaps" }, ({ payload }) => {
-      setSwaps(payload as Record<number, number>);
+      const p = payload as { map?: Record<number, number>; from?: string };
+      if (!isHostAuthored(p.from)) return;
+      setSwaps(p.map ?? {});
     });
     channel.on("broadcast", { event: "variant" }, ({ payload }) => {
-      setVariant((payload as { variant: number }).variant);
+      const p = payload as { variant: number; from?: string };
+      if (!isHostAuthored(p.from)) return;
+      setVariant(p.variant);
       setSwaps({}); // a fresh mix clears per-stop swaps
       setReactions({}); // …and its reactions
     });
@@ -282,7 +391,14 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
         stepIdx: number;
         value: StopReaction | null;
       };
-      if (!memberId) return;
+      if (
+        !acceptsPayload(
+          guardRef.current,
+          memberId,
+          wasSentByMe(`react:${stepIdx}:${value}`),
+        )
+      )
+        return;
       setReactions((prev) => {
         const stop = { ...(prev[stepIdx] ?? {}) };
         if (value) stop[memberId] = value;
@@ -295,8 +411,9 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
         memberId: string;
         taste: TasteMap;
       };
-      if (memberId && taste)
-        setTasteByMember((prev) => ({ ...prev, [memberId]: taste }));
+      if (!acceptsPayload(guardRef.current, memberId, wasSentByMe("taste")))
+        return;
+      if (taste) setTasteByMember((prev) => ({ ...prev, [memberId]: taste }));
     });
     // A newcomer (or a device recovering from a dropped message) asks everyone
     // to re-send their taste. Broadcast has no replay, so this is how a late
@@ -310,6 +427,10 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
         });
     });
 
+    // Guards the subscribe callback: removeChannel() during cleanup fires
+    // CLOSED, which must not paint an "offline" failure on a component that is
+    // simply re-running its effect.
+    let cancelled = false;
     channelRef.current = channel;
     // Hand Realtime the signed-in user's JWT so the private channel's RLS check
     // passes, THEN join. (supabase-js also auto-manages this token, but we set
@@ -322,21 +443,120 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
       } catch {
         // fall through — subscribe will surface an auth failure via status
       }
+      if (cancelled) return;
       channel.subscribe((status) => {
+        if (cancelled) return;
+        // The old code handled ONLY "SUBSCRIBED", so a timeout, an RLS
+        // rejection or a dropped network left the user on "Setting up your
+        // room…" forever. Every terminal status now surfaces honest copy.
         if (status === "SUBSCRIBED") {
+          setFailure(null);
           void channel.track(me);
           // Ask any members already here to re-send their taste (their earlier
           // broadcasts predate this subscription and Broadcast has no replay).
           channel.send({ type: "broadcast", event: "taste-sync", payload: {} });
+          return;
         }
+        const f = failureFromStatus(status);
+        if (f) setFailure(f);
       });
     })();
 
     return () => {
+      cancelled = true;
       void supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [code, me, isHost]);
+  }, [code, me, roomId]);
+
+  // Re-apply the gate to the LAST presence snapshot when the roster arrives or
+  // changes. Without this the members list would keep whatever it computed
+  // before the roster was known until the next join/leave event.
+  useEffect(() => {
+    if (!rosterLoaded) return;
+    const vetted = filterPresence(guardRef.current, rawPresenceRef.current);
+    if (vetted.length > 0) {
+      setMembers(vetted);
+      const ids = new Set(vetted.map((m) => m.id));
+      setReactions((prev) => pruneReactions(prev, ids));
+    }
+  }, [roster, rosterLoaded, me.id]);
+
+  // ── Roster + host lifecycle ─────────────────────────────────────────────
+  // Polls the server-owned room state: the roster (which gates every inbound
+  // payload) and the host record. Realtime is deliberately NOT the source of
+  // truth here — a forged broadcast must never be able to change who is host
+  // or who counts as a member.
+  useEffect(() => {
+    if (!roomId) return;
+    let alive = true;
+    const tick = async () => {
+      const state = await loadRoomState(roomId);
+      if (!alive) return;
+      if (!state.room) {
+        // The room vanished (purged) or the session dropped. Say so rather
+        // than polling a ghost — silent failure is the class of bug this
+        // track exists to end.
+        setFailure("not-found");
+        alive = false;
+        return;
+      }
+      setRoster(state.roster);
+      if (state.roster.length > 0) setRosterLoaded(true);
+      setHostUserId(state.room.hostUserId);
+      setHostSeenAt(state.room.hostSeenAt);
+
+      if (state.room.closedAt) {
+        setFailure("closed");
+        alive = false; // terminal: stop polling (and stop re-firing events)
+        return;
+      }
+      if (Date.parse(state.room.expiresAt) <= Date.now()) {
+        setFailure("expired");
+        if (!expiredFiredRef.current) {
+          expiredFiredRef.current = true;
+          track("together_room_expired", { room_id: roomId });
+        }
+        alive = false;
+        return;
+      }
+
+      // I'm the host → keep the liveness stamp fresh so nobody promotes over
+      // a host who is simply quiet.
+      if (state.room.hostUserId === me.id) {
+        await touchHost(roomId);
+        return;
+      }
+
+      // I'm not the host → promote only if the rule picks ME, so the common
+      // case is exactly one RPC. The conditional UPDATE inside
+      // promote_plan_room_host() settles any residual race.
+      const present = new Set(membersRef.current.map((m) => m.id));
+      if (
+        shouldClaimHost({
+          roster: state.roster,
+          presentUserIds: present,
+          hostUserId: state.room.hostUserId,
+          hostSeenAt: state.room.hostSeenAt,
+          myUserId: me.id,
+        })
+      ) {
+        const next = await promoteHost(roomId);
+        if (!alive) return;
+        if (next) {
+          setHostUserId(next);
+          if (next === me.id)
+            track("together_host_handoff", { room_id: roomId });
+        }
+      }
+    };
+    void tick();
+    const iv = setInterval(() => void tick(), 10_000);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [roomId, code, me.id]);
 
   const sendPhase = useCallback((p: Phase) => {
     channelRef.current?.send({
@@ -351,12 +571,13 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     channelRef.current?.send({
       type: "broadcast",
       event: "settings",
-      payload: s,
+      payload: { ...s, from: meIdRef.current },
     });
   }, []);
 
   const sendVote = useCallback(
     (qIdx: number, value: boolean) => {
+      noteSent(`vote:${qIdx}:${value}`);
       channelRef.current?.send({
         type: "broadcast",
         event: "vote",
@@ -367,6 +588,7 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
   );
 
   const sendDone = useCallback(() => {
+    noteSent("done");
     channelRef.current?.send({
       type: "broadcast",
       event: "done",
@@ -378,7 +600,7 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     channelRef.current?.send({
       type: "broadcast",
       event: "swap",
-      payload: { stepIdx, altIdx },
+      payload: { stepIdx, altIdx, from: meIdRef.current },
     });
   }, []);
 
@@ -388,12 +610,13 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     channelRef.current?.send({
       type: "broadcast",
       event: "variant",
-      payload: { variant: n },
+      payload: { variant: n, from: meIdRef.current },
     });
   }, []);
 
   const sendTaste = useCallback(
     (taste: TasteMap) => {
+      noteSent("taste");
       myTasteRef.current = taste; // remember, so we can re-emit on late joins
       setTasteByMember((prev) => ({ ...prev, [me.id]: taste })); // optimistic self
       channelRef.current?.send({
@@ -407,6 +630,7 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
 
   const sendReact = useCallback(
     (stepIdx: number, value: StopReaction | null) => {
+      noteSent(`react:${stepIdx}:${value}`);
       setReactions((prev) => {
         // optimistic self
         const stop = { ...(prev[stepIdx] ?? {}) };
@@ -427,6 +651,7 @@ export function useRoom(code: string, me: Member, isHost: boolean): Room {
     code,
     me,
     isHost,
+    failure,
     members,
     phase,
     settings,

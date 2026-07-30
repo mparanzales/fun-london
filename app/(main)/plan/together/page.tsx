@@ -50,7 +50,14 @@ export default async function PlanTogetherPage({
     fetchProfile(authUser.id),
   ]);
   const myName = profile?.displayName ?? authUser.email?.split("@")[0] ?? "You";
-  return <TogetherFlow venues={venues} events={events} myName={myName} />;
+  return (
+    <TogetherFlow
+      venues={venues}
+      events={events}
+      myName={myName}
+      myUserId={authUser.id}
+    />
+  );
 }
 
 // Static, non-interactive backdrop behind the auth wall — just enough of the

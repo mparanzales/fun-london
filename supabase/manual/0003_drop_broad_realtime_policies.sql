@@ -1,0 +1,80 @@
+-- ⚠️ OWNER-LEVEL EXECUTION REQUIRED — THIS FILE CANNOT BE APPLIED BY THE
+-- NORMAL MIGRATION PATH.
+--
+-- Measured against the live project 2026-07-29:
+--   current_user                                   = postgres
+--   rolsuper(postgres)                             = FALSE
+--   owner of realtime.messages                     = supabase_realtime_admin
+--   pg_has_role(postgres, supabase_realtime_admin) = FALSE
+--   postgres is a member of                        = supabase_privileged_role
+--
+-- ✅ AND YET THE PROBE BELOW SUCCEEDS. It was RUN against production through
+-- the Supabase MCP `execute_sql` path: the policy was created, confirmed in
+-- pg_policies, then dropped, leaving production at exactly its two original
+-- policies. An earlier revision of this header concluded from the pg_has_role
+-- result that no route existed. The measurement was right; the inference was
+-- wrong. `supabase_privileged_role` is the likely mechanism, but stock
+-- PostgreSQL semantics do not fully explain it — so trust the PROBE, not the
+-- theory. Run it, watch it succeed, then proceed. If it ever 42501s, STOP.
+--
+-- STILL TRUE: `supabase db push`, `db reset`, `apply_migration` and CI take a
+-- different path and must not be relied on for this file.
+--
+-- WHY THIS FILE IS NOT IN supabase/migrations/: it cannot be applied by the
+-- migration runner, so leaving it in the numbered chain would abort any
+-- `supabase db push` / `db reset` (including the bootstrap of a fresh staging
+-- project) partway through. Same precedent as supabase/realtime-policies.sql.
+--
+-- APPLY VIA (route CONFIRMED 2026-07-29, but re-prove it every time): a
+-- privileged SQL session — the Supabase MCP `execute_sql` path, or the
+-- dashboard SQL editor. Immediately before the production window, re-run this
+-- inert ownership probe:
+--     create policy "zz_probe_delete_me" on realtime.messages
+--       for select to authenticated using (false);
+--     drop policy "zz_probe_delete_me" on realtime.messages;
+--   A `using (false)` permissive policy grants nothing and removes nothing, so
+--   it is the safest possible ownership test. Confirm it appears in pg_policies
+--   and that the DROP leaves exactly the policies you started with. If it
+--   42501s, STOP — the plan then needs a different owner-level mechanism (e.g.
+--   Supabase support granting supabase_realtime_admin to postgres for one
+--   window, then revoking).
+--
+-- Then paste the statements below verbatim and prove the result.
+--
+-- ⚠️ `EXPECT_STAGE=3 pnpm verify-room-security` works against a database that
+-- has the exec_sql_readonly RPC. Production deliberately does NOT — that helper
+-- was REJECTED as unsafe (see
+-- docs/funldn-group-security-staging-evidence/REJECTED-exec_sql_readonly.sql).
+-- Against production, run the catalog queries from scripts/verify-room-security.ts
+-- §1-3 over the same privileged session and paste the output into
+-- docs/FUNLDN_GROUP_SECURITY_PRODUCTION_ROLLOUT.md.
+-- The repository copy and the applied database state must stay identical; the
+-- verification script is what proves they are.
+--
+-- ─────────────────────────────────────────────────────────────────────────
+-- 0003 · Remove the broad plan-% Realtime policies.
+--
+-- STEP 3 OF 3 — THE ONLY STEP THAT REMOVES ACCESS. Run it only after
+-- `pnpm tsx scripts/verify-room-security.ts` reports the membership path
+-- healthy on production (see the doc's "Production verification" section).
+--
+-- Before: any authenticated user who guessed a room code could read and write
+-- that room's channel. After: only recorded, non-departed members of a room
+-- that is neither expired nor closed.
+--
+-- Rollback (immediate, safe): re-create the two policies below verbatim —
+-- this is the pre-change state, kept here so a rollback needs no archaeology.
+--
+--   create policy "authenticated can read plan-together rooms"
+--     on realtime.messages for select to authenticated
+--     using ((select realtime.topic()) like 'plan-%'
+--            and extension in ('broadcast','presence'));
+--
+--   create policy "authenticated can write plan-together rooms"
+--     on realtime.messages for insert to authenticated
+--     with check ((select realtime.topic()) like 'plan-%'
+--                 and extension in ('broadcast','presence'));
+-- ─────────────────────────────────────────────────────────────────────────
+
+drop policy if exists "authenticated can read plan-together rooms"  on realtime.messages;
+drop policy if exists "authenticated can write plan-together rooms" on realtime.messages;

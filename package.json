@@ -64,6 +64,8 @@
     "test": "vitest run",
     "verify-feed-rank": "tsx scripts/verify-feed-rank.ts",
     "verify-plan": "tsx scripts/verify-plan.ts",
+    "verify-room-security": "tsx scripts/verify-room-security.ts",
+    "staging:room-security": "tsx scripts/staging-room-security-suite.ts",
     "generate-plan-notes:dry": "tsx scripts/generate-plan-notes.ts --dry-run",
     "generate-plan-notes": "tsx scripts/generate-plan-notes.ts",
     "prune-expired-events:dry": "tsx scripts/prune-expired-events.ts --dry-run",

@@ -10,7 +10,16 @@ import type { Room } from "@/lib/realtime/room";
 // Plan Together — Step 1: Lobby (real-time).
 // Real presence: `room.members` updates live as people open the link.
 
-export function Lobby({ room, onStart }: { room: Room; onStart: () => void }) {
+export function Lobby({
+  room,
+  onStart,
+  onCloseRoom,
+}: {
+  room: Room;
+  onStart: () => void;
+  /** Host-only: end the room now (see lib/room-action.ts closeRoom). */
+  onCloseRoom?: () => void;
+}) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
 
@@ -122,6 +131,15 @@ export function Lobby({ room, onStart }: { room: Room; onStart: () => void }) {
       >
         Start swiping ({room.members.length})
       </button>
+      {room.isHost && onCloseRoom && (
+        <button
+          type="button"
+          onClick={onCloseRoom}
+          className="mb-3 w-full text-[12px] font-semibold text-muted-fg hover:text-fg"
+        >
+          End this room
+        </button>
+      )}
       <p className="text-[11px] text-muted-fg text-center -mt-2">
         Anyone can start, everyone jumps to swiping together.
       </p>
