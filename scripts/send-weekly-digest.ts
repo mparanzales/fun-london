@@ -16,6 +16,7 @@
 import * as dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { tidyText } from "@/lib/text";
+import { sizedImageUrl } from "@/lib/img";
 
 dotenv.config({ path: ".env.local" });
 
@@ -59,6 +60,10 @@ const BRAND_VIOLET = "#4426D9";
 // token, on a white card: about 2.9:1, failing AA. globals.css records that
 // #645c50 was darkened specifically to clear AA.
 const MUTED_FG = "#645c50";
+
+// One string for the <title> and the sent subject. They were declared
+// separately and had already drifted.
+const SUBJECT = "Where the night starts this week";
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   console.error("Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
@@ -209,7 +214,8 @@ function venueCard(v: VenueLite): string {
   return `<tr><td style="padding:8px 0;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
       <td width="84" valign="top">
-        <img src="${esc(v.img_url)}" width="72" height="72" alt=""
+        <img src="${esc(sizedImageUrl(v.img_url, 144))}" width="72" height="72"
+          alt="${esc(v.name)}"
           style="border-radius:12px;object-fit:cover;display:block;">
       </td>
       <td valign="top" style="padding-left:12px;">
@@ -226,20 +232,33 @@ function venueCard(v: VenueLite): string {
 }
 
 function eventRow(e: EventLite): string {
+  // Field order matches components/event-card.tsx: name, then VENUE and area,
+  // then date and time. The digest had it inverted, which put a near-constant
+  // value in the loud slot (nine of this week's events start at 19:00, so most
+  // rows read "7:00 PM") while the field that actually differs between rows was
+  // demoted to the quietest line.
+  //
+  // alt carries the real name. R2 photography is WebP, which Outlook desktop
+  // cannot render at all, so alt="" turned the section into blank boxes there.
+  // sizedImageUrl picks the 512px variant rather than the 1280px one, which is
+  // a weight win for a 72px thumbnail but does NOT fix WebP in Outlook. Only
+  // the alt text does, by degrading to something a reader can act on.
   return `<tr><td style="padding:8px 0;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
       <td width="84" valign="top">
-        <img src="${esc(e.img_url)}" width="72" height="72" alt=""
+        <img src="${esc(sizedImageUrl(e.img_url, 144))}" width="72" height="72"
+          alt="${esc(e.name)}"
           style="border-radius:12px;object-fit:cover;display:block;">
       </td>
       <td valign="top" style="padding-left:12px;">
         <a href="${SITE_URL}/event/${esc(e.id)}"
           style="color:#1a1409;font-weight:800;font-size:15px;text-decoration:none;">
           ${esc(e.name)}</a>
-        <div style="color:#645c50;font-size:12px;margin-top:2px;">
+        <div style="color:${MUTED_FG};font-size:12px;margin-top:2px;">
+          <span style="color:#2a2419;font-weight:600;">${esc(e.venue_name)}</span>
+          &middot; ${esc(e.area)}</div>
+        <div style="color:${MUTED_FG};font-size:12px;margin-top:2px;">
           ${esc(e.date_label)} &middot; ${esc(e.time_label)}</div>
-        <div style="color:#645c50;font-size:12px;margin-top:2px;">
-          ${esc(e.venue_name)} &middot; ${esc(e.area)}</div>
       </td>
     </tr></table>
   </td></tr>`;
@@ -260,7 +279,7 @@ function buildHtml(
   unsubUrl: string,
 ): string {
   const venuesBlock = section(
-    "New on Fun London",
+    "New this week &middot; first stops",
     venues.map(venueCard).join(""),
   );
   const eventsBlock = section(
@@ -284,7 +303,7 @@ function buildHtml(
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light only">
   <meta name="format-detection" content="telephone=no,date=no,address=no,email=no">
-  <title>This week in independent London</title>
+  <title>${SUBJECT}</title>
   <style>
     a[x-apple-data-detectors] {
       color: inherit !important;
@@ -309,18 +328,19 @@ function buildHtml(
         style="width:100%;max-width:440px;background:#ffffff;border-radius:18px;
         padding:24px;border:1px solid #e3ddd2;">
         <tr><td>
-          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:${BRAND_VIOLET};">This week in independent London</div>
+          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:${BRAND_VIOLET};">London &middot; this week</div>
           <div style="font-size:22px;font-weight:800;color:#1a1409;margin-top:4px;">Fun London</div>
           <div style="font-size:14px;color:#645c50;margin-top:4px;">
-            No chains. No sponsored slots. Here is what is new this week.</div>
+            New places and what is on this week. All real, all independent.
+            The night itself takes seconds to build.</div>
         </td></tr>
         ${venuesBlock}
         ${eventsBlock}
         <tr><td style="padding-top:24px;">
-          <a href="${SITE_URL}/explore"
+          <a href="${SITE_URL}/plan"
             style="display:inline-block;background:${BRAND_VIOLET};color:#fff;
             font-weight:800;font-size:14px;text-decoration:none;
-            padding:12px 22px;border-radius:12px;">Open Fun London</a>
+            padding:12px 22px;border-radius:12px;">Build my night</a>
         </td></tr>
         <tr><td style="padding-top:24px;border-top:1px solid #e3ddd2;margin-top:16px;">
           <div style="font-size:11px;color:${MUTED_FG};padding-top:12px;line-height:1.5;">
@@ -385,7 +405,7 @@ async function main() {
     return;
   }
 
-  const subject = "This week in independent London";
+  const subject = SUBJECT;
 
   if (PREVIEW) {
     const html = buildHtml(venues, events, `${SITE_URL}/api/email/unsubscribe?token=PREVIEW`);
@@ -430,7 +450,7 @@ async function main() {
   if (list.length > 0 && sent === 0) {
     console.error(
       `\nFAILED: 0 of ${list.length} digests were delivered. ` +
-        `Every send was rejected — check the per-recipient errors above ` +
+        `Every send was rejected. Check the per-recipient errors above ` +
         `(a 422 "domain is invalid" means the EMAIL_FROM domain is not verified in Resend).`,
     );
     process.exit(1);
