@@ -152,6 +152,20 @@ export function clearActivePlan(
   }
 }
 
+/** Wipe the anonymous browser's night in every form it can take. Safe to call
+ *  when there is nothing there. */
+export function clearAnonPlanKeys(store?: StorageLike | null): void {
+  const s = store ?? defaultStorage();
+  if (!s) return;
+  for (const k of [activePlanKey(null), ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+    try {
+      s.removeItem(k);
+    } catch {
+      /* nothing to do */
+    }
+  }
+}
+
 /**
  * Move the anonymous browser's night to a signed-in owner, once.
  *
@@ -170,20 +184,6 @@ export function clearActivePlan(
  * one they are asking to keep. Discarding it loses the exact night they
  * created an account to save.
  */
-/** Wipe the anonymous browser's night in every form it can take. Safe to call
- *  when there is nothing there. */
-export function clearAnonPlanKeys(store?: StorageLike | null): void {
-  const s = store ?? defaultStorage();
-  if (!s) return;
-  for (const k of [activePlanKey(null), ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
-    try {
-      s.removeItem(k);
-    } catch {
-      /* nothing to do */
-    }
-  }
-}
-
 export function claimAnonPlan(
   owner: string,
   store?: StorageLike | null,
@@ -191,7 +191,7 @@ export function claimAnonPlan(
   const s = store ?? defaultStorage();
   const anon = readActivePlan(null, s);
   if (!anon) return null;
-  // ALL of them, not just the slot we read from. See ANON_PLAN_KEYS above.
+  // ALL of them, not just the slot we read from — see clearAnonPlanKeys.
   clearAnonPlanKeys(s);
   const claimed: NightPlan = { ...anon, source: "anon" };
   writeActivePlan(owner, claimed, s);

@@ -20,7 +20,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
 import { clearSignInTrigger } from "@/lib/analytics-keys";
-import { clearAnonPlanKeys } from "@/lib/active-plan";
+import { clearAnonPlanKeys, clearActivePlan } from "@/lib/active-plan";
 import { isSignOutTransition } from "@/lib/auth-transition";
 
 const AuthUserIdContext = createContext<string | null>(null);
@@ -63,6 +63,12 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
         // on /plan — and, because the signed-out flow re-persists what it
         // rehydrates, what gets claimed into the next account that signs in.
         clearAnonPlanKeys();
+        // ...and the DEPARTING account's own slot. clearAnonPlanKeys is
+        // anon-scoped by construction, so without this A's night — title,
+        // area and venue slugs — sat in localStorage on a shared laptop
+        // indefinitely: owner-scoped, so B never SEES it, but it is still A's
+        // data left on someone else's machine, and nothing sweeps it.
+        clearActivePlan(prevIdRef.current);
       }
 
       prevIdRef.current = nextId;

@@ -52,6 +52,7 @@ const plan = (over: Partial<NightPlan> = {}): NightPlan => ({
   ],
   source: "generated",
   savedRowId: null,
+  offset: 0,
   ...over,
 });
 
@@ -468,28 +469,67 @@ describe("hydrateStops", () => {
   });
 });
 
-describe("isFresh · a stale night must not be presented as tonight", () => {
-  it("accepts a night from this evening", () => {
-    expect(isFresh(plan({ createdAt: new Date().toISOString() }))).toBe(true);
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-    expect(isFresh(plan({ createdAt: twoHoursAgo }))).toBe(true);
+describe("isFresh · a night is stale when it is OVER, not 12h after it was thought of", () => {
+  const H = 60 * 60 * 1000;
+  // The fixture's two stops are 60 + 8 + 90 mins = 158 mins of night.
+  const NIGHT_MS = 158 * 60 * 1000;
+
+  it("🧨 a night planned for LATER stays fresh, however long ago it was built", () => {
+    // "Pick a day" invites planning ahead. Anchored only to createdAt, a night
+    // made on Thursday for next Saturday was deleted on Friday morning —
+    // before the night it was made for — and the claim refused it, so the
+    // anon-to-account conversion this branch exists for could not happen.
+    const nextSaturday = new Date(Date.now() + 3 * 24 * H).toISOString();
+    const builtThreeDaysAgo = new Date(Date.now() - 3 * 24 * H).toISOString();
+    expect(
+      isFresh(plan({ startsAt: nextSaturday, createdAt: builtThreeDaysAgo })),
+    ).toBe(true);
   });
 
-  it("🧨 rejects last week's night", () => {
-    // The legacy anon stash had a 1h TTL; the first draft of this model
-    // dropped it, which would have rendered a three-week-old night under
-    // "Tonight, the plan:" with stale opening hours.
-    const lastWeek = new Date(
-      Date.now() - 7 * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    expect(isFresh(plan({ createdAt: lastWeek }))).toBe(false);
+  it("a night in progress keeps its remaining stops", () => {
+    const anHourIn = new Date(Date.now() - 1 * H).toISOString();
+    expect(isFresh(plan({ startsAt: anHourIn }))).toBe(true);
   });
 
-  it("rejects a night from the future and an unparseable stamp", () => {
-    // A device clock that has gone backwards must not make a night immortal.
-    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    expect(isFresh(plan({ createdAt: future }))).toBe(false);
-    expect(isFresh(plan({ createdAt: "not a date" }))).toBe(false);
+  it("🧨 rejects a night that has already finished, however recently built", () => {
+    // Build a day out at 13:00; it ends at 17:00. At 19:00 you open Plan to
+    // sort the EVENING — and used to land on this afternoon's finished day out
+    // under "Today, the plan:", because it was only six hours old.
+    const over = new Date(Date.now() - NIGHT_MS - 1 * H).toISOString();
+    expect(
+      isFresh(plan({ startsAt: over, createdAt: new Date().toISOString() })),
+    ).toBe(false);
+  });
+
+  describe("with no start time, createdAt is the fallback", () => {
+    const noClock = (over = {}) => plan({ startsAt: null, ...over });
+
+    it("accepts a night from this evening", () => {
+      expect(isFresh(noClock({ createdAt: new Date().toISOString() }))).toBe(
+        true,
+      );
+      expect(
+        isFresh(
+          noClock({ createdAt: new Date(Date.now() - 2 * H).toISOString() }),
+        ),
+      ).toBe(true);
+    });
+
+    it("🧨 rejects last week's night", () => {
+      // The legacy anon stash had a 1h TTL; the first draft of this model
+      // dropped it, which would have rendered a three-week-old night under
+      // "Tonight, the plan:" with stale opening hours.
+      const lastWeek = new Date(Date.now() - 7 * 24 * H).toISOString();
+      expect(isFresh(noClock({ createdAt: lastWeek }))).toBe(false);
+    });
+
+    it("rejects a night from the future and an unparseable stamp", () => {
+      // A device clock that has gone backwards must not make a night immortal.
+      expect(
+        isFresh(noClock({ createdAt: new Date(Date.now() + H).toISOString() })),
+      ).toBe(false);
+      expect(isFresh(noClock({ createdAt: "not a date" }))).toBe(false);
+    });
   });
 });
 

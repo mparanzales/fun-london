@@ -48,14 +48,19 @@ night by construction rather than by remembering to clear.
 
 ## Deliberate boundaries
 
-- **The area control is not seeded** from a restored night. It is an `AreaSel`
-  union and a NightPlan carries only the resolved string, so mapping back would
-  guess between "region" and "neighbourhood" — and guessing wrong silently
-  changes what the engine generates next.
-- **Per-stop swaps stay hidden on a reopened saved night.**
-  `computed.alternatives[i]` is relative to a *generated* plan's other stops, so
-  offering them against a reopened night could produce a route that is no
-  longer walkable. Making that correct is engine work, not adapter work.
+- **The area control IS seeded**, as a neighbourhood, but only when
+  `regionOf()` resolves the name. This reverses an earlier boundary: not
+  guessing was defensible while nothing on a restored night could regenerate,
+  but "Try another combination" now appears on every night, so declining to
+  guess became the worse guess — reopening "A Lively Night in Shoreditch" and
+  tapping it returned a night anywhere in London. An unmapped neighbourhood
+  falls back to "anywhere", because the picker renders an unresolvable name as
+  a highlighted chip labelled the literal word "Area", with no drill-down.
+- **Per-stop swaps stay hidden on EVERY restored night**, not only a reopened
+  saved one. `computed.alternatives[i]` is relative to a *generated* plan's
+  other stops, so offering them against any night the engine did not just
+  produce could build a route that is no longer walkable. Making that correct
+  is engine work, not adapter work. The gate is `!openedSaved`.
 - **A restored night is not a reopened one.** Only `source === "saved"` is
   read-only; a restored generated or claimed night keeps Save and Try-another.
 

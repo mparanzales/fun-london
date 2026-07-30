@@ -99,6 +99,17 @@ export type NightPlan = {
    * not an oversight — changing it needs a migration and a lifecycle decision.
    */
   savedRowId: string | null;
+  /**
+   * How many times "Try another combination" had been tapped when this night
+   * was produced. Optional on disk: entries written before this field parse
+   * as 0.
+   *
+   * 🧨 Without it, restoring reset the counter to 0 while `computePlan` is
+   * deterministic per offset — so someone who reshuffled three times, tapped a
+   * stop and came back had to re-reject the same three nights before seeing
+   * anything new. It reads as the app being stuck.
+   */
+  offset: number;
 };
 
 /** The legacy step shape still on disk for every row written before this. */
@@ -180,6 +191,12 @@ export function parseNightPlan(value: unknown): NightPlan | null {
     budget: p.budget as PlanBudget,
     daypart: p.daypart,
     startsAt: p.startsAt as string | null,
+    // Absent on entries written before the field existed; 0 is the honest
+    // reading, being where an un-reshuffled night sits.
+    offset:
+      typeof p.offset === "number" && Number.isFinite(p.offset) && p.offset >= 0
+        ? p.offset
+        : 0,
     stops: p.stops as NightPlanStop[],
     source,
     savedRowId: p.savedRowId as string | null,
@@ -213,6 +230,8 @@ export function fromEnginePlan(
     savedRowId?: string | null;
     /** Preserved across a re-persist so restoring does not reset freshness. */
     createdAt?: string;
+    /** Reshuffle position, so Try-another resumes rather than replays. */
+    offset?: number;
   },
 ): NightPlan {
   return {
@@ -234,6 +253,7 @@ export function fromEnginePlan(
     })),
     source: opts.source ?? "generated",
     savedRowId: opts.savedRowId ?? null,
+    offset: opts.offset ?? 0,
   };
 }
 
@@ -303,6 +323,9 @@ export function fromSavedRow(
     stops,
     source: "saved",
     savedRowId: row.id,
+    // A saved row carries no reshuffle position, and shouldn't: reopening it
+    // is a fresh starting point, not a resumption of someone's browsing.
+    offset: 0,
   };
 }
 
@@ -385,6 +408,26 @@ export function totalMins(plan: NightPlan): number {
  * the plan:" — see NIGHT_PLAN_TTL_MS.
  */
 export function isFresh(plan: NightPlan, now: number = Date.now()): boolean {
+  // 🧨 A NIGHT GOES STALE WHEN IT IS OVER, NOT 12 HOURS AFTER IT WAS THOUGHT OF.
+  //
+  // Anchoring only to `createdAt` was wrong in both directions, and both were
+  // found in the flow review rather than by a test:
+  //
+  //   • Build a day out at 13:00; it ends at 17:00. At 19:00 you open Plan to
+  //     sort the EVENING and land on this afternoon's finished day out under
+  //     "Today, the plan:" — six hours old, therefore "fresh".
+  //   • "Pick a day" invites planning ahead. Plan next Saturday on Thursday
+  //     evening and it is deleted by Friday morning, before the night it was
+  //     made for. For an anonymous visitor the same night was gone in an hour,
+  //     and the claim refused it, so the conversion this whole branch exists
+  //     for could not happen.
+  //
+  // When the night knows when it happens, that is the authority: it is fresh
+  // until its own last stop is behind us. `createdAt` remains the fallback for
+  // a night with no start (the engine fails open on hours before mount).
+  const start = plan.startsAt ? Date.parse(plan.startsAt) : NaN;
+  if (Number.isFinite(start)) return now < start + totalMins(plan) * 60_000;
+
   const created = Date.parse(plan.createdAt);
   if (!Number.isFinite(created)) return false;
   // A clock that has gone backwards (timezone change, device clock reset)

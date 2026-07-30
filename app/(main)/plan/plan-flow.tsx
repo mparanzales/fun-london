@@ -298,6 +298,14 @@ export function PlanFlow({
   // `plan_origin` dimension carries the finer distinction between a live,
   // restored, claimed and reopened night.
   const anonOriginRef = useRef(false);
+  // Standing the restored night down also ends its provenance. Without this,
+  // claim -> "Try another combination" -> Save sent anon_origin: true on a
+  // night generated ten seconds earlier — a wrong dimension, which this file
+  // argues elsewhere is worse than a missing one.
+  const standDown = useCallback(() => {
+    setActive(null);
+    anonOriginRef.current = false;
+  }, []);
   // 🧨 Freshness is measured from GENERATION, not from the last write. The
   // effect below re-persists on every swap, and stamping a fresh createdAt
   // there would push the 12h window out each time the user fiddled with a
@@ -373,6 +381,19 @@ export function PlanFlow({
   const eyebrow =
     now && now.getHours() >= 6 && now.getHours() < 18 ? "today," : "tonight,";
 
+  // 🧨 DERIVED, not per-mount state. `saveState` resets to "idle" on every
+  // mount, so a night that had been saved came back after a refresh or a tap
+  // through to a venue reading "Save this night" — and tapping it inserted a
+  // SECOND identical row. `public.plans` is insert-only and the app has no
+  // delete, so "Your saved nights" filled with duplicates the user could not
+  // remove, degrading the entry point to the whole saved-night loop. The
+  // signature was already computed inside onSave for analytics; it just never
+  // reached the button.
+  const planSignature = display.steps.map((s) => s.venue.id).join("|");
+  const alreadySaved = savedPlans.some(
+    (p) => p.steps.map((s) => s.venueId).join("|") === planSignature,
+  );
+
   // ── Saved plans (signed-in only) ────────────────────────────────────
   const loadSavedPlans = useCallback(async () => {
     if (!authUserId) return;
@@ -404,10 +425,6 @@ export function PlanFlow({
     // the prop bag the legacy plan_save already sent, so a dashboard can be
     // migrated without losing a dimension. No title, no venue names, no ids.
     const swapCount = Object.values(swaps).filter((v) => v >= 0).length;
-    const signature = display.steps.map((s) => s.venue.id).join("|");
-    const alreadySaved = savedPlans.some(
-      (p) => p.steps.map((s) => s.venueId).join("|") === signature,
-    );
     const mode: SaveMode = alreadySaved
       ? "duplicate"
       : swapCount > 0
@@ -468,17 +485,26 @@ export function PlanFlow({
       // Canonical adapter. Still an ARRAY with the same four legacy keys, plus
       // `slug` — so a row written today is readable by anything that predates
       // the model, including the account-data export. See lib/night-plan.ts.
+      // 🧨 Built from what is ON SCREEN, never spread from `computed`. The
+      // spread put the LIVE engine run's vibe, budget and daypart on a
+      // restored night's adapter — the exact "stale generation metadata" this
+      // model exists to remove. It leaked nothing only because toSavedSteps
+      // throws those three away; the moment anyone widens it (which the
+      // schema note in lib/night-plan.ts anticipates), a reopened evening
+      // night saves as a day out with no test failing.
       steps: toSavedSteps(
         fromEnginePlan(
           {
-            ...computed,
             area: display.area,
+            vibe,
+            budget,
+            daypart: display.daypart,
             steps: display.steps.map((s) => ({
               ...s,
               arriveAt: s.arriveAt ?? null,
             })),
           },
-          { title: display.title },
+          { title: display.title, offset },
         ),
       ),
     });
@@ -599,7 +625,30 @@ export function PlanFlow({
       // header still reading "Tonight,". WhenChoice's "day"/"evening" map 1:1
       // onto the daypart; the AREA control still cannot be mapped back (see
       // above), which is why this is a partial re-seed rather than a full one.
-      setWhen(np.daypart);
+      // 🧨 ...and its DATE, when it has one. `setWhen(daypart)` alone meant a
+      // night built for next Saturday 20:00 restored perfectly — right stops,
+      // right arrivals — and then "Try another combination" regenerated for
+      // TONIGHT: different venues, different opening-hours filtering, and no
+      // date anywhere on screen to reveal the swap. startsAt is already
+      // stored; the controls just were not being fed from it.
+      const startDate = np.startsAt ? new Date(np.startsAt) : null;
+      const startsToday =
+        !startDate || toISODate(startDate) === toISODate(new Date());
+      if (startDate && !startsToday) {
+        setWhen("custom");
+        setCustomDate(toISODate(startDate));
+        setCustomTime(
+          `${String(startDate.getHours()).padStart(2, "0")}:${String(
+            startDate.getMinutes(),
+          ).padStart(2, "0")}`,
+        );
+      } else {
+        setWhen(np.daypart);
+      }
+      // Resume the reshuffle sequence rather than replaying it. computePlan is
+      // deterministic per offset, so restoring at 0 made someone who had
+      // reshuffled three times re-reject those same three nights.
+      setOffset(np.offset);
       // Only when `regionOf` resolves it. REGION_OF is a hand-maintained map
       // over a crawl-grown catalogue, so an unmapped neighbourhood is normal —
       // and it renders the Area chip highlighted but labelled the literal word
@@ -775,10 +824,13 @@ export function PlanFlow({
             arriveAt: s.arriveAt ?? null,
           })),
         },
-        { title: display.title, createdAt: genStampRef.current.at },
+        { title: display.title, createdAt: genStampRef.current.at, offset },
       ),
     );
-  }, [step, active, computed, display, owner]);
+    // `offset` is already implied by `computed` (computePlan takes it), but
+    // listed so the persisted reshuffle position cannot silently go stale if
+    // that ever stops being true.
+  }, [step, active, computed, display, owner, offset]);
 
   // Hydrate a night built while signed OUT. The anon /plan flow stashes its
   // result in localStorage before the sign-in round-trip (three navigations
@@ -883,7 +935,7 @@ export function PlanFlow({
         first_control: control,
       });
     }
-    setActive(null);
+    standDown();
     setSaveState("idle");
     setSwaps({});
     fn();
@@ -1093,7 +1145,7 @@ export function PlanFlow({
               const duration_ms = Math.round(performance.now() - t0);
               setOffset(0);
               setSwaps({});
-              setActive(null);
+              standDown();
               // Build produces a DIFFERENT night, so the save flag from the
               // last one must not follow it. Without this: Build -> Try
               // another -> Save -> Edit -> Build left the button reading
@@ -1191,7 +1243,7 @@ export function PlanFlow({
         <button
           type="button"
           onClick={() => {
-            setActive(null);
+            standDown();
             setStep("setup");
           }}
           className="h-11 px-5 rounded-2xl bg-primary text-white font-extrabold text-[15px]"
@@ -1418,7 +1470,7 @@ export function PlanFlow({
               // kept returning the stored plan while `computed` moved on, so
               // the screen never changed and plan_reshuffle fired anyway —
               // counting a reshuffle the user never saw.
-              setActive(null);
+              standDown();
               setOffset(nextOffset);
               const reshuffleProps = {
                 area: result.area, // resolved walkable pocket
@@ -1460,10 +1512,10 @@ export function PlanFlow({
             <button
               type="button"
               onClick={onSave}
-              disabled={saveState !== "idle"}
+              disabled={saveState !== "idle" || alreadySaved}
               className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold disabled:opacity-70"
             >
-              {saveState === "saved" ? (
+              {saveState === "saved" || alreadySaved ? (
                 <>
                   Saved to your nights{" "}
                   <Check

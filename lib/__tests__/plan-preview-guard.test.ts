@@ -202,6 +202,45 @@ describe("anon plan client stays outside the moat", () => {
     }
   });
 
+  it("🧨 and neither do the modules it pulls in", () => {
+    // The allowlist above reads anon-plan-flow's OWN import lines, so it has
+    // nothing to say about what those modules import in turn. This branch
+    // widened that list by two, and a `from "@/lib/queries"` added inside
+    // either of them would reach the anon client bundle with the guard still
+    // green — the same "guard that cannot fail" shape the comment above
+    // describes, one level down. Both are pure shape/localStorage modules and
+    // must stay that way; a type-only import of the engine is fine because it
+    // is erased.
+    for (const rel of ["../night-plan.ts", "../active-plan.ts"]) {
+      const mod = readFileSync(
+        fileURLToPath(new URL(rel, import.meta.url)),
+        "utf8",
+      )
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      for (const banned of [
+        "@/lib/queries",
+        "@/lib/supabase",
+        "@/lib/signals",
+        "@/lib/plan-preview",
+        "server-only",
+      ]) {
+        expect(mod, `${rel} must not import ${banned}`).not.toContain(
+          `"${banned}`,
+        );
+      }
+      // The engine may only enter as types.
+      for (const m of mod.matchAll(/^import\s+([\s\S]*?)from\s+"([^"]+)"/gm)) {
+        if (m[2] === "@/lib/plan-engine") {
+          expect(
+            m[1],
+            `${rel} must import plan-engine as types only`,
+          ).toContain("type");
+        }
+      }
+    }
+  });
+
   it("never imports the supabase browser client, signals, or queries", () => {
     // Guards the ALLOWLIST itself: these three are the specific direct data
     // paths this flow must never grow, so adding one by mistake above still

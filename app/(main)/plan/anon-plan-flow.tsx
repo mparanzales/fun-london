@@ -74,12 +74,7 @@ import {
   planFailReasonFromServer,
   throwFailReason,
 } from "@/lib/analytics-reasons";
-import {
-  isStop,
-  parseNightPlan,
-  NIGHT_PLAN_VERSION,
-  type NightPlan,
-} from "@/lib/night-plan";
+import { isStop, parseNightPlan, NIGHT_PLAN_VERSION } from "@/lib/night-plan";
 import {
   writeActivePlan,
   activePlanKey,
@@ -224,6 +219,10 @@ export function AnonPlanFlow({
   };
 
   const build = async (offset: 0 | 1) => {
+    // A deliberate build is a NEW anonymous night, so it is allowed to
+    // persist even if another tab claimed the previous one. See the ref's
+    // declaration for why the latch must not be permanent.
+    claimedElsewhere.current = false;
     setBuilding(true);
     setFailure(null);
     const t = resolveAnonTiming(when, customDate, customTime);
@@ -365,6 +364,15 @@ export function AnonPlanFlow({
         startLabel?: string | null;
         startISO?: string | null;
         savedAt?: number;
+        brief?: {
+          vibe?: (typeof VIBES)[number]["v"];
+          budget?: (typeof BUDGETS)[number];
+          areaSel?: AreaSel;
+          when?: WhenChoice;
+          customDate?: string;
+          customTime?: string;
+          reshuffles?: number;
+        };
       };
       // 🧨 `age >= 0` as well as `<= TTL`. A device clock nudged forward makes
       // a plain "now - savedAt > TTL" test false forever, so the night becomes
@@ -379,6 +387,7 @@ export function AnonPlanFlow({
         window.localStorage.removeItem(ANON_RESULT_KEY);
         return;
       }
+      const brief = saved.brief;
       const payload = saved.payload;
       // 🧨 VALIDATE THE STOPS, not just that some exist. The result screen does
       // `s.rating.toFixed(1)`, so one shapeless stop — a truncated write, a
@@ -405,6 +414,23 @@ export function AnonPlanFlow({
         return;
       }
       resultStamp.current = { src: payload, at: savedAt };
+      // Restore the brief BEFORE the night, so a reshuffle straight off the
+      // restored screen generates against what the visitor actually asked
+      // for. Each field is applied only if present, so an entry written
+      // before `brief` existed degrades to today's behaviour rather than
+      // wiping the controls.
+      if (brief) {
+        if (brief.vibe) setVibe(brief.vibe);
+        if (brief.budget) setBudget(brief.budget);
+        if (brief.areaSel) setAreaSel(brief.areaSel);
+        if (brief.when) setWhen(brief.when);
+        if (typeof brief.customDate === "string")
+          setCustomDate(brief.customDate);
+        if (typeof brief.customTime === "string")
+          setCustomTime(brief.customTime);
+        if (typeof brief.reshuffles === "number")
+          setReshuffles(brief.reshuffles);
+      }
       setResult(payload);
       setStartLabel(saved.startLabel ?? null);
       setStartISO(saved.startISO ?? null);
@@ -426,6 +452,11 @@ export function AnonPlanFlow({
   // clear. The `storage` event fires in the OTHER tabs on exactly that write,
   // so tab A learns about the claim without importing an auth hook here (which
   // the moat allowlist forbids, correctly).
+  // Reset by an explicit Build/Reshuffle below: the latch exists to stop a
+  // STALE mounted tab re-arming keys for a night that was already claimed, not
+  // to disable persistence forever. clearAnonPlanKeys() on sign-out fires the
+  // same event, so without the reset a sign-out in another tab silently killed
+  // persistence in this one for the rest of its life.
   const claimedElsewhere = useRef(false);
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -483,6 +514,26 @@ export function AnonPlanFlow({
             startLabel,
             startISO,
             savedAt: resultStamp.current.at,
+            // 🧨 THE BRIEF, not just the night. AnonPlanPayload carries no
+            // vibe, budget, area or when — it is a render payload — so
+            // restoring only the night left all four controls on their mount
+            // defaults. A visitor who asked for Fancy / £ / Soho / Tonight,
+            // tapped a stop to look at it and came back then got a
+            // Chill / ££ / anywhere night from Reshuffle, with nothing on
+            // screen admitting the brief had changed. It also poisoned the
+            // canonical write below, so the CLAIMED night and the saved row's
+            // prose described a brief the user never chose — the exact
+            // failure the comment further down says it fixed, reintroduced
+            // through the restore door.
+            brief: {
+              vibe,
+              budget,
+              areaSel,
+              when,
+              customDate,
+              customTime,
+              reshuffles,
+            },
           }),
         );
         // Canonical store. WRITE-ONLY on this side, deliberately: this is
@@ -494,7 +545,10 @@ export function AnonPlanFlow({
         // here rather than half-built.
         const np = parseNightPlan({
           version: NIGHT_PLAN_VERSION,
-          createdAt: new Date().toISOString(),
+          // The ORIGINAL build, not this write. plan-flow goes to real
+          // trouble (genStampRef) to keep freshness anchored to generation;
+          // re-stamping here made the two halves of one feature disagree.
+          createdAt: new Date(resultStamp.current.at).toISOString(),
           // The anon payload carries no title (it has no vibe control to
           // build the signed-in one from). Derive a plain one that keeps the
           // "Day Out" / "Night" convention the daypart inference in
