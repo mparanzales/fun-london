@@ -246,6 +246,14 @@ describe("load-bearing init options are pinned, not defended by a comment", () =
     expect((await initOptions()).capture_dead_clicks).toBe(false);
   });
 
+  it("keeps heatmaps off (the one the project actually had ENABLED)", async () => {
+    // $heatmap_data is keyed by the page URL, which is how a room code shipped
+    // in an object KEY. The project's remote config returns heatmaps: true and
+    // nothing in the product uses them, so the feature is switched off rather
+    // than left to the redactor.
+    expect((await initOptions()).capture_heatmaps).toBe(false);
+  });
+
   it("stays on the EU host and stays cookieless", async () => {
     const o = await initOptions();
     expect(o.api_host).toBe("https://eu.i.posthog.com");
@@ -305,6 +313,59 @@ describe("it does not damage anything legitimate", () => {
     expect(out.when).toBe(d); // returned as is, type preserved
     expect(out.n).toBe(1);
     expect(out.z).toBeNull();
+  });
+});
+
+describe("the persisted first-touch URL is scrubbed before init reads it", () => {
+  // posthog-js freezes $initial_person_info on the first pageview and then
+  // sends it as $initial_current_url on every /flags request, which does NOT
+  // pass through sanitize_properties. A browser that already opened an invite
+  // link has a live room code in its own localStorage, forever.
+  it("rewrites a room code already frozen in posthog's own storage", async () => {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_KEY", "phc_test_key");
+    const store = new Map<string, string>();
+    const STORE_KEY = "ph_phc_test_key_posthog";
+    store.set(
+      STORE_KEY,
+      JSON.stringify({
+        distinct_id: "abc",
+        $initial_person_info: {
+          u: `https://funldn.com/plan/together?room=${CODE}`,
+        },
+      }),
+    );
+    vi.doMock("posthog-js", () => ({
+      default: {
+        init: vi.fn(),
+        capture: vi.fn(),
+        identify: vi.fn(),
+        reset: vi.fn(),
+        opt_in_capturing: vi.fn(),
+        opt_out_capturing: vi.fn(),
+        captureException: vi.fn(),
+      },
+    }));
+    vi.stubGlobal("window", {
+      innerWidth: 375,
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+      },
+      sessionStorage: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+      },
+    });
+    const mod = await import("@/lib/analytics");
+    expect(store.get(STORE_KEY)).toContain(CODE); // positive control
+    mod.initAnalytics();
+    expect(store.get(STORE_KEY)).not.toContain(CODE);
+    expect(store.get(STORE_KEY)).toContain("redacted");
+    expect(store.get(STORE_KEY)).toContain("abc"); // nothing else destroyed
+    vi.unstubAllGlobals();
   });
 });
 

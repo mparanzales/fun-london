@@ -488,10 +488,38 @@ function flushPendingEvents(): void {
 // Called by the consent-gated AnalyticsGate. Safe to call repeatedly: inits at
 // most once, and no-ops when there's no key configured yet (so the app runs
 // fine before the PostHog project key is added to the env).
+/**
+ * Rewrite the room code out of PostHog's PERSISTED first-touch URL, before init
+ * reads it.
+ *
+ * 🧨 WHY THIS EXISTS AT ALL. posthog-js records `$initial_person_info` on the
+ * first pageview and keeps it in localStorage forever. It then sends it as
+ * `$initial_current_url` in `person_properties` on every /flags request — and
+ * /flags does NOT go through the capture path, so `sanitize_properties` never
+ * sees it. Any browser that has ALREADY opened an invite link therefore has a
+ * live room code frozen in its own storage, and keeps posting it, no matter
+ * what the app does from now on.
+ *
+ * Cleaning the URL going forward does not fix those browsers. This does, once,
+ * before init, so posthog reads the scrubbed value.
+ */
+function scrubPersistedInitialUrl(key: string): void {
+  const storeKey = `ph_${key}_posthog`;
+  try {
+    const raw = window.localStorage.getItem(storeKey);
+    if (!raw) return;
+    const cleaned = redactRoomCodesInString(raw);
+    if (cleaned !== raw) window.localStorage.setItem(storeKey, cleaned);
+  } catch {
+    // Private mode, quota, or a shape we do not recognise. Never break init.
+  }
+}
+
 export function initAnalytics(): void {
   if (posthogReady || typeof window === "undefined") return;
   const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
   if (!key) return;
+  scrubPersistedInitialUrl(key);
   posthog.init(key, {
     api_host:
       process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
@@ -525,6 +553,13 @@ export function initAnalytics(): void {
     //                     so no redaction pattern can ever match it.
     logs: { captureConsoleLogs: false },
     capture_dead_clicks: false,
+    // 🧨 HEATMAPS OFF. This is the one that was actually ENABLED: the project's
+    // remote config returns "heatmaps": true, and nothing in this product uses
+    // them. $heatmap_data is an object KEYED BY THE PAGE URL, which is how a
+    // room code shipped in a key while every value in the payload was clean.
+    // Turning the feature off removes the whole category rather than relying on
+    // the redactor to keep winning.
+    capture_heatmaps: false,
     loaded: (ph) => {
       if (!analyticsAllowed()) {
         ph.opt_out_capturing();
