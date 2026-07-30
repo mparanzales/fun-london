@@ -304,15 +304,23 @@ Existing no-cost alternatives, and why they are second choices:
 | Option | Cost | Assessment |
 |---|---|---|
 | Step in `maintenance.yml` (daily 03:00 UTC) | £0 | **Recommended.** Existing workflow, existing secret, existing failure alerting. |
-| `pg_cron` | £0 | Available but **not installed**. Database-native and needs no secret, but installing an extension is an infrastructure change and wants its own review. Would satisfy the function's `current_user` guard, since pg_cron runs as `postgres`. |
+| `pg_cron` | £0 | Available but **not installed**. Database-native and needs no secret, but installing an extension is an infrastructure change and wants its own review. (Note: `0004` removed that in-body `current_user` guard, because inside a definer function it can never refuse anyone. The GRANT is the control, and pg_cron running as `postgres` is unaffected by the change.) |
 | Supabase Edge Function + schedule | £0 on current plan | Requires deploying edge functions, which this project does not currently use. More surface for less benefit. |
 | Vercel Cron | £0 within Hobby limits | Needs a new API route, i.e. a new publicly-reachable endpoint guarding a destructive function. Worst option here. |
 
-**Decision required from Maria:** approve adding the purge step to `maintenance.yml`. It was
+**Decision required from Maria — now proposed in PR #190, still hers to approve:** adding the
+purge step to `maintenance.yml`. That PR implements it as its OWN job (own alerting, no Google
+key, no R2) rather than a step of the venue refresh. It was
 deliberately **not enabled** — it is a workflow change, so it belongs in a reviewed PR, not in a
 cutover. Until then, room and membership records accumulate indefinitely.
 
 ## Still open
+
+> **UPDATE, PR #190 (open, not merged).** All three bullets below are addressed on branch
+> `fix/room-hygiene`: the purge is scheduled in its own nightly job, the verification script
+> runs over a direct read-only Postgres connection with no SQL-execution RPC, and `0004`
+> closes the `create_plan_room` existence oracle. The backup note stands as written. Nothing
+> in that branch touches the Realtime policies this document records as shipped.
 
 - **`verify-room-security.ts` cannot run against production** until it takes a direct Postgres
   connection instead of the rejected RPC. The same change repairs `verify-plan.ts` and
@@ -325,3 +333,40 @@ cutover. Until then, room and membership records accumulate indefinitely.
 - **Backups: better than recorded earlier.** `.github/workflows/backup-db.yml` backs the database
   up to private R2 every Sunday at 04:00 UTC. The pre-flight recorded this as an unverified manual
   check; it is in fact covered. PITR remains a separate paid add-on and is still not enabled.
+
+# 0004 applied to production, 2026-07-30
+
+Pre-merge database step for PR #190. Applied through the Supabase MCP
+`apply_migration` path — the same privileged route used for `0002` and `0003` —
+and recorded as `server_side_room_codes_0004`.
+
+| Check | Before | After |
+|---|---|---|
+| `create_plan_room` signature | `p_code text` | `p_code text DEFAULT NULL::text` |
+| `new_plan_room_code` | absent | present, **no** EXECUTE for `anon` or `authenticated` |
+| dead `current_user` check in purge | present | **removed** |
+| purge sweeps the throttle ledger | no | **yes** |
+| policies on `realtime.messages` | 2 | **2, unchanged** |
+
+PostgREST schema cache reloaded with `notify pgrst, 'reload schema'`, then
+verified **through the API**, which is the only check that can see a stale
+cache:
+
+| Call | Result |
+|---|---|
+| `POST /rpc/create_plan_room` `{}` — anon key | `42501 permission denied for function` → signature RESOLVED (not `PGRST202`) |
+| `POST /rpc/create_plan_room` `{}` — signed in | **room created**, server-minted 6-char code, `plan-` topic |
+| `POST /rpc/create_plan_room` `{"p_code":"ZZZZZZ"}` — signed in | returned code is **NOT** `ZZZZZZ`; a different server-minted code came back |
+
+That last row is the oracle fix demonstrated on production: the deployed client's
+call shape still works, and the code it supplies is ignored.
+
+Cleanup verified by re-query: `auth.users` back to **16**, and `0 / 0 / 0` rows
+across `plan_rooms`, `plan_room_members`, `plan_room_join_attempts`. No orphaned
+profiles.
+
+**Dev was not updated — there is no dev project.** `rcecr…fskx` returns
+`Project not found` (deleted before 2026-07-29) and the organisation contains
+exactly one project. The only Supabase "branch" is `main`, whose `project_ref`
+IS production, so it is not a second database. Nothing was applied anywhere but
+production.

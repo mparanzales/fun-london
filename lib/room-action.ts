@@ -16,11 +16,7 @@
 import { getAuthUser } from "./auth";
 import { createClient } from "./supabase/server";
 import { rateLimit } from "./rate-limit";
-import {
-  isValidRoomCode,
-  normaliseRoomCode,
-  randomRoomCode,
-} from "./room-code";
+import { isValidRoomCode, normaliseRoomCode } from "./room-code";
 
 export type RoomRecord = {
   id: string;
@@ -62,7 +58,17 @@ function toRecord(row: RoomRow): RoomRecord {
   };
 }
 
-/** Create a room with a fresh 6-char code and enrol the caller as host. */
+/**
+ * Create a room and enrol the caller as host.
+ *
+ * 🧨 The CODE IS MINTED BY THE DATABASE, and the client must not send one.
+ * When the caller supplied the code, a duplicate came back as `23505` — which
+ * turned this call into an oracle for "does room ABC234 exist?", answerable at
+ * unlimited rate and completely bypassing the join throttle that is supposed
+ * to be the enumeration perimeter. `create_plan_room()` now generates the code
+ * with a CSPRNG and retries collisions internally, so no caller ever learns
+ * which codes are taken. See supabase/migrations/0004_server_side_room_codes.sql.
+ */
 export async function createRoom(): Promise<RoomResult> {
   const user = await getAuthUser();
   if (!user) return { ok: false, reason: "auth" };
@@ -73,17 +79,14 @@ export async function createRoom(): Promise<RoomResult> {
   if (!allowed) return { ok: false, reason: "rate-limited" };
 
   const supabase = await createClient();
-  // Retry on the (vanishingly unlikely) unique-code collision rather than
-  // handing the user an error: 32^6 space, but a duplicate must never merge
-  // two groups into one room.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { data, error } = await supabase
-      .rpc("create_plan_room", { p_code: randomRoomCode() })
-      .single<RoomRow>();
-    if (!error && data) return { ok: true, room: toRecord(data) };
-    if (error && error.code !== "23505") return { ok: false, reason: "error" };
-  }
-  return { ok: false, reason: "error" };
+  // No client-side retry loop any more: collision handling moved into the
+  // function, where it belongs, because that is the only place it can be done
+  // without telling the caller what it collided with.
+  const { data, error } = await supabase
+    .rpc("create_plan_room")
+    .single<RoomRow>();
+  if (error || !data) return { ok: false, reason: "error" };
+  return { ok: true, room: toRecord(data) };
 }
 
 /** Join an existing room by code. Enrols the caller as a member. */

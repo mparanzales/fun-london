@@ -1,9 +1,10 @@
 /**
  * Live verification for the Plan Together security track.
  *
- * READ-ONLY against whatever database SUPABASE_* points at. It creates no
- * rooms, joins nothing and deletes nothing — it inspects catalog state and
- * reports. Run it:
+ * READ-ONLY by construction: it opens a direct Postgres connection with the
+ * session pinned `default_transaction_read_only`, so the SERVER refuses any
+ * write from this path — including one reached through a volatile function.
+ * It creates no rooms, joins nothing and deletes nothing. Run it:
  *
  *   · after 0001  → tables/functions/grants exist, policies unchanged
  *   · after 0002  → the membership-scoped policies are live alongside the old
@@ -11,7 +12,13 @@
  *   · after 0003  → the broad plan-% policies are GONE and only the scoped
  *                   ones remain  ← the gate for calling the exposure closed
  *
- *   pnpm tsx scripts/verify-room-security.ts
+ *   SUPABASE_DB_URL=postgresql://… pnpm verify-room-security
+ *
+ * It reads pg_policies / pg_proc / the grant catalogs, which PostgREST cannot
+ * expose, so it needs a database URL rather than the anon or service key.
+ * Prefer a read-only role. It does NOT use, and must never reintroduce, an
+ * exec_sql_readonly-style SQL-execution RPC — see
+ * docs/funldn-group-security-staging-evidence/REJECTED-exec_sql_readonly.sql.
  *
  * Exit code is 1 when a REQUIRED invariant for the detected stage fails, so
  * it can gate a deploy step. Stage is detected, not assumed.
@@ -22,31 +29,8 @@
 import * as dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
-import { createClient } from "@supabase/supabase-js";
-import { hashRoomCode } from "@/lib/room-code";
-import { isLoopback, refFromKey } from "./staging-guard";
-
-/**
- * Deliberately NOT `@/lib/supabase/admin`.
- *
- * That module opens with `import "server-only"`, which Next resolves during a
- * build but which is not an installed package — so importing it here made this
- * script die with MODULE_NOT_FOUND before its first line ran. The header above
- * has always told you to run it with `pnpm tsx`; until this was found (during
- * the local staging run, 2026-07-29) that was impossible, which means the
- * documented production gate could never have gated anything.
- *
- * The service client is four lines, so build it here and leave admin.ts's
- * mechanical client-bundle guard intact for application code.
- */
-function createServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
+import { isLoopback } from "./staging-guard";
+import { connectReadOnly, MISSING_DB_URL } from "./pg-readonly";
 
 type PolicyRow = {
   policyname: string;
@@ -66,20 +50,22 @@ function check(pass: boolean, label: string, detail = "") {
 }
 
 async function main() {
-  const supabase = createServiceClient();
-  if (!supabase) {
-    console.error(
-      "No service-role client. Set NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (see lib/supabase/admin.ts).",
-    );
-    process.exit(1);
-  }
-
   // 🧨 A deploy gate that disables itself on a malformed value is the same
   // family as "the CI secret was an empty string so `??` never fired". If the
   // variable is set at all it must name a real stage — and this has to run
   // BEFORE any query, or the script dies on something else first and the guard
-  // never gets a turn. It originally sat next to its use ~100 lines below, and
-  // a live test of EXPECT_STAGE=three sailed straight past it.
+  // never gets a turn.
+  // Same strictness for EXPECT_0004: `true`, `yes` or a trailing space would
+  // otherwise disarm the 0004 assertion silently and still exit 0.
+  const raw0004 = process.env.EXPECT_0004;
+  if (raw0004 !== undefined && raw0004.trim() !== "1") {
+    console.error(
+      `EXPECT_0004=${raw0004} is not 1. Refusing to run with a gate that would silently do nothing.`,
+    );
+    process.exit(1);
+  }
+  const require0004 = raw0004?.trim() === "1";
+
   const rawExpected = process.env.EXPECT_STAGE;
   if (
     rawExpected !== undefined &&
@@ -91,56 +77,37 @@ async function main() {
     process.exit(1);
   }
 
-  // 🧨 NAME THE DATABASE, ALWAYS.
-  //
-  // This script loads .env.local, which means it certifies whatever that file
-  // happens to point at. During the staging run that file pointed at a loopback
-  // stack — so `EXPECT_STAGE=3 … → "All required invariants hold." → exit 0`
-  // could have authorised closing the PRODUCTION exposure while describing a
-  // local database, with nothing in the output to give it away. A gate that
-  // does not say what it inspected is not a gate.
-  const targetUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const dbUrl = process.env.SUPABASE_DB_URL ?? "";
+  // 🧨 NAME THE DATABASE, ALWAYS. A gate that does not say what it inspected
+  // is not a gate: this script used to load .env.local and certify whatever
+  // that happened to point at, with nothing in the output to reveal it.
   let targetHost = "(unparseable)";
   try {
-    targetHost = new URL(targetUrl).host;
+    targetHost = new URL(dbUrl).host;
   } catch {
     /* leave as unparseable */
   }
-  const keyRef = refFromKey(process.env.SUPABASE_SERVICE_ROLE_KEY ?? "");
-  console.log(
-    `Target: ${targetHost}${keyRef ? ` (key names project ${keyRef})` : " (key names no project)"}`,
-  );
-  if (
-    keyRef &&
-    targetHost !== "(unparseable)" &&
-    !targetHost.includes(keyRef)
-  ) {
+  console.log(`Target: ${targetHost}`);
+  if (isLoopback(dbUrl) && rawExpected && process.env.ALLOW_LOCAL !== "1") {
     console.error(
-      "REFUSING: the service key belongs to a different project than the URL.",
+      "REFUSING: EXPECT_STAGE is set but the target is loopback. Set ALLOW_LOCAL=1 to verify a local stack on purpose.",
     );
     process.exit(1);
   }
-  // A staged run against a local stack must opt in explicitly, so that a
-  // forgotten .env.local can never be mistaken for the production cutover.
-  if (isLoopback(targetUrl) && process.env.EXPECT_STAGE) {
-    if (process.env.ALLOW_LOCAL !== "1") {
-      console.error(
-        "REFUSING: EXPECT_STAGE is set but the target is loopback. Set ALLOW_LOCAL=1 to verify a local stack on purpose.",
-      );
-      process.exit(1);
-    }
-    console.log("(local stack, ALLOW_LOCAL=1)");
+
+  const db = await connectReadOnly();
+  if (!db) {
+    console.error(MISSING_DB_URL);
+    process.exit(1);
   }
 
-  // Catalog reads go through a SQL helper because PostgREST cannot select
-  // from pg_policies directly.
+  // Fixed, named catalog queries over a session pinned
+  // `default_transaction_read_only`. Postgres refuses any write reached from
+  // here, including one smuggled through a volatile function — which is the
+  // exact case the rejected exec_sql_readonly helper could not stop.
   const q = async <T>(sql: string): Promise<T[]> => {
-    const { data, error } = await supabase.rpc("exec_sql_readonly", { q: sql });
-    if (error)
-      throw new Error(
-        `${error.message} (add the read-only SQL helper or run this SQL by hand)`,
-      );
-    return (data ?? []) as T[];
+    const { rows } = await db.query(sql);
+    return rows as T[];
   };
 
   console.log("\n── Plan Together security verification ──\n");
@@ -160,6 +127,7 @@ async function main() {
 
   if (!stage1) {
     console.log("\nStage: PRE-0001. Nothing else to verify yet.\n");
+    await db.end();
     process.exit(failures > 0 ? 1 : 0);
   }
 
@@ -311,6 +279,48 @@ async function main() {
     !!predicate?.auth,
     "authenticated can EXECUTE is_plan_room_member (policies fail without it)",
   );
+  // 0004 invariants. Without these the gate cannot tell you whether the
+  // migration that closes the room-code oracle is actually applied — which is
+  // the check that would catch a client deployed ahead of its migration.
+  const createFn = await q<{ args: string }>(
+    `select pg_get_function_arguments(p.oid) as args
+       from pg_proc p where p.pronamespace = 'public'::regnamespace
+        and p.proname = 'create_plan_room'`,
+  );
+  // Report, but only FAIL when 0004 is actually expected. Otherwise this gate
+  // exits 1 on every pre-0004 database and "the exposure regressed" becomes
+  // indistinguishable from "the hygiene migration has not landed yet".
+  const create0004 =
+    createFn.length === 1 && createFn[0].args.toLowerCase().includes("default");
+  if (create0004 || require0004) {
+    check(
+      create0004,
+      "0004 applied: exactly one create_plan_room, with a DEFAULTed parameter",
+      createFn.map((f) => f.args || "(no args)").join(" | ") || "absent",
+    );
+  } else {
+    console.log(
+      `${INFO}0004 not applied yet (create_plan_room: ${createFn.map((f) => f.args || "(no args)").join(" | ") || "absent"}). Set EXPECT_0004=1 to require it.`,
+    );
+  }
+  const codeGen = await q<{ anon: boolean; auth: boolean }>(
+    `select has_function_privilege('anon', p.oid, 'execute') as anon,
+            has_function_privilege('authenticated', p.oid, 'execute') as auth
+       from pg_proc p where p.pronamespace = 'public'::regnamespace
+        and p.proname = 'new_plan_room_code'`,
+  );
+  check(
+    require0004
+      ? codeGen.length === 1 && !codeGen[0].anon && !codeGen[0].auth
+      : codeGen.length === 0 || (!codeGen[0].anon && !codeGen[0].auth),
+    "the room-code generator is not executable by anon or authenticated",
+    codeGen.length
+      ? `anon=${codeGen[0].anon} auth=${codeGen[0].auth}`
+      : require0004
+        ? "ABSENT — but EXPECT_0004=1 requires it"
+        : "absent (pre-0004)",
+  );
+
   const anonExecutable = grants.filter((g) => g.anon).map((g) => g.fn);
   check(
     anonExecutable.length === 0,
@@ -363,20 +373,27 @@ async function main() {
   check((orphans[0]?.n ?? 0) === 0, "no orphaned membership rows");
 
   // Sample one live room, hashed, so an operator can correlate with analytics.
-  const sample = await q<{ code: string; members: number }>(
-    `select r.code, (select count(*) from public.plan_room_members m where m.room_id = r.id)::int as members
+  const sample = await q<{ id_hash: string; members: number }>(
+    `select encode(sha256(r.id::text::bytea), 'hex') as id_hash,
+            (select count(*) from public.plan_room_members m where m.room_id = r.id)::int as members
        from public.plan_rooms r where r.closed_at is null and r.expires_at > now()
       order by r.created_at desc limit 1`,
   );
   if (sample[0]) {
+    // 🧨 The room's UUID, hashed — NOT hashRoomCode(). That helper is
+    // rainbow-reversible over the 32^6 code space with a salt that ships in the
+    // bundle (lib/room-code.ts says so), and this line describes a LIVE room
+    // whose code is a bearer secret. Gate output from this track gets committed
+    // to a public repo. Same standard as scripts/purge-plan-rooms.ts.
     console.log(
-      `${INFO}newest live room: ${hashRoomCode(sample[0].code)} (hashed) · ${sample[0].members} member(s)`,
+      `${INFO}newest live room: ${sample[0].id_hash.slice(0, 8)} (id hash) · ${sample[0].members} member(s)`,
     );
   }
 
   console.log(
     `\n${failures === 0 ? "All required invariants hold." : `${failures} FAILED.`}\n`,
   );
+  await db.end();
   process.exit(failures > 0 ? 1 : 0);
 }
 

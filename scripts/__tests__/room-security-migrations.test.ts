@@ -36,12 +36,23 @@ const M2 = "0002_realtime_membership_policies.sql";
 const M3 = "0003_drop_broad_realtime_policies.sql";
 
 describe("migration sequence", () => {
-  it("only the runner-applicable migration sits in migrations/", () => {
-    expect(
-      readdirSync(DIR)
-        .filter((f) => f.endsWith(".sql"))
-        .sort(),
-    ).toEqual([M1]);
+  it("only runner-applicable migrations sit in migrations/", () => {
+    // The invariant is NOT "exactly one file" — it is that nothing needing
+    // owner-level execution is in the runner's numbered chain, because a
+    // `db push` that aborts partway through is worse than a manual step.
+    const inChain = readdirSync(DIR)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    expect(inChain).toEqual(["0001_plan_rooms.sql", "0004_server_side_room_codes.sql"]);
+    for (const f of inChain) {
+      const sql = readFileSync(join(DIR, f), "utf8")
+        .split("\n")
+        .filter((l) => !l.trimStart().startsWith("--"))
+        .join("\n");
+      expect(sql, `${f} must not touch realtime.messages`).not.toContain(
+        "realtime.messages",
+      );
+    }
   });
 
   it("the owner-level files sit in supabase/manual/, out of the runner's chain", () => {
@@ -250,14 +261,29 @@ describe("post-review hardening (findings from supabase-guardian, 2026-07-29)", 
       expect(r).toContain("from public, anon, authenticated");
   });
 
-  it("purge is service_role-granted AND self-guards on current_user", () => {
+  it("🧨 purge is protected by the GRANT — the in-body role check was theatre", () => {
+    // This used to also assert `current_user not in ('service_role', ...)` in
+    // the body, calling it "belt AND braces". It is neither: inside a SECURITY
+    // DEFINER function `current_user` is the function OWNER, not the caller, so
+    // that condition is unconditionally satisfied however the function is
+    // reached. Our own REJECTED-exec_sql_readonly.sql notes exactly this. A
+    // test pinning a check that cannot fire is worse than no test, so it now
+    // pins the control that actually refuses callers: the grant.
     expect(sql).toMatch(
       /grant execute on function public\.purge_expired_plan_rooms\(\)\s+to service_role;/,
     );
-    const fn = sql.slice(
-      sql.indexOf("function public.purge_expired_plan_rooms"),
+    expect(sql).toMatch(
+      /revoke all on function public\.purge_expired_plan_rooms\(\)\s+from public, anon, authenticated;/,
     );
-    expect(fn).toContain("current_user not in ('service_role'");
+    // and 0004, which replaces the body, must not reinstate the theatre
+    const m4 = readFileSync(
+      join(process.cwd(), "supabase/migrations/0004_server_side_room_codes.sql"),
+      "utf8",
+    )
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("--"))
+      .join("\n");
+    expect(m4).not.toContain("current_user not in");
   });
 
   it("the join throttle lives in the DATABASE (the RPC is directly reachable)", () => {
@@ -436,9 +462,9 @@ describe("staging-harness guards (behaviour, not spelling)", () => {
     // It loads .env.local, so without this it would happily certify whatever
     // that file points at — and during the staging run it pointed at a local
     // stack. A gate that does not say what it inspected is not a gate.
-    expect(verify).toContain("new URL(targetUrl).host");
+    expect(verify).toContain("new URL(dbUrl).host");
     expect(verify).toMatch(/Target: \$\{targetHost\}/);
-    expect(verify).toContain("isLoopback(targetUrl) && process.env.EXPECT_STAGE");
+    expect(verify).toMatch(/isLoopback\(dbUrl\)\s*&&\s*rawExpected/);
     expect(verify).toContain("ALLOW_LOCAL");
   });
 

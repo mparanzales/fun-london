@@ -1,0 +1,24 @@
+{
+  // Used ONLY by `tsx` for scripts under scripts/. Next.js never reads this
+  // file, which is the entire point of it being separate.
+  //
+  // 🧨 WHY: `lib/supabase/admin.ts` opens with `import "server-only"` — the
+  // mechanical guard that fails the build if the service-role client is ever
+  // pulled into a client bundle. Next resolves that specifier through its own
+  // internal alias (the package is not installed); plain Node does not, so any
+  // script that transitively imports it — verify-plan.ts and
+  // verify-feed-rank.ts reach it through lib/taste-feed.ts — died with
+  // MODULE_NOT_FOUND before its first line.
+  //
+  // Aliasing the specifier to the existing no-op stub fixes the scripts. It is
+  // deliberately NOT added to tsconfig.json: Next reads that file's paths, so
+  // putting it there could silently disable the client-bundle guard for the
+  // whole app. A guard test pins that this alias exists here and nowhere else.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./*"],
+      "server-only": ["./test/server-only-stub.ts"]
+    }
+  }
+}

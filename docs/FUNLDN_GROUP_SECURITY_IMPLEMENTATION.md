@@ -8,13 +8,23 @@
 > `CHANNEL_ERROR` while host and member sessions were unaffected and a vote broadcast still
 > delivered. Full record: `FUNLDN_GROUP_SECURITY_PRODUCTION_ROLLOUT.md`.
 >
-> Open follow-ups: `purge_expired_plan_rooms()` is still unscheduled, and
-> `verify-room-security.ts` cannot run against production until it uses a direct Postgres
-> connection instead of the rejected `exec_sql_readonly` RPC.
+> Both follow-ups this banner used to list — the unscheduled purge, and a verification
+> script that could not run against production — are closed by the **room-hygiene** work
+> below (§7b), which also removes the `create_plan_room` existence oracle.
+>
+> ## 🧨 ONE DATABASE STEP IS REQUIRED BEFORE THAT BRANCH MERGES
+>
+> `0004_server_side_room_codes.sql` must be applied **before** the hygiene client ships.
+> The branch calls `create_plan_room()` with **no argument**; the defaulted parameter
+> protects old-client/new-DB, **not** new-client/old-DB. Against a database without `0004`
+> every create is `PGRST202` and room creation is dead for everyone. Exact order in §3
+> step 5a.
 
+Security and infrastructure only: **no interface redesign, no group-plan saving, no change to solo planning, navigation or identity.**
 
-
-Branch `fix/group-room-security`, off `main` @ `0d35d47`. Security and infrastructure only: **no interface redesign, no group-plan saving, no change to solo planning, navigation or identity.** Nothing is merged and nothing is deployed — the migrations are files in the repo, not applied to any database.
+The original track (`fix/group-room-security`, off `main` @ `0d35d47`) is **merged as
+`da88c2f` and applied to production** — `0001` through `0003`. The room-hygiene follow-up
+(§7b) adds `0004`, which is **not** applied yet.
 
 ## 1. The previous exposure
 
@@ -80,6 +90,76 @@ Practical consequences:
 | 2 | *(deploy the client)* | The app starts creating/joining membership records, so the new predicate has rows to match. | Rooms work as before; new rows appear in `plan_rooms` |
 | 3 | `supabase/manual/0002_…` | **Adds** membership-scoped read+write policies **alongside** the broad ones. Postgres ORs permissive policies, so this cannot break a live room — it is the dual-run checkpoint. | Script reports **stage 2 (DUAL-RUN)**; two-account test passes (§6) |
 | 4 | `supabase/manual/0003_…` | **Drops** the two broad `plan-%` policies. This is the only step that removes access. | `EXPECT_STAGE=3 pnpm tsx scripts/verify-room-security.ts` exits 0 — it asserts the stage reached, that **no** unscoped policy of any name remains, and the function grants |
+| 5a | 🧨 **`0004` — APPLY BEFORE MERGING PR #190** | The exact order is below the table. The branch client calls `create_plan_room()` with no argument; the shim protects old-client/new-DB, **not** new-client/old-DB. | `EXPECT_STAGE=3 EXPECT_0004=1 pnpm verify-room-security` exits 0 |
+| 5b | `0004_server_side_room_codes.sql` (what it does) | **Hygiene, post-cutover.** Moves room-code generation into the database so a collision can no longer answer "does this room exist?". Additive: adds one function, replaces two, drops nothing. | Guard tests in `scripts/__tests__/room-hygiene.test.ts`; behaviour proven on a throwaway Postgres |
+
+### Step 5a in full — the order for PR #190
+
+Do these in order. Steps 1 to 3 are database and take a few minutes; step 4 is the merge.
+
+**1. Apply `0004_server_side_room_codes.sql` to production AND dev.**
+Both, because PR previews point at the dev project, so a preview will fail in exactly the
+same way if dev is skipped. Apply it through a privileged SQL session (the same route used
+for `0002`/`0003`). It is additive and idempotent: one new function, two replaced, nothing
+dropped. It aborts loudly if `pgcrypto` is missing rather than applying clean and failing at
+runtime. If it does abort, the remedy is one statement, then re-run `0004`:
+
+```sql
+create extension if not exists pgcrypto with schema extensions;
+```
+
+**2. Reload the PostgREST schema cache — on BOTH projects.**
+PostgREST caches function signatures. Until it reloads, a no-argument call still resolves
+against the OLD signature and returns `PGRST202`, so the migration alone is not enough.
+Either way works:
+
+```sql
+notify pgrst, 'reload schema';
+```
+
+or restart the API from the Supabase dashboard. A settings change also triggers it.
+
+**3. Verify through PostgREST — not through SQL.**
+This is the step that catches a stale schema cache, so it has to go through the
+API. A direct `select` and the catalog gate both pass with a stale cache, because
+neither touches PostgREST; they corroborate, they do not verify.
+
+The check needs no user token. PostgREST resolves the signature from its cache
+*before* executing, so the two outcomes are distinguishable with the anon key
+alone:
+
+```bash
+curl -s -X POST "$SUPABASE_URL/rest/v1/rpc/create_plan_room" \
+  -H "apikey: $ANON_KEY" -H "Content-Type: application/json" -d '{}'
+```
+
+- Any `42501` → **PASS.** The signature resolved. With the anon key you get
+  `permission denied for function create_plan_room`, because `anon` holds no
+  EXECUTE grant so the body never runs — that is correct and is still proof the
+  cache is fresh. (Measured on production 2026-07-30; an earlier draft of this
+  step predicted `auth required`, which is what a *signed-in* caller with no
+  session would see, not the anon key.)
+- `PGRST202` (*"Could not find the function … in the schema cache"*) → **FAIL.**
+  Go back to step 2. Merging now breaks room creation for everyone.
+
+Run it against **production and dev**. Corroborate afterwards if you like:
+
+```sql
+select (public.create_plan_room()).code is not null as ok;   -- expect t
+```
+```
+EXPECT_STAGE=3 EXPECT_0004=1 SUPABASE_DB_URL=… pnpm verify-room-security
+```
+
+(dev may not be at stage 3 — adjust `EXPECT_STAGE` there.) Delete any probe room
+afterwards.
+
+**4. Merge PR #190.** Vercel then deploys the client that calls with no argument. Because
+step 1 kept the parameter, the currently deployed client keeps working throughout — there
+is no window in which either client is broken.
+
+**If step 3 fails**, stop and do not merge: the deployed client is fine (it still sends a
+code, which `0004` ignores), so there is no urgency and nothing to roll back.
 
 ## 4. Policies (after step 4)
 
@@ -96,9 +176,25 @@ No client-facing write policy exists on either new table by design.
 
 ## 5. Rollback
 
-- **After 0001 or 0002 (nothing removed yet):** `drop policy if exists "plan room members read"/"plan room members write" on realtime.messages;` then `drop table public.plan_room_join_attempts, public.plan_room_members, public.plan_rooms cascade;` and drop the nine functions. **Three** tables, not two — `plan_room_join_attempts` stores user ids, so a rollback that forgets it leaves personal data behind. Behaviour returns to today's exactly.
+- **After 0001 or 0002 (nothing removed yet):** `drop policy if exists "plan room members read"/"plan room members write" on realtime.messages;` then `drop table public.plan_room_join_attempts, public.plan_room_members, public.plan_rooms cascade;` and drop the functions — **nine after 0001, TEN once 0004 has added `new_plan_room_code`**. **Three** tables, not two — `plan_room_join_attempts` stores user ids, so a rollback that forgets it leaves personal data behind. Behaviour returns to today's exactly.
 - **After 0003 (access removed):** re-create the two broad policies — their verbatim text is kept in the header of `supabase/manual/0003_…` precisely so a rollback needs no archaeology. This restores the old (permissive) behaviour in one statement pair while the cause is investigated.
 - **Client rollback:** revert the branch. The client tolerates a missing room record by surfacing an honest failure rather than crashing, but the intended rollback is git-level, not partial.
+
+### Rollback for 0004
+
+🧨 **`create or replace` alone does NOT work.** 0004 gives `create_plan_room` a
+DEFAULTed parameter, and Postgres refuses to remove a default that way
+(`cannot remove parameter defaults from existing function`). The sequence is:
+
+```sql
+drop function public.create_plan_room(text);
+-- re-run 0001's create_plan_room body AND its grants
+-- restore 0001's purge_expired_plan_rooms body (0004 replaced it too)
+drop function public.new_plan_room_code();
+```
+
+It drops nothing and touches no table, policy or grant, so there is no data to
+restore. 0004 adds ONE function and replaces TWO.
 
 ## 5b. Review findings and what changed because of them
 
@@ -112,7 +208,7 @@ Both required gates ran before this was presented as complete. **Neither returne
 
 ## 6. Testing
 
-**Automated — full suite green: 347 tests / 38 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
+**Automated — full suite green: 369 tests / 39 files, `tsc --noEmit` clean, `next lint` clean (one pre-existing unrelated warning), `next build` succeeds, no-dashes copy guard passes.** New coverage:
 
 | Claim | Test |
 |---|---|
@@ -130,7 +226,7 @@ Both required gates ran before this was presented as complete. **Neither returne
 | No migration touches plans/venues/saved_venues/bookings/profiles | same |
 | Rooms expire after ~6 hours by default | same |
 | Revokes cover public AND anon AND authenticated | same |
-| Purge is service_role-only and self-guards on `current_user` | same |
+| Purge is service_role-only — the GRANT is the control; the old in-body `current_user` check was removed in 0004 because inside a definer function it can never refuse anyone | same |
 | The join throttle is enforced in the database, not just the action | same |
 | The host-staleness window is clamped server-side | same |
 | Host handoff ROTATES forward and cannot two-cycle (the measured defect) | same |
@@ -174,7 +270,7 @@ fail by re-granting the privilege on purpose.
 
 ## 7. Production verification steps (manual, in order)
 
-Nothing below has been performed — the migrations are unapplied. **Staging verification was attempted and is blocked on provisioning an isolated database; see `FUNLDN_GROUP_SECURITY_STAGING_VERIFICATION.md`.** The live multi-account harness that executes most of this list automatically is `scripts/staging-room-security-suite.ts` (`pnpm staging:room-security`), which refuses to run against a production ref.
+**Superseded: 0001 through 0003 were verified on an isolated database, then applied to production and merged (see `FUNLDN_GROUP_SECURITY_PRODUCTION_ROLLOUT.md`). This list is kept as the procedure; `0004` is the only migration still unapplied.** The live multi-account harness that executes most of this list automatically is `scripts/staging-room-security-suite.ts` (`pnpm staging:room-security`), which refuses to run against a production ref.
 
 1. **Apply `0001` only.** Run `pnpm tsx scripts/verify-room-security.ts` → expect stage 1, tables + definer functions present, no client write policies, RLS on.
 2. **Deploy the client** (this branch, after merge). Open `/plan/together` as account A → a room is created; confirm a row in `plan_rooms` and one in `plan_room_members`, and that the URL code is **6 characters**.
@@ -188,15 +284,79 @@ Nothing below has been performed — the migrations are unapplied. **Staging ver
 10. **Rate limit.** Attempt >20 joins in 10 minutes with one account → later attempts return the denied state.
 11. **Cleanup.** Delete the test rooms (`delete from plan_rooms where code in (...)`), or leave them to expire and be purged.
 
+## 7b. Hygiene follow-up (branch `fix/room-hygiene`, not yet applied)
+
+Three items that the cutover deliberately left open, now addressed:
+
+**The room-code existence oracle is closed.** `create_plan_room(p_code text)`
+took the code from its caller and leaned on the unique constraint, so `23505`
+answered "does room ABC234 exist?" at unlimited rate, entirely bypassing the
+20-per-10-minutes throttle on `join_plan_room` — the stated enumeration
+perimeter had a door beside it. `0004` mints the code server-side from
+`extensions.gen_random_bytes`, retries collisions internally, and raises a
+generic error that names no code. The parameter is retained, DEFAULTED and IGNORED — one signature, not two
+overloads, so PostgREST has no payload-key routing to resolve. That keeps the
+currently deployed client working; it is dropped once the server log stops
+reporting callers that still send it. Proven on a throwaway Postgres 17: a caller-supplied code is
+ignored (the function returns a different one), a forced permanent collision
+raises `could not create room` rather than `23505`, and the migration aborts
+loudly if `pgcrypto` is absent instead of applying clean and failing at runtime.
+
+**The purge is scheduled.** `purge_expired_plan_rooms()` had no caller at all,
+so `plan_room_members` — a record of who planned a night with whom, and when —
+accumulated forever. It now runs from `maintenance.yml` at 03:00 UTC in its
+OWN job — as a trailing step of the venue refresh it would have been skipped
+whenever an earlier Places step failed, and those credits have been exhausted
+since 2026-07-23, so the alert would have read "refresh failed" rather than
+"retention did not run". The job carries its own failure alerting, since
+job-level alerting does not span jobs. Both sweeps (rooms and the throttle
+ledger) live INSIDE `purge_expired_plan_rooms()`, so the retention window has
+one home and the script performs no deletes at all. Logs are counts only, and
+the run fails loudly if rows were eligible but nothing was purged.
+
+**The verification scripts run again, with no SQL-execution RPC.**
+`verify-room-security.ts` opens a direct Postgres connection with the session
+pinned `default_transaction_read_only`, so the server refuses any write from
+that path. That is strictly stronger than the rejected `exec_sql_readonly`
+helper, whose "only a SELECT is possible" defence was defeated by
+`select public.purge_expired_plan_rooms()`; under the read-only session that
+exact statement now fails with `cannot execute DELETE in a read-only
+transaction`. `verify-plan.ts` and `verify-feed-rank.ts` were broken by a
+*transitive* `import "server-only"` through `lib/taste-feed.ts`, so they could
+not be repaired by editing the scripts; they now run under a separate
+`tsconfig.scripts.json` that aliases the specifier to the repo's existing test
+stub. That alias is deliberately absent from `tsconfig.json`, because Next
+reads that file and it could silently disable the client-bundle guard.
+
+### Recommended next: make the gate a nightly alarm
+
+`scripts/verify-room-security.ts` is now runnable, but nothing runs it, so
+enforcement of step 5a (and of the anon table-grant moat, which no behavioural
+test can see) is "somebody remembers". Adding a `SUPABASE_DB_URL` repository
+secret — the **direct** connection on 5432, not the transaction pooler — and one
+step to the `purge-plan-rooms` job would turn the whole gate into a nightly
+alarm:
+
+```yaml
+      - name: Verify room security invariants
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: EXPECT_STAGE=3 EXPECT_0004=1 pnpm verify-room-security
+```
+
+Deliberately NOT added in this branch: without the secret the step fails every
+night, and a cron that cries wolf gets muted, which is worse than no cron. Add
+the secret first, then the step.
+
 ## 8. Remaining limitations (honest)
 
 1. **Member-to-member impersonation inside a real roster is still possible.** Broadcast payloads are client-authored, so member A can still stamp a payload with member B's user id, and other devices cannot cryptographically disprove it. What is now impossible is *inflating the group beyond its real membership* — both the voter set and the majority denominator are server-owned. Closing this fully requires server-authoritative votes (writes to the database instead of broadcast), which is a product change, not a security patch. **Do not describe voting as tamper-proof in any copy.**
 2. **Presence is still self-reported** — a member can appear/disappear at will; the roster bounds who counts, not who is genuinely looking at the screen.
 3. **`leaveRoom` is best-effort** (`pagehide`); a hard crash leaves a stale membership row until expiry. Host handoff tolerates this via the liveness stamp.
-4. **`purge_expired_plan_rooms()` has no scheduler yet** — it is `service_role`-only and ready for a cron; rooms simply stop working at expiry regardless.
-5. **The verification script needs a read-only SQL helper RPC** (`exec_sql_readonly`) or the equivalent queries run by hand in the SQL editor; it does not create one, because adding a SQL-executing RPC is itself a security decision for the founder.
+4. **`purge_expired_plan_rooms()` has scheduled nightly in its own `maintenance.yml` job** — it is `service_role`-only and ready for a cron; rooms simply stop working at expiry regardless.
+5. ~~The verification script needs a read-only SQL helper RPC~~ — **RESOLVED, and the RPC is REJECTED.** `scripts/verify-room-security.ts` now opens a direct Postgres connection with the session pinned `default_transaction_read_only` (`scripts/pg-readonly.ts`). Do **not** build `exec_sql_readonly`: its "only a SELECT is possible" defence is false, because `select public.purge_expired_plan_rooms()` is a SELECT that deletes rows as `postgres`. See `docs/funldn-group-security-staging-evidence/REJECTED-exec_sql_readonly.sql`.
 6. **Group results still cannot be saved** — deliberately out of scope for this track (decision register #11).
 7. **The client and database host rules are related, not identical.** The client knows who is *present* and decides when a handoff is needed; the database knows who has not written `left_at` and decides *who gets it*. They can disagree for a member who is recorded but not watching; the database's answer wins and every device reads it back. Making them identical needs per-member `last_seen_at` heartbeats (follow-up).
-8. **`purge_expired_plan_rooms()` still has no scheduler**, and retains rooms 7 days past expiry. `plan_room_members` is a who-planned-with-whom social graph: schedule the purge and consider shortening the window before a wider beta.
+8. ~~`purge_expired_plan_rooms()` still has no scheduler~~ — **RESOLVED.** It runs nightly at 03:00 UTC in its own `maintenance.yml` job (§7b). Retention is still 7 days past expiry; `plan_room_members` is a who-planned-with-whom social graph, so consider shortening that window before a wider beta.
 9. **Realtime authorization is evaluated at join.** An already-subscribed socket may keep broadcasting briefly after `closed_at`/`expires_at`; §7 step 7 is the test that establishes the real behaviour. Do not claim instant revocation in copy until it is measured.
-10. **The verification script still needs a read-only SQL path** (an `exec_sql_readonly` RPC, or running its queries over `psql`). If that RPC is ever created it must be SECURITY INVOKER, revoked from `public, anon, authenticated`, and granted to `service_role` only — otherwise it is a worse hole than the one this track closed.
+10. ~~The verification script still needs a read-only SQL path~~ — **RESOLVED. Do not build the RPC.** It uses a direct Postgres connection (`SUPABASE_DB_URL`, session pinned read-only). The earlier note here specified how to build `exec_sql_readonly` safely; that recipe was wrong, which is why the file is now archived as REJECTED. No SQL-execution function belongs in this database.
