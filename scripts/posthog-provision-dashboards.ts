@@ -20,11 +20,13 @@
 // posthog:verify, and issue a second key with the write scopes, run this once,
 // then delete that key from the PostHog settings page.
 //
-// ⚠️ Dashboard 5 (generation failures + latency) is DELIBERATELY PARTIAL. The
-// app does not instrument plan-generation failures or latency today: the anon
-// builder's failure branches (`limited`, `soft` in anon-plan-flow.tsx) fire no
-// event at all, and no event carries a duration. What ships here are the
-// honest proxies that exist. Do not read an empty panel as "no failures".
+// ⚠️ Dashboard 5 (generation failures + latency) is DELIBERATELY PARTIAL AS OF
+// 2026-07-30. On main at that date the anon builder's failure branches
+// (`limited`, `soft` in anon-plan-flow.tsx) fire no event at all, and no event
+// carries a duration, so dashboard 5 ships honest proxies and a flat panel means
+// NOT INSTRUMENTED rather than "no failures". Branch feat/analytics-foundation
+// adds the real events; when it is deployed and data has arrived, rewrite those
+// panels and drop the warning (see the manifest doc for the ordered steps).
 // ─────────────────────────────────────────────────────────────────────────
 
 import { ph, resolveProjectId, API_HOST } from "./posthog-api";
@@ -97,7 +99,7 @@ const DASHBOARDS: Dashboard[] = [
       {
         name: "Signed-out: preview to account to saved night",
         description:
-          "The anon builder shipped in PR #185. plan_preview_built is the number that route exists to move.",
+          "The anon builder shipped in PR #185. plan_preview_built is the number that route exists to move. ⚠️ This funnel CROSSES THE IDENTIFY BOUNDARY while the SDK runs with person_profiles set to identified_only, so the pre-sign-in steps sit on an anonymous distinct_id that only becomes a person at sign-in. Read it on distinct_id rather than unique users, and treat the step-to-step rates as approximate.",
         query: funnel([
           "$pageview",
           "plan_preview_built",
@@ -127,7 +129,7 @@ const DASHBOARDS: Dashboard[] = [
       {
         name: "Anon preview to sign-in",
         description:
-          "plan_preview_built to plan_stop_opened to sign_in_complete. The middle step is interest; the last is conversion.",
+          "plan_preview_built to plan_stop_opened to sign_in_complete. The middle step is interest; the last is conversion. ⚠️ Same identify-boundary caveat as dashboard 1's signed-out funnel: the first two steps are anonymous distinct_ids under person_profiles identified_only.",
         query: funnel([
           "plan_preview_built",
           "plan_stop_opened",
@@ -147,15 +149,16 @@ const DASHBOARDS: Dashboard[] = [
         query: trend(["plan_stash_restored", "plan_save"]),
       },
       {
-        name: "Anon preview to sign-in rate, by day",
+        name: "Anon previews and sign-ins, by day",
         description:
-          "The conversion rate as one number per day, so a copy or wall change shows up as a step in the line.",
+          "Two raw daily counts and their ratio. ⚠️ signins_per_preview is NOT a conversion rate: it divides two independent daily event counts, so the sign-ins in a day need not be the same people as the previews in that day, and a sign-in that never previewed still lands in the numerator. Read it as a coarse trend line for spotting the effect of a copy or wall change, and use the funnel insights on this dashboard for real per-person conversion.",
         query: table(
           `SELECT toDate(timestamp) AS day,
                   countIf(event = 'plan_preview_built') AS previews,
                   countIf(event = 'sign_in_complete')   AS signins,
                   round(100.0 * countIf(event = 'sign_in_complete')
-                        / nullif(countIf(event = 'plan_preview_built'), 0), 1) AS pct
+                        / nullif(countIf(event = 'plan_preview_built'), 0), 1)
+                    AS signins_per_preview_pct
              FROM events
             WHERE timestamp > now() - INTERVAL 60 DAY
               AND event IN ('plan_preview_built', 'sign_in_complete')
@@ -267,7 +270,7 @@ const DASHBOARDS: Dashboard[] = [
   {
     name: "5. Generation failures and latency (PARTIAL)",
     description:
-      "⚠️ PARTIAL BY CONSTRUCTION. The app does not emit a plan-generation failure event or any duration today. The anon builder's `limited` and `soft` failure branches are silent, so a flat panel here means NOT INSTRUMENTED, not zero failures. What follows are the honest proxies. Closing the gap needs a plan_preview_failed event plus a ms property.",
+      "⚠️ PARTIAL AS OF 2026-07-30, and dated on purpose so this text cannot silently become false. At the time of writing main emits no plan-generation failure event and no duration, so the panels below are PROXIES and a flat line means NOT INSTRUMENTED rather than zero failures. The real events (plan_generate_failed, plan_preview_failed, duration_ms) are built on branch feat/analytics-foundation. ONCE THAT BRANCH IS DEPLOYED AND DATA HAS ARRIVED, replace these panels and delete this warning: see docs/FUNLDN_ANALYTICS_DASHBOARD_MANIFEST.md for the ordered transition.",
     insights: [
       {
         name: "Soft failure: nights that did not fill",

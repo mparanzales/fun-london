@@ -46,11 +46,24 @@ generosity converts, and whether the auth wall helps or hurts.
 | Anon preview to sign-in | FunnelsQuery |
 | Wall dismissals vs sign-ins | TrendsQuery |
 | Did the built night survive sign-in? | TrendsQuery |
-| Anon preview to sign-in rate, by day | DataTableNode (HogQL) |
+| Anon previews and sign-ins, by day | DataTableNode (HogQL) |
 
 "Wall dismissals vs sign-ins" is the panel the deferred detail-wall decision was
 waiting on: if dismissals climb while sign-ins stay flat, the wall is friction
 rather than conversion.
+
+⚠️ **"Anon previews and sign-ins, by day" is NOT a conversion rate**, and it was
+renamed during review because its old name claimed it was. It divides two
+independent daily event counts: the sign-ins in a day need not be the same people
+as the previews in that day, and a sign-in that never previewed still lands in the
+numerator. Use it as a coarse trend line; use the funnels for per-person
+conversion.
+
+⚠️ **Both anon funnels cross the identify boundary** while the SDK runs with
+`person_profiles: "identified_only"`, so the pre-sign-in steps sit on an anonymous
+distinct_id that only becomes a person at sign-in. Read them on distinct_id rather
+than unique users and treat the step-to-step rates as approximate. Noted in each
+insight's own PostHog description too.
 
 **Upgrade available once instrumentation lands:** `sign_in_complete` will carry a
 `trigger` property, so this dashboard can break conversion down by which door the
