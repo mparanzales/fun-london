@@ -55,6 +55,7 @@ import { AuthWall } from "@/components/auth-wall";
 import {
   WhenPicker,
   WHENS,
+  maxDateFrom,
   AreaPicker,
   Group,
   toISODate,
@@ -84,6 +85,10 @@ import {
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
 import type { PlanRole } from "@/lib/plan-engine";
+// Static vocabulary only: a neighbourhood -> region map and the region list,
+// with a type-only import of Venue. No queries, no client. On the allowlist
+// and covered by the transitive check in plan-preview-guard.
+import { REGIONS } from "@/lib/regions";
 
 // The signed-out night, kept so it survives a refresh and a tap through to a
 // venue page and back.
@@ -427,13 +432,20 @@ export function AnonPlanFlow({
         if (VIBES.some((v) => v.v === brief.vibe)) setVibe(brief.vibe!);
         if (BUDGETS.includes(brief.budget as (typeof BUDGETS)[number]))
           setBudget(brief.budget!);
+        // The VARIANT payload too, not just the kind: a corrupt
+        // {kind:"region", region:"Mars"} is refused server-side, so every
+        // Build then dead-ends on "That didn't build" until the user happens
+        // to re-pick an area.
+        const a = brief.areaSel;
         if (
-          brief.areaSel &&
-          ["anywhere", "nearYou", "region", "neighbourhood"].includes(
-            brief.areaSel.kind,
-          )
+          a?.kind === "anywhere" ||
+          a?.kind === "nearYou" ||
+          (a?.kind === "region" && REGIONS.includes(a.region)) ||
+          (a?.kind === "neighbourhood" &&
+            typeof a.name === "string" &&
+            a.name.length > 0)
         )
-          setAreaSel(brief.areaSel);
+          setAreaSel(a);
         if (WHENS.some((w) => w.v === brief.when)) setWhen(brief.when!);
         if (typeof brief.customDate === "string")
           setCustomDate(brief.customDate);
@@ -444,7 +456,15 @@ export function AnonPlanFlow({
       }
       setResult(payload);
       setStartLabel(saved.startLabel ?? null);
-      setStartISO(saved.startISO ?? null);
+      // Same reasoning as the brief: unparseable here makes parseNightPlan
+      // reject the canonical write below, which is swallowed, so the claim
+      // finds nothing while the screen looks perfect.
+      setStartISO(
+        typeof saved.startISO === "string" &&
+          Number.isFinite(Date.parse(saved.startISO))
+          ? saved.startISO
+          : null,
+      );
       setStep("result");
     } catch {
       /* corrupt or private mode — fall through to the setup screen */
@@ -604,6 +624,7 @@ export function AnonPlanFlow({
             dwellMins: s.dwellMins,
             walkToNextMins: s.walkToNextMins,
           })),
+          tracksClock: when === "now",
           source: "anon" as const,
           savedRowId: null,
         });
@@ -866,6 +887,7 @@ export function AnonPlanFlow({
           dateStr={customDate}
           timeStr={customTime}
           minDate={minDate}
+          maxDate={maxDateFrom(minDate)}
           onChange={(next) => {
             markSetupStarted("when");
             setWhen(next.choice);

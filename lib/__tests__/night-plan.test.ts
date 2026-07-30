@@ -53,6 +53,7 @@ const plan = (over: Partial<NightPlan> = {}): NightPlan => ({
   source: "generated",
   savedRowId: null,
   offset: 0,
+  tracksClock: false,
   ...over,
 });
 
@@ -499,6 +500,19 @@ describe("isFresh · a night is stale when it is OVER, not 12h after it was thou
     // ...but a legitimate week-ahead plan is still fine.
     const nextWeek = new Date(Date.now() + 6 * 24 * H).toISOString();
     expect(isFresh(plan({ startsAt: nextWeek }))).toBe(true);
+  });
+
+  it("tracksClock is off unless the writer asks for it", () => {
+    // Older entries have no such field. `false` keeps their behaviour (pin the
+    // stored start) instead of silently re-dating them to now.
+    const legacy = parseNightPlan({ ...plan(), tracksClock: undefined });
+    expect(legacy?.tracksClock).toBe(false);
+    expect(parseNightPlan({ ...plan(), tracksClock: "yes" })?.tracksClock).toBe(
+      false,
+    );
+    expect(parseNightPlan({ ...plan(), tracksClock: true })?.tracksClock).toBe(
+      true,
+    );
   });
 
   it("a night in progress keeps its remaining stops", () => {

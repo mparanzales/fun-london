@@ -51,12 +51,18 @@ export function WhenPicker({
   dateStr,
   timeStr,
   minDate,
+  maxDate,
   onChange,
 }: {
   choice: WhenChoice;
   dateStr: string;
   timeStr: string;
   minDate: string;
+  /** Optional ceiling. Passed by the surface that has one — the anon flow's
+   *  server clamps to now + 7d — rather than imposed on every caller: Plan
+   *  Together and the signed-in solo flow run the engine locally and have no
+   *  such limit. */
+  maxDate?: string;
   onChange: (next: {
     choice: WhenChoice;
     dateStr: string;
@@ -90,7 +96,7 @@ export function WhenPicker({
             type="date"
             value={dateStr || minDate}
             min={minDate}
-            max={maxDateFrom(minDate)}
+            max={maxDate || undefined}
             onChange={(e) =>
               onChange({ choice, dateStr: e.target.value, timeStr })
             }

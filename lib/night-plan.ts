@@ -110,6 +110,20 @@ export type NightPlan = {
    * anything new. It reads as the app being stuck.
    */
   offset: number;
+  /**
+   * True when this night was built as "Right now", so its start is a snapshot
+   * of the clock rather than a chosen time.
+   *
+   * 🧨 This replaces inferring it from `|startsAt - createdAt| < 2min`, which
+   * is only true on the anon surface. In the signed-in flow `startsAt` comes
+   * from the `now` state captured once at MOUNT while `createdAt` is stamped
+   * at the Build tap, so their gap is however long someone spent on the setup
+   * screen. Any build more than two minutes after page load was misread as a
+   * scheduled night: the When control silently flipped to "Pick a day" at a
+   * time already past, and Try-another planned from that stale clock — exactly
+   * the failure the exception existed to prevent.
+   */
+  tracksClock: boolean;
 };
 
 /** The legacy step shape still on disk for every row written before this. */
@@ -197,6 +211,9 @@ export function parseNightPlan(value: unknown): NightPlan | null {
       typeof p.offset === "number" && Number.isFinite(p.offset) && p.offset >= 0
         ? p.offset
         : 0,
+    // Absent on older entries. `false` keeps their existing behaviour (pin the
+    // stored start) rather than silently re-dating them to now.
+    tracksClock: p.tracksClock === true,
     stops: p.stops as NightPlanStop[],
     source,
     savedRowId: p.savedRowId as string | null,
@@ -232,6 +249,8 @@ export function fromEnginePlan(
     createdAt?: string;
     /** Reshuffle position, so Try-another resumes rather than replays. */
     offset?: number;
+    /** True for a "Right now" night, whose clock must stay live. */
+    tracksClock?: boolean;
   },
 ): NightPlan {
   return {
@@ -254,6 +273,7 @@ export function fromEnginePlan(
     source: opts.source ?? "generated",
     savedRowId: opts.savedRowId ?? null,
     offset: opts.offset ?? 0,
+    tracksClock: opts.tracksClock ?? false,
   };
 }
 
@@ -326,6 +346,8 @@ export function fromSavedRow(
     // A saved row carries no reshuffle position, and shouldn't: reopening it
     // is a fresh starting point, not a resumption of someone's browsing.
     offset: 0,
+    // A saved row has no start time at all, so there is no live clock to keep.
+    tracksClock: false,
   };
 }
 

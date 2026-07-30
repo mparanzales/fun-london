@@ -192,6 +192,8 @@ describe("anon plan client stays outside the moat", () => {
       // pure shape/localStorage modules: no queries, no supabase client.
       "@/lib/night-plan",
       "@/lib/active-plan",
+      // Static neighbourhood -> region vocabulary; no data path.
+      "@/lib/regions",
     ]);
     expect(imported.length).toBeGreaterThan(5);
     for (const m of imported) {
@@ -211,7 +213,11 @@ describe("anon plan client stays outside the moat", () => {
     // describes, one level down. Both are pure shape/localStorage modules and
     // must stay that way; a type-only import of the engine is fine because it
     // is erased.
-    for (const rel of ["../night-plan.ts", "../active-plan.ts"]) {
+    for (const rel of [
+      "../night-plan.ts",
+      "../active-plan.ts",
+      "../regions.ts",
+    ]) {
       const mod = readFileSync(
         fileURLToPath(new URL(rel, import.meta.url)),
         "utf8",

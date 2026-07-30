@@ -510,7 +510,7 @@ export function PlanFlow({
               arriveAt: s.arriveAt ?? null,
             })),
           },
-          { title: display.title, offset },
+          { title: display.title, offset, tracksClock: when === "now" },
         ),
       ),
     });
@@ -645,12 +645,11 @@ export function PlanFlow({
       //
       // A "Right now" night is the exception: its start is its build time, so
       // it must keep tracking the live clock rather than pinning to a stamp
-      // that is already going stale. Distinguishable because for that night
-      // and no other, startsAt ~= createdAt.
+      // that is already going stale. The night records that intent itself
+      // (`tracksClock`) — see lib/night-plan.ts for why inferring it from the
+      // two timestamps was wrong on this surface.
       const startDate = np.startsAt ? new Date(np.startsAt) : null;
-      const wasRightNow =
-        !!startDate &&
-        Math.abs(startDate.getTime() - Date.parse(np.createdAt)) < 2 * 60_000;
+      const wasRightNow = np.tracksClock;
       // A night still running after midnight would seed YESTERDAY, below the
       // picker's floor, and then plan for a time already past.
       const inThePast =
@@ -845,13 +844,22 @@ export function PlanFlow({
             arriveAt: s.arriveAt ?? null,
           })),
         },
-        { title: display.title, createdAt: genStampRef.current.at, offset },
+        {
+          title: display.title,
+          createdAt: genStampRef.current.at,
+          offset,
+          tracksClock: when === "now",
+        },
       ),
     );
     // `offset` is already implied by `computed` (computePlan takes it), but
     // listed so the persisted reshuffle position cannot silently go stale if
     // that ever stops being true.
-  }, [step, active, computed, display, owner, offset]);
+    // `offset` and `when` are both already implied by `computed` (computePlan
+    // takes the offset, and `timing` derives from the when choice), but listed
+    // so the persisted reshuffle position and clock intent cannot silently go
+    // stale if that ever stops being true.
+  }, [step, active, computed, display, owner, offset, when]);
 
   // Hydrate a night built while signed OUT. The anon /plan flow stashes its
   // result in localStorage before the sign-in round-trip (three navigations
