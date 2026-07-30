@@ -133,8 +133,12 @@ curl -s -X POST "$SUPABASE_URL/rest/v1/rpc/create_plan_room" \
   -H "apikey: $ANON_KEY" -H "Content-Type: application/json" -d '{}'
 ```
 
-- `42501` / `auth required` → **PASS.** The signature resolved and the function
-  ran; it refused because there is no signed-in user, which is correct.
+- Any `42501` → **PASS.** The signature resolved. With the anon key you get
+  `permission denied for function create_plan_room`, because `anon` holds no
+  EXECUTE grant so the body never runs — that is correct and is still proof the
+  cache is fresh. (Measured on production 2026-07-30; an earlier draft of this
+  step predicted `auth required`, which is what a *signed-in* caller with no
+  session would see, not the anon key.)
 - `PGRST202` (*"Could not find the function … in the schema cache"*) → **FAIL.**
   Go back to step 2. Merging now breaks room creation for everyone.
 
