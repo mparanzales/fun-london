@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tidyText, hasControlChars } from "@/lib/text";
+import { tidyText, repairMojibake, hasControlChars } from "@/lib/text";
 
 // The real thing: the exact characters Ticketmaster's Discovery API served for
 // event 1AwZk8gGkdJ9ZcH on 2026-07-30, captured from the live response and
@@ -80,5 +80,64 @@ describe("tidyText leaves legitimate text alone", () => {
   it("passes null and undefined straight through", () => {
     expect(tidyText(null)).toBeNull();
     expect(tidyText(undefined)).toBeUndefined();
+  });
+});
+
+describe("recovery never deletes a printable character", () => {
+  // REGRESSION. The first version of this helper dropped an entire run when it
+  // could not recover, which ate real letters off the front of real names.
+  // Found by code review, reproduced against live behaviour, fixed here.
+  const MOJI_E_ACUTE = "\u00C3\u0089";
+  const MOJI_E_LOWER = "\u00C3\u00A9";
+  const MOJI_O_SLASH = "\u00C3\u0098";
+  const MOJI_ELLIPSIS = "\u00C2\u0080\u00A6";
+  const MOJI_BULLET = "\u00C2\u0080\u00A2";
+  const MOJI_RTL = "\u00C2\u0080\u008F";
+
+  it("recovers accented capitals instead of swallowing them", () => {
+    expect(tidyText(`${MOJI_E_ACUTE}tienne de Cr${MOJI_E_LOWER}cy`)).toBe(
+      "\u00C9tienne de Cr\u00E9cy",
+    );
+    expect(tidyText(`M${MOJI_O_SLASH}`)).toBe("M\u00D8");
+  });
+
+  it("recovers punctuation whose tail byte is printable, not just controls", () => {
+    // These tails sit above U+009F, so a controls-only rule left bare garbage.
+    expect(tidyText(`Doors at 7${MOJI_ELLIPSIS}`)).toBe("Doors at 7\u2026");
+    expect(tidyText(`A ${MOJI_BULLET} B`)).toBe("A \u2022 B");
+  });
+
+  it("keeps every printable when corruption is genuinely unrecoverable", () => {
+    // Only the control goes; the letters either side must survive.
+    expect(tidyText(`Bar\u0085Cafe`)).toBe("BarCafe");
+    expect(tidyText(`caf\u00E9\u0085bar`)).toBe("caf\u00E9bar");
+  });
+
+  it("never emits an invisible direction mark mid-title", () => {
+    // Tails 0x8B to 0x8F recover to zero-width and direction marks, which
+    // would flip the rest of the line. They must not survive.
+    expect(tidyText(`Bar ${MOJI_RTL} Grill`)).toBe("Bar Grill");
+  });
+});
+
+describe("ingest keeps provider fidelity, read applies the brand rule", () => {
+  const MOJI_EN = "\u00C2\u0080\u0093";
+
+  it("repairMojibake restores the dash but does NOT tidy it away", () => {
+    // What we STORE stays faithful to what the provider sent. That fidelity is
+    // what proved this corruption was upstream and not ours.
+    expect(repairMojibake(`Stars ${MOJI_EN} Voyager`)).toBe(
+      "Stars \u2013 Voyager",
+    );
+  });
+
+  it("tidyText applies the no-dashes rule on the way out", () => {
+    expect(tidyText(`Stars ${MOJI_EN} Voyager`)).toBe("Stars, Voyager");
+  });
+
+  it("repairMojibake leaves accented names untouched", () => {
+    for (const n of ["Abra\u00E7o Dalston", "Caf\u00E9 Kitsun\u00E9"]) {
+      expect(repairMojibake(n)).toBe(n);
+    }
   });
 });

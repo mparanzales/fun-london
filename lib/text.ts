@@ -8,78 +8,86 @@
 // because it rules out the obvious remedy: re-ingesting cannot help, so the
 // only correct place to deal with this is on the way IN and on the way OUT.
 //
-// The signature is reliable. U+0080 to U+009F are C1 control characters. They
-// are unprintable and can never occur in real text, so their presence always
-// means a broken decode somewhere upstream. Mail clients render them as boxes,
-// which is exactly how this surfaced: in a weekly digest that reached real
-// subscribers reading "Through Storms and Stars [box][box] an Evening with".
+// RECOVERY, not guesswork. Mojibake is a UTF-8 sequence decoded one byte at a
+// time, so the residue still carries the original codepoint. Two families
+// cover essentially everything a listings feed contains, and each maps back
+// arithmetically from its final byte:
 //
-// RECOVERY, not guesswork. The residue is the tail of a mangled UTF-8
-// sequence. Every character in Unicode's General Punctuation block encodes as
-// e2 80 xx, and that final byte gives the codepoint directly:
+//   e2 80 xx  ->  U+2000 + (xx - 0x80)   General Punctuation: dashes, curly
+//                                        quotes, apostrophes, ellipsis, bullet
+//   c3    xx  ->  U+00C0 + (xx - 0x80)   Latin-1 Supplement: accented letters
 //
-//     U+2000 + (xx - 0x80)
+// That is how the Voyager title is KNOWN to have held an en dash (tail 0x93)
+// rather than assumed to.
 //
-// So U+0093 recovers to U+2013 (en dash), U+0094 to U+2014 (em dash), U+0099
-// to U+2019 (curly apostrophe), U+009C to U+201C (curly quote). This is how we
-// know the Voyager title held an en dash rather than assuming it did.
+// 🧨 NEVER DELETE A PRINTABLE CHARACTER HERE. The first version of this file
+// dropped the whole run when it could not recover, which ate real letters:
+// "Etienne de Crecy" arrives mojibaked as a c3-family run, failed the
+// e2-80-only test, and came out as "tienne de Crecy" with the leading letter
+// gone. A guard that mangles real names is worse than the bug it fixes. When
+// recovery is not possible, strip ONLY the unprintable controls and leave
+// every printable character exactly where it was.
 //
-// Literal dash characters never appear in this file's source: the check-no-dashes
-// guard scans lib/, so every dash is written as an escape.
+// Literal dash characters never appear in this file's source: the
+// check-no-dashes guard scans lib/, so every dash is written as an escape.
 
-// A mojibake run: an optional mis-decoded lead character followed by one or
-// more C1 controls. A legitimate capital A-circumflex is never followed by a
-// control character, so requiring the control makes this safe for real text
-// (French, Portuguese and Vietnamese names pass through untouched).
-const MOJIBAKE_RUN = new RegExp(
-  "[\\u00C2\\u00C3\\u00E2]?[\\u0080-\\u009F]+",
-  "g",
-);
+// Recoverable: General Punctuation. Needs the 0x80 middle byte.
+const PUNCT_RUN = new RegExp("[\\u00C2\\u00E2]\\u0080([\\u0080-\\u00BF])", "g");
+
+// Recoverable: Latin-1 Supplement, the accented letters. Two bytes only.
+const LATIN_RUN = new RegExp("\\u00C3([\\u0080-\\u00BF])", "g");
 
 // Whatever survives recovery: stray C0/C1 controls, BOM, replacement char.
-// Tabs and newlines are deliberately preserved.
+// Tabs and newlines are deliberately preserved. Printables are NEVER matched.
 const RESIDUAL_CONTROLS = new RegExp(
   "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F\\uFEFF\\uFFFD]",
   "g",
 );
 
+// Recovery can land on the invisible end of General Punctuation (zero-width
+// joiners, and the left/right-to-right marks). A stray direction mark flips
+// the rest of a title, so collapse the space-like ones and drop the invisible.
+const RECOVERED_SPACES = new RegExp("[\\u2000-\\u200A]", "g");
+const RECOVERED_INVISIBLE = new RegExp("[\\u200B-\\u200F\\u202A-\\u202E]", "g");
+
 const DASH_RE = new RegExp("\\s*[\\u2014\\u2013]\\s*", "g"); // em / en dash
 const DBL_HYPHEN_RE = / -{2} /g;
 const MULTI_SPACE = /[ \t]{2,}/g;
 
-// Recover a single mojibake run to the punctuation it was before the feed
-// mangled it. The last control character in the run carries the identity: it
-// is the third byte of the original e2 80 xx sequence.
-function recoverRun(run: string): string {
-  const controls = [...run].filter((c) => {
-    const n = c.codePointAt(0)!;
-    return n >= 0x80 && n <= 0x9f;
-  });
-  if (controls.length === 0) return run;
-
-  const tail = controls[controls.length - 1]!.codePointAt(0)!;
-  // Only the e2 80 xx family is recoverable this way, and a genuine sequence
-  // always carries the 0x80 middle byte. Anything else is unrecoverable
-  // garbage and is dropped rather than turned into a plausible wrong glyph.
-  const hasMiddleByte = controls.some((c) => c.codePointAt(0) === 0x80);
-  if (!hasMiddleByte || controls.length < 2) return "";
-
-  return String.fromCodePoint(0x2000 + (tail - 0x80));
+/**
+ * Undo provider mojibake, leaving every printable character intact.
+ *
+ * This is the INGEST-side helper. It repairs corruption without applying any
+ * editorial rule, so what we store stays faithful to what the provider sent.
+ * That fidelity is not academic: it is what made this bug diagnosable at all
+ * (the stored bytes matched the live API exactly, which is how we proved the
+ * corruption was upstream and not ours).
+ */
+export function repairMojibake<T extends string | null | undefined>(s: T): T {
+  if (s == null) return s;
+  return s
+    .replace(PUNCT_RUN, (_m, tail: string) =>
+      String.fromCodePoint(0x2000 + (tail.codePointAt(0)! - 0x80)),
+    )
+    .replace(LATIN_RUN, (_m, tail: string) =>
+      String.fromCodePoint(0x00c0 + (tail.codePointAt(0)! - 0x80)),
+    )
+    .replace(RECOVERED_SPACES, " ")
+    .replace(RECOVERED_INVISIBLE, "")
+    .replace(RESIDUAL_CONTROLS, "") as T;
 }
 
 /**
- * Repair provider mojibake and apply the no-dashes brand rule.
+ * Repair mojibake AND apply the no-dashes brand rule.
  *
- * Order matters: recovery runs FIRST so a mangled en dash becomes a real en
- * dash and is then tidied to ", " by the same rule that governs clean copy.
- * Without that order the corrupt title would slip past the dash guard, which
- * is precisely what let it reach subscribers.
+ * This is the READ/RENDER-side helper. Order matters: recovery runs FIRST so a
+ * mangled en dash becomes a real en dash and is then tidied to ", " by the same
+ * rule that governs clean copy. Without that order the corrupt title slips past
+ * the dash guard, which is exactly what let it reach subscribers.
  */
 export function tidyText<T extends string | null | undefined>(s: T): T {
   if (s == null) return s;
-  return s
-    .replace(MOJIBAKE_RUN, recoverRun)
-    .replace(RESIDUAL_CONTROLS, "")
+  return (repairMojibake(s) as string)
     .replace(DASH_RE, ", ")
     .replace(DBL_HYPHEN_RE, ", ")
     .replace(MULTI_SPACE, " ")
@@ -88,8 +96,8 @@ export function tidyText<T extends string | null | undefined>(s: T): T {
 
 /**
  * True when a string still carries characters that can never be legitimate
- * text. Used by ingest to log provider corruption rather than swallow it,
- * so a feed that starts serving garbage at scale is visible and not silent.
+ * text. Used by ingest to LOG provider corruption rather than swallow it, so a
+ * feed that starts serving garbage at scale is visible and not silent.
  */
 export function hasControlChars(s: string | null | undefined): boolean {
   if (s == null) return false;

@@ -47,7 +47,18 @@ const MAX_EVENTS = 6;
 // section headings and button while the masthead used the real one, so the two
 // sat side by side in the same message looking like a mistake. The brand
 // system is explicit that there is ONE solid violet.
-const BRAND_VIOLET = "hsl(250 70% 50%)";
+//
+// Written as HEX, not hsl(). Outlook on Windows renders through the Word
+// engine, which does not parse hsl() in any form and is riskier still with
+// space-separated CSS Color 4 syntax. An unparsed background would leave the
+// CTA as unstyled text, which is the same "reads as broken" class of failure
+// the <head> work here is fixing. #4426D9 is hsl(250 70% 50%) exactly.
+const BRAND_VIOLET = "#4426D9";
+
+// The DAY muted foreground. This email was using #9c9385, which is the NIGHT
+// token, on a white card: about 2.9:1, failing AA. globals.css records that
+// #645c50 was darkened specifically to clear AA.
+const MUTED_FG = "#645c50";
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   console.error("Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
@@ -110,6 +121,13 @@ async function newVenues(): Promise<VenueLite[]> {
     .from("venues")
     .select("slug, name, neighbourhood, type, vibe, img_url, created_at")
     .not("google_place_id", "is", null)
+    // Mirror the visibility gate every other catalogue read applies. Without
+    // it a venue hidden this week is emailed to subscribers with a link that
+    // fetchVenueBySlug then resolves to a 404, and an empty img_url renders a
+    // broken-image icon in every inbox. This was the only catalogue read in
+    // the repo missing hidden_at.
+    .is("hidden_at", null)
+    .neq("img_url", "")
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(MAX_VENUES);
@@ -126,6 +144,7 @@ async function eventsThisWeek(): Promise<EventLite[]> {
     .from("events")
     .select("id, name, venue_name, area, date_label, time_label, img_url, starts_at")
     .is("cancelled_at", null)
+    .neq("img_url", "")
     .gte("starts_at", now)
     .lte("starts_at", horizon)
     .order("starts_at", { ascending: true })
@@ -279,10 +298,15 @@ function buildHtml(
   </style>
   </head><body style="margin:0;background:#f0eee9;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0eee9;padding:24px 0;">
-    <tr><td align="center">
-      <table width="100%" cellpadding="0" cellspacing="0"
-        style="max-width:440px;background:#ffffff;border-radius:18px;
+  <!-- bgcolor attributes are load bearing for Outlook on Windows: it renders
+       through the Word engine, which drops the CSS background shorthand and
+       would leave the cream page white. The width attribute is there for the
+       same reason, since max-width alone is ignored and the card would become
+       a full-window slab. Modern clients take the inline width:100%. -->
+  <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f0eee9" style="background:#f0eee9;padding:24px 0;">
+    <tr><td align="center" style="padding:0 12px;">
+      <table width="440" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
+        style="width:100%;max-width:440px;background:#ffffff;border-radius:18px;
         padding:24px;border:1px solid #e3ddd2;">
         <tr><td>
           <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:${BRAND_VIOLET};">This week in independent London</div>
@@ -299,10 +323,10 @@ function buildHtml(
             padding:12px 22px;border-radius:12px;">Open Fun London</a>
         </td></tr>
         <tr><td style="padding-top:24px;border-top:1px solid #e3ddd2;margin-top:16px;">
-          <div style="font-size:11px;color:#9c9385;padding-top:12px;line-height:1.5;">
+          <div style="font-size:11px;color:${MUTED_FG};padding-top:12px;line-height:1.5;">
             You are getting this because you turned on weekly emails in your Fun
             London profile.<br>
-            <a href="${unsubUrl}" style="color:#9c9385;">Unsubscribe</a>
+            <a href="${unsubUrl}" style="color:${MUTED_FG};">Unsubscribe</a>
           </div>
         </td></tr>
       </table>

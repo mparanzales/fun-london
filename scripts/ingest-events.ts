@@ -37,7 +37,7 @@ dotenv.config({ path: ".env.local" });
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { EVENT_SUBSCRIPTIONS, type EventSubscription } from "./events-seed";
 import { tmCategory } from "./event-category";
-import { tidyText, hasControlChars } from "@/lib/text";
+import { repairMojibake, hasControlChars } from "@/lib/text";
 
 // Provider text is not trustworthy. Ticketmaster's Discovery API served an
 // event title containing the unprintable characters U+0080 and U+0093 where an
@@ -48,7 +48,18 @@ import { tidyText, hasControlChars } from "@/lib/text";
 // So every string from a provider goes through here on the way in. The log
 // line matters as much as the repair. A feed that starts serving garbage at
 // scale should be visible in the cron output, not silently laundered.
-let corruptFieldsSeen = 0;
+//
+// This repairs ONLY. It deliberately does not apply the no-dashes brand rule,
+// which belongs on the read path: what we store stays faithful to what the
+// provider sent. That fidelity is what made this bug diagnosable in the first
+// place, since the stored bytes matched the live API exactly and proved the
+// corruption was upstream rather than ours.
+//
+// Recovered and dropped are counted separately on purpose. Counting only
+// "inputs that contained controls" would report a silent deletion as a
+// success, which is the same class of lie as a green tick over a dead cron.
+let repairedFields = 0;
+let lossyFields = 0;
 
 function clean<T extends string | null | undefined>(
   value: T,
@@ -56,13 +67,22 @@ function clean<T extends string | null | undefined>(
   sourceId: string,
   field: string,
 ): T {
-  if (value != null && hasControlChars(value)) {
-    corruptFieldsSeen++;
+  if (value == null || !hasControlChars(value)) return value;
+  const fixed = repairMojibake(value) as string;
+  // Anything printable that vanished means the repair was lossy, not clean.
+  const lossy = [...(value as string)].some(
+    (c) => c.codePointAt(0)! > 0x9f && !fixed.includes(c),
+  );
+  if (lossy) {
+    lossyFields++;
     console.log(
-      `  ~ ${provider}/${sourceId}: repaired control characters in ${field}`,
+      `  ! ${provider}/${sourceId}: ${field} had UNRECOVERABLE corruption`,
     );
+  } else {
+    repairedFields++;
+    console.log(`  ~ ${provider}/${sourceId}: repaired ${field}`);
   }
-  return tidyText(value);
+  return fixed as T;
 }
 
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -1138,7 +1158,8 @@ async function main() {
   console.log(`Cancelled/removed:       ${tally.deactivated}`);
   // Visible, never silent: a rising number here means a provider's own feed is
   // degrading, which is worth knowing before subscribers read it as boxes.
-  console.log(`Provider text repaired:  ${corruptFieldsSeen}`);
+  console.log(`Provider text repaired:  ${repairedFields}`);
+  console.log(`Unrecoverable text:      ${lossyFields}`);
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Ingestion complete."}`);
 
   // Green-but-empty guard: at least one provider pass threw AND the whole run
