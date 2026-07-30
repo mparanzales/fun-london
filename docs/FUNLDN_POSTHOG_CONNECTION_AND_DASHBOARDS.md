@@ -157,17 +157,37 @@ the wire:
 | --- | --- |
 | `venue_save` | ✅ observed reaching the capture endpoint |
 | `venue_unsave` | ✅ observed |
-| `together_room_create` | ⏳ pending: not exercisable anonymously |
-| `together_room_join` | ⏳ pending: not exercisable anonymously |
+| `together_room_create` | ⏳ pending: needs a signed-in session |
+| `together_room_join` | ⏳ pending: needs a signed-in session |
 
 The two group events are **not broken**. `app/(main)/plan/together/page.tsx`
 returns the auth wall for anonymous visitors, so `TogetherFlow` (which fires both
 on mount) never mounts. Verifying them needs either a signed-in session on a
 secure staging deployment, or `pnpm posthog:verify` once the read key exists.
 
-The secure group-room work (`fix/group-room-security`) is not deployed to a
-staging environment, so per the brief the two events are recorded as **pending
-staging verification** rather than tested against insecure production behaviour.
+**Update 2026-07-30: the secure group-room environment now EXISTS in production.**
+`fix/group-room-security` merged as
+[PR #187](https://github.com/mparanzales/fun-london/pull/187) (`main` @ `da88c2f`),
+main auto-deploys, and the merge is confirmed live: the room-code stripper's
+replacement string is present in the deployed production bundle. So the brief's
+condition ("verify group events only against the secure group-room environment")
+is now satisfiable in prod rather than blocked on a staging deploy.
+
+What still blocks the two events is narrower: **a signed-in session**.
+`app/(main)/plan/together/page.tsx` returns the auth wall for anonymous visitors,
+so `TogetherFlow` (which fires both events on mount) never mounts. Two ways to
+close it, either is sufficient:
+1. **`pnpm posthog:verify` once the read-only key exists** — it counts both events
+   across all real users and exits 1 if either has never fired. No manual session
+   needed. This is the recommended route.
+2. A signed-in session on prod, driven manually. Not needed if (1) is run.
+
+⚠️ Do **not** verify them by creating rooms in production and reading room codes
+out of the analytics feed. Until
+[PR #189](https://github.com/mparanzales/fun-london/pull/189) merges, two of the
+three room-code leak paths it fixes are **live**, so that method would be reading
+bearer credentials out of PostHog. #189 hardens the stripper; verify after it
+lands.
 
 ### 🧨 The false alarm, recorded so nobody repeats it
 
