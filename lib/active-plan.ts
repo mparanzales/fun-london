@@ -139,11 +139,16 @@ export function clearActivePlan(
  * deliberately destructive on the anon side: leaving a copy behind is how the
  * next person on a shared browser inherits it.
  *
- * Returns the claimed plan, or null when there was nothing to claim. Does NOT
- * overwrite an existing signed-in active plan — if the user already has a
- * night in progress, theirs wins and the anonymous one is discarded, because
- * silently replacing the plan someone is looking at is worse than losing one
- * they abandoned before signing in.
+ * Returns the claimed plan, or null when there was nothing to claim.
+ *
+ * 🧨 The anonymous night WINS over anything already in the owner slot. The
+ * first draft had this backwards, on the reasoning that "silently replacing
+ * the plan someone is looking at is worse". At claim time the user is looking
+ * at the ANONYMOUS night — they just built it and tapped Save — and the owner
+ * slot can only have been written while signed in, i.e. strictly before the
+ * sign-out that led here. So the anonymous one is provably the newer, and the
+ * one they are asking to keep. Discarding it loses the exact night they
+ * created an account to save.
  */
 export function claimAnonPlan(
   owner: string,
@@ -153,7 +158,6 @@ export function claimAnonPlan(
   const anon = readActivePlan(null, s);
   if (!anon) return null;
   clearActivePlan(null, s);
-  if (readActivePlan(owner, s)) return null;
   const claimed: NightPlan = { ...anon, source: "anon" };
   writeActivePlan(owner, claimed, s);
   return claimed;

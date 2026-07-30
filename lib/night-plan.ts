@@ -38,7 +38,19 @@ import type {
 } from "@/lib/plan-engine";
 
 /** Bump only for a shape change that old readers cannot tolerate. */
-export const NIGHT_PLAN_VERSION = 1 as const;
+export const NIGHT_PLAN_VERSION = 2 as const;
+
+/**
+ * How long a stored night still counts as "the night I am planning".
+ *
+ * 🧨 The legacy anon stash carried `savedAt` and a 1-hour TTL; the first draft
+ * of this model dropped both, which meant a night from three weeks ago would
+ * be restored and rendered under "Tonight, the plan:" — with an hours total
+ * over venues whose opening hours were only ever checked at generation time.
+ * Twelve hours covers "I planned this afternoon, I am going out tonight"
+ * without ever presenting last Saturday as tonight.
+ */
+export const NIGHT_PLAN_TTL_MS = 12 * 60 * 60 * 1000;
 
 /** A single stop: a reference plus the timing the engine computed for it. */
 export type NightPlanStop = {
@@ -61,6 +73,8 @@ export type NightPlanSource = "generated" | "saved" | "anon";
 
 export type NightPlan = {
   version: typeof NIGHT_PLAN_VERSION;
+  /** When this night was built. Drives freshness — see NIGHT_PLAN_TTL_MS. */
+  createdAt: string;
   title: string;
   area: string;
   vibe: PlanVibe;
@@ -130,6 +144,7 @@ export function parseNightPlan(value: unknown): NightPlan | null {
   if (typeof value !== "object" || value === null) return null;
   const p = value as Record<string, unknown>;
   if (p.version !== NIGHT_PLAN_VERSION) return null;
+  if (typeof p.createdAt !== "string") return null;
   if (typeof p.title !== "string" || typeof p.area !== "string") return null;
   if (!VIBES.has(p.vibe as PlanVibe)) return null;
   if (!BUDGETS.has(p.budget as PlanBudget)) return null;
@@ -144,6 +159,7 @@ export function parseNightPlan(value: unknown): NightPlan | null {
   if (p.savedRowId !== null && typeof p.savedRowId !== "string") return null;
   return {
     version: NIGHT_PLAN_VERSION,
+    createdAt: p.createdAt,
     title: p.title,
     area: p.area,
     vibe: p.vibe as PlanVibe,
@@ -177,10 +193,17 @@ type EngineLike = {
 /** Engine output (or the on-screen plan with swaps applied) -> canonical. */
 export function fromEnginePlan(
   plan: EngineLike,
-  opts: { title: string; source?: NightPlanSource; savedRowId?: string | null },
+  opts: {
+    title: string;
+    source?: NightPlanSource;
+    savedRowId?: string | null;
+    /** Preserved across a re-persist so restoring does not reset freshness. */
+    createdAt?: string;
+  },
 ): NightPlan {
   return {
     version: NIGHT_PLAN_VERSION,
+    createdAt: opts.createdAt ?? new Date().toISOString(),
     title: opts.title,
     area: plan.area,
     vibe: plan.vibe,
@@ -251,6 +274,10 @@ export function fromSavedRow(
 
   return {
     version: NIGHT_PLAN_VERSION,
+    // Reopening a saved night is an act of intent, so it counts as fresh from
+    // this moment. The row's own created_at is when it was SAVED, which says
+    // nothing about whether the user wants it tonight.
+    createdAt: new Date().toISOString(),
     title: row.title,
     area: row.neighbourhood,
     vibe: defaults.vibe,
@@ -335,4 +362,18 @@ export function totalMins(plan: NightPlan): number {
     (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
     0,
   );
+}
+
+/**
+ * Is this night still the one the user is planning, or a stale leftover?
+ *
+ * A stale night must not be restored onto the result screen under "Tonight,
+ * the plan:" — see NIGHT_PLAN_TTL_MS.
+ */
+export function isFresh(plan: NightPlan, now: number = Date.now()): boolean {
+  const created = Date.parse(plan.createdAt);
+  if (!Number.isFinite(created)) return false;
+  // A clock that has gone backwards (timezone change, device clock reset)
+  // must not make a night immortal.
+  return now - created >= 0 && now - created < NIGHT_PLAN_TTL_MS;
 }

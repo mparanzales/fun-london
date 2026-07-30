@@ -317,17 +317,20 @@ export function AnonPlanFlow({
         // and what claimAnonPlan() hands to the account after sign-in.
         const np = parseNightPlan({
           version: NIGHT_PLAN_VERSION,
+          createdAt: new Date().toISOString(),
           // The anon payload carries no title (it has no vibe control to
           // build the signed-in one from). Derive a plain one that keeps the
           // "Day Out" / "Night" convention the daypart inference in
           // fromSavedRow keys on, so a claimed night reads consistently.
           title: `${result.area} ${result.daypart === "day" ? "Day Out" : "Night"}`,
           area: result.area,
-          // The anon brief has no vibe/budget control, so these are the
-          // signed-in defaults. They affect regeneration only, never how the
-          // night renders.
-          vibe: "Chill" as const,
-          budget: "££" as const,
+          // The REAL brief the visitor set. An earlier draft hardcoded
+          // Chill/££ with a comment claiming this flow had no such controls —
+          // it has both, right here in this component, so a visitor who chose
+          // Fancy/£ would have signed in and found their brief silently
+          // reverted, and their next reshuffle generating against it.
+          vibe,
+          budget,
           daypart:
             result.daypart === "day" ? ("day" as const) : ("evening" as const),
           startsAt: null,

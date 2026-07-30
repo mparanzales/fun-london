@@ -7,6 +7,7 @@ import {
   hydrateStops,
   parseNightPlan,
   totalMins,
+  isFresh,
   type NightPlan,
 } from "@/lib/night-plan";
 import {
@@ -21,6 +22,7 @@ import {
 
 const plan = (over: Partial<NightPlan> = {}): NightPlan => ({
   version: NIGHT_PLAN_VERSION,
+  createdAt: new Date().toISOString(),
   title: "A Chill Soho Night",
   area: "Soho",
   vibe: "Chill",
@@ -49,21 +51,54 @@ const plan = (over: Partial<NightPlan> = {}): NightPlan => ({
 });
 
 describe("NightPlan · the canonical shape", () => {
-  it("holds venue REFERENCES only, never venue data (the anon moat)", () => {
-    // If this ever fails, someone has started embedding catalogue rows in a
-    // structure that is written to localStorage on a signed-OUT browser.
-    const json = JSON.stringify(plan());
-    for (const moat of [
-      "vibeTags",
-      "long_description",
-      "reviews",
-      "phone",
-      "openingHours",
+  it("🧨 the ADAPTER strips venue data, not just the fixture (the anon moat)", () => {
+    // The first version of this test stringified a hand-written fixture and
+    // inspected its keys, so it asserted nothing about adapter output: it
+    // would have stayed green while fromEnginePlan started embedding whole
+    // catalogue rows into a structure a signed-OUT browser persists.
+    // Poison a real engine venue and check what survives the adapter.
+    const poisoned = {
+      id: "v1",
+      slug: "one",
+      name: "The Venue",
+      vibeTags: ["SECRET-TAG"],
+      long_description: "SECRET-DESCRIPTION",
+      reviews: ["SECRET-REVIEW"],
+      phone: "SECRET-PHONE",
+      openingHours: { mon: "SECRET-HOURS" },
+    };
+    const np = fromEnginePlan(
+      {
+        area: "Soho",
+        vibe: "Chill",
+        budget: "££",
+        daypart: "evening",
+        steps: [
+          {
+            venue: poisoned as unknown as { id: string; slug: string },
+            role: "Start",
+            dwellMins: 60,
+            walkToNextMins: null,
+            arriveAt: null,
+          },
+        ],
+      },
+      { title: "t" },
+    );
+    const json = JSON.stringify(np);
+    for (const secret of [
+      "SECRET-TAG",
+      "SECRET-DESCRIPTION",
+      "SECRET-REVIEW",
+      "SECRET-PHONE",
+      "SECRET-HOURS",
+      "The Venue",
     ]) {
-      expect(json).not.toContain(moat);
+      expect(json).not.toContain(secret);
     }
-    const stopKeys = Object.keys(plan().stops[0]).sort();
-    expect(stopKeys).toEqual([
+    // …and the same for what goes to the database.
+    expect(JSON.stringify(toSavedSteps(np))).not.toContain("SECRET");
+    expect(Object.keys(np.stops[0]).sort()).toEqual([
       "dwellMins",
       "role",
       "slug",
@@ -94,6 +129,8 @@ describe("parseNightPlan · the trust boundary", () => {
       "a string",
       {},
       { ...plan(), version: 99 },
+      { ...plan(), createdAt: undefined },
+      { ...plan(), createdAt: 12345 },
       { ...plan(), stops: [] },
       { ...plan(), stops: "not an array" },
       { ...plan(), vibe: "Rowdy" },
@@ -344,6 +381,31 @@ describe("hydrateStops", () => {
   });
 });
 
+describe("isFresh · a stale night must not be presented as tonight", () => {
+  it("accepts a night from this evening", () => {
+    expect(isFresh(plan({ createdAt: new Date().toISOString() }))).toBe(true);
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    expect(isFresh(plan({ createdAt: twoHoursAgo }))).toBe(true);
+  });
+
+  it("🧨 rejects last week's night", () => {
+    // The legacy anon stash had a 1h TTL; the first draft of this model
+    // dropped it, which would have rendered a three-week-old night under
+    // "Tonight, the plan:" with stale opening hours.
+    const lastWeek = new Date(
+      Date.now() - 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    expect(isFresh(plan({ createdAt: lastWeek }))).toBe(false);
+  });
+
+  it("rejects a night from the future and an unparseable stamp", () => {
+    // A device clock that has gone backwards must not make a night immortal.
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    expect(isFresh(plan({ createdAt: future }))).toBe(false);
+    expect(isFresh(plan({ createdAt: "not a date" }))).toBe(false);
+  });
+});
+
 describe("the active-plan store", () => {
   let store: StorageLike;
   beforeEach(() => {
@@ -351,8 +413,11 @@ describe("the active-plan store", () => {
   });
 
   it("survives a round trip", () => {
-    writeActivePlan("user-a", plan(), store);
-    expect(readActivePlan("user-a", store)).toEqual(plan());
+    // One instance, not two: the fixture stamps `createdAt` at call time, so
+    // comparing plan() to plan() is a millisecond race.
+    const p = plan();
+    writeActivePlan("user-a", p, store);
+    expect(readActivePlan("user-a", store)).toEqual(p);
   });
 
   it("🧨 one owner CANNOT read another's night (the shared-browser bleed)", () => {
@@ -405,12 +470,26 @@ describe("claimAnonPlan · sign in and keep the night you just built", () => {
     expect(readActivePlan(null, store)).toBeNull();
   });
 
-  it("does not clobber a night the signed-in user already has", () => {
-    writeActivePlan("user-a", plan({ title: "Mine, in progress" }), store);
-    writeActivePlan(null, plan({ title: "Anonymous leftover" }), store);
-    expect(claimAnonPlan("user-a", store)).toBeNull();
-    expect(readActivePlan("user-a", store)?.title).toBe("Mine, in progress");
-    // …and the anonymous one is still cleared, so it cannot resurface later.
+  it("🧨 the anonymous night WINS over an older one in the owner slot", () => {
+    // The user just built this and tapped Save. The owner slot can only have
+    // been written before the sign-out that led here, so the anonymous night
+    // is provably the newer one — and the one they made an account to keep.
+    writeActivePlan(
+      "user-a",
+      plan({ title: "From before the sign-out" }),
+      store,
+    );
+    writeActivePlan(
+      null,
+      plan({ title: "Just built, about to be saved" }),
+      store,
+    );
+    expect(claimAnonPlan("user-a", store)?.title).toBe(
+      "Just built, about to be saved",
+    );
+    expect(readActivePlan("user-a", store)?.title).toBe(
+      "Just built, about to be saved",
+    );
     expect(readActivePlan(null, store)).toBeNull();
   });
 

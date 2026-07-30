@@ -54,8 +54,9 @@ import {
   fromSavedRow,
   toSavedSteps,
   hydrateStops,
-  totalMins as nightTotalMins,
+  isFresh,
   type NightPlan,
+  type NightPlanSource,
 } from "@/lib/night-plan";
 import {
   readActivePlan,
@@ -257,6 +258,25 @@ export function PlanFlow({
   // When set, the result view shows a re-opened saved plan instead of the
   // live-computed one. Cleared whenever the user edits inputs / tries again.
   const [openedSaved, setOpenedSaved] = useState<DisplayPlan | null>(null);
+  // 🧨 WHERE the night on screen came from — NOT the same question as
+  // "is `openedSaved` set".
+  //
+  // Both gates caught this: overloading `openedSaved` to mean both "reopened
+  // from the Saved list" and "the active night" made every RESTORED night
+  // inert. An anon visitor tapped "Save this night", signed in, had their
+  // night faithfully restored, and found no Save button — the exact
+  // conversion the transfer path exists for. Same for anyone who tapped a
+  // stop and came back.
+  //
+  // Only a night reopened from a saved ROW is read-only. A restored generated
+  // or claimed night keeps Save and Try-another; per-stop swaps stay hidden in
+  // all three cases, because `computed.alternatives[i]` is relative to a
+  // different set of stops and offering them could produce a night that is no
+  // longer walkable.
+  const [activeSource, setActiveSource] = useState<NightPlanSource | null>(
+    null,
+  );
+  const isReopenedSaved = activeSource === "saved";
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
     "idle",
@@ -468,23 +488,33 @@ export function PlanFlow({
       });
       // A night whose venues have all left the catalogue is not a night.
       if (stops.length === 0) return false;
+
+      // 🧨 RELINK when a stop was dropped. Without this the survivors keep the
+      // walk time that was measured to the venue that just disappeared, and
+      // the header keeps the full night's duration — so a 3-stop night that
+      // loses its middle stop renders "~6 min walk" between two venues that
+      // may be 25 minutes apart, while the map draws the real leg. A short
+      // night is honest; a wrong walk time is not.
+      const steps = dropped > 0 ? relinkSteps(stops, undefined) : stops;
       if (dropped > 0) {
-        // Rendering a three-stop night with two stops and saying nothing is
-        // how a plan quietly becomes wrong. Surfaced for analytics; the user
-        // still gets the stops that survived.
         track("plan_restored_partial", {
           dropped,
-          kept: stops.length,
+          kept: steps.length,
           source: np.source,
         });
       }
+
       setOpenedSaved({
         title: np.title,
         area: np.area,
         daypart: np.daypart,
-        totalMins: nightTotalMins(np),
-        steps: stops,
+        totalMins: steps.reduce(
+          (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+          0,
+        ),
+        steps,
       });
+      setActiveSource(np.source);
       // Seed the vibe/budget controls so the brief behind the night is what
       // the user sees, and so "try again" regenerates something comparable
       // rather than whatever the controls happened to be left on.
@@ -494,14 +524,27 @@ export function PlanFlow({
       // only the resolved area STRING, so mapping back would have to guess
       // between "region" and "neighbourhood". Guessing wrong would silently
       // change what the engine generates next, and preserving generation
-      // behaviour is a hard requirement here. The night itself still renders
-      // with its own area.
+      // behaviour is a hard requirement here.
       setVibe(np.vibe);
       setBudget(np.budget);
       setStep("result");
+
+      // Re-persist from the HYDRATED venues, so an anon-origin night (whose
+      // ids are slugs) is re-keyed to real catalogue ids, and so a night that
+      // lost stops is stored in its relinked form rather than its stale one.
+      writeActivePlan(owner, {
+        ...np,
+        stops: steps.map((s) => ({
+          venueId: s.venue.id,
+          slug: s.venue.slug,
+          role: s.role,
+          dwellMins: s.dwellMins,
+          walkToNextMins: s.walkToNextMins,
+        })),
+      });
       return true;
     },
-    [venueById, venueBySlug],
+    [venueById, venueBySlug, owner],
   );
 
   const openSaved = (row: SavedPlanRow) => {
@@ -543,13 +586,32 @@ export function PlanFlow({
     const claimed = owner ? claimAnonPlan(owner) : null;
     if (claimed) {
       anonOriginRef.current = true;
+      // The canonical claim has won. Drop the legacy one-shot stash so the
+      // older effect below cannot restore a coarser copy of the same night
+      // over the top of it and double-fire the analytics.
+      try {
+        window.localStorage.removeItem(ANON_PLAN_STASH_KEY);
+      } catch {
+        /* private mode */
+      }
       if (activate(claimed)) {
         track("plan_anon_claimed", { stops: claimed.stops.length });
         return;
       }
+      // Every venue has gone. The anon copy is already destroyed by the claim,
+      // so drop the owner copy too rather than retrying it on every mount.
+      clearActivePlan(owner);
+      return;
     }
     const existing = readActivePlan(owner);
-    if (existing) activate(existing);
+    if (!existing) return;
+    // A stale night must not be restored onto the result screen under
+    // "Tonight, the plan:" with opening hours that were checked days ago.
+    if (!isFresh(existing)) {
+      clearActivePlan(owner);
+      return;
+    }
+    if (!activate(existing)) clearActivePlan(owner);
   }, [owner, venues.length, activate]);
 
   // Persist whatever is on screen, so a refresh, a tap through to a venue and
@@ -1044,21 +1106,22 @@ export function PlanFlow({
               <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase">
                 {s.role}
               </div>
-              {!openedSaved && (computed.alternatives[i]?.length ?? 0) > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onSwap(i, 1, "button")}
-                  aria-label={`Change the ${s.role} stop`}
-                  className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
-                >
-                  <RotateCw
-                    className="w-3.5 h-3.5"
-                    strokeWidth={2}
-                    aria-hidden
-                  />
-                  Change
-                </button>
-              )}
+              {!isReopenedSaved &&
+                (computed.alternatives[i]?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onSwap(i, 1, "button")}
+                    aria-label={`Change the ${s.role} stop`}
+                    className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
+                  >
+                    <RotateCw
+                      className="w-3.5 h-3.5"
+                      strokeWidth={2}
+                      aria-hidden
+                    />
+                    Change
+                  </button>
+                )}
             </div>
             <SwipeStop
               enabled={
@@ -1177,7 +1240,7 @@ export function PlanFlow({
       )}
 
       {/* Actions — try another + save (live plans only, not re-opened) */}
-      {!openedSaved && (
+      {!isReopenedSaved && (
         <div className="px-5 pb-2 flex flex-col gap-2.5">
           <button
             type="button"
