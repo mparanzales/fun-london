@@ -100,7 +100,14 @@ function resolveTiming(
   customDate: string,
   customTime: string,
   base: Date,
-): { daypart: PlanDaypart; when: Date } {
+): { daypart: PlanDaypart; when: Date; tracksClock: boolean } {
+  // 🧨 `tracksClock` belongs HERE, next to the branches, not at the call site.
+  // Deriving it from `choice === "now"` under-detected by two thirds: "Today"
+  // picked during the day, and "Tonight" picked when it is already evening,
+  // both return `base` — the same snapshot of the clock — and were classed as
+  // fixed times. Restoring one then pinned the When control to a stamp already
+  // going stale, which is precisely what the flag exists to prevent. Computed
+  // beside the branch it describes, it cannot drift from it.
   const at = (h: number, m = 0) => {
     const d = new Date(base);
     d.setHours(h, m, 0, 0);
@@ -112,10 +119,18 @@ function resolveTiming(
   switch (choice) {
     case "day":
       // A daytime plan: use now if it's still daytime, else a representative 1pm.
-      return { daypart: "day", when: isDayNow ? base : at(13) };
+      return {
+        daypart: "day",
+        when: isDayNow ? base : at(13),
+        tracksClock: isDayNow,
+      };
     case "evening":
       // A night out: use now if it's already evening, else 7pm tonight.
-      return { daypart: "evening", when: isDayNow ? at(19) : base };
+      return {
+        daypart: "evening",
+        when: isDayNow ? at(19) : base,
+        tracksClock: !isDayNow,
+      };
     case "custom": {
       // A specific calendar day + clock time. The day matters for the
       // open-at-arrival checks — venues keep different hours by weekday.
@@ -132,10 +147,16 @@ function resolveTiming(
       return {
         daypart: isDaytimeHour(when.getHours()) ? "day" : "evening",
         when,
+        // A specific calendar day and clock time: pinned by definition.
+        tracksClock: false,
       };
     }
     default: // "now" — plan for this moment, shape follows the clock.
-      return { daypart: isDayNow ? "day" : "evening", when: base };
+      return {
+        daypart: isDayNow ? "day" : "evening",
+        when: base,
+        tracksClock: true,
+      };
   }
 }
 
@@ -510,7 +531,11 @@ export function PlanFlow({
               arriveAt: s.arriveAt ?? null,
             })),
           },
-          { title: display.title, offset, tracksClock: when === "now" },
+          {
+            title: display.title,
+            offset,
+            tracksClock: timing?.tracksClock ?? true,
+          },
         ),
       ),
     });
@@ -848,7 +873,7 @@ export function PlanFlow({
           title: display.title,
           createdAt: genStampRef.current.at,
           offset,
-          tracksClock: when === "now",
+          tracksClock: timing?.tracksClock ?? true,
         },
       ),
     );
@@ -859,7 +884,11 @@ export function PlanFlow({
     // takes the offset, and `timing` derives from the when choice), but listed
     // so the persisted reshuffle position and clock intent cannot silently go
     // stale if that ever stops being true.
-  }, [step, active, computed, display, owner, offset, when]);
+    // `offset` and `timing` are both already implied by `computed`
+    // (computePlan takes the offset, and derives from the same timing), but
+    // listed so the persisted reshuffle position and clock intent cannot
+    // silently go stale if that ever stops being true.
+  }, [step, active, computed, display, owner, offset, timing]);
 
   // Hydrate a night built while signed OUT. The anon /plan flow stashes its
   // result in localStorage before the sign-in round-trip (three navigations

@@ -121,7 +121,7 @@ function resolveAnonTiming(
   choice: WhenChoice,
   dateStr: string,
   timeStr: string,
-): { daypart: "day" | "evening"; whenISO: string } {
+): { daypart: "day" | "evening"; whenISO: string; tracksClock: boolean } {
   const now = new Date();
   const at = (h: number) => {
     const d = new Date(now);
@@ -133,11 +133,15 @@ function resolveAnonTiming(
     return {
       daypart: "day",
       whenISO: (isDayNow ? now : at(13)).toISOString(),
+      // See plan-flow's resolveTiming: "Today" during the day IS the live
+      // clock, and classing it as a fixed time re-pins it to a stale stamp.
+      tracksClock: isDayNow,
     };
   if (choice === "evening")
     return {
       daypart: "evening",
       whenISO: (isDayNow ? at(19) : now).toISOString(),
+      tracksClock: !isDayNow,
     };
   if (choice === "custom") {
     const d = new Date(`${dateStr || toISODate(now)}T${timeStr || "20:00"}`);
@@ -146,9 +150,14 @@ function resolveAnonTiming(
     return {
       daypart: h >= 5 && h < 17 ? "day" : "evening",
       whenISO: when.toISOString(),
+      tracksClock: false,
     };
   }
-  return { daypart: isDayNow ? "day" : "evening", whenISO: now.toISOString() };
+  return {
+    daypart: isDayNow ? "day" : "evening",
+    whenISO: now.toISOString(),
+    tracksClock: true,
+  };
 }
 
 // "3h 40m" from total minutes, no degenerate separators.
@@ -290,6 +299,7 @@ export function AnonPlanFlow({
           nowMs + 7 * 24 * 60 * 60 * 1000,
         ),
       );
+      tracksClockRef.current = t.tracksClock;
       setStartISO(startsAt.toISOString());
       setStartLabel(
         startsAt
@@ -375,6 +385,7 @@ export function AnonPlanFlow({
           customDate?: string;
           customTime?: string;
           reshuffles?: number;
+          tracksClock?: boolean;
         };
       };
       // 🧨 `age >= 0` as well as `<= TTL`. A device clock nudged forward makes
@@ -459,6 +470,7 @@ export function AnonPlanFlow({
       // Same reasoning as the brief: unparseable here makes parseNightPlan
       // reject the canonical write below, which is swallowed, so the claim
       // finds nothing while the screen looks perfect.
+      tracksClockRef.current = brief?.tracksClock === true;
       setStartISO(
         typeof saved.startISO === "string" &&
           Number.isFinite(Date.parse(saved.startISO))
@@ -489,6 +501,10 @@ export function AnonPlanFlow({
   // and re-arming the anon keys from here would hand it to whoever is next on
   // this browser. NOT reset by a new Build — see the listener for why that was
   // a mistake.
+  // Whether the night on screen tracks the live clock, as decided by
+  // resolveAnonTiming. A ref, not state: the persist effect reads it and
+  // nothing renders from it.
+  const tracksClockRef = useRef(true);
   const claimedElsewhere = useRef(false);
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -581,6 +597,11 @@ export function AnonPlanFlow({
               customDate,
               customTime,
               reshuffles,
+              // Whether the start is a snapshot of the clock. Without this the
+              // restored night is re-classified from the raw `when` choice,
+              // which under-detects: "Today" during the day and "Tonight" in
+              // the evening are both live too.
+              tracksClock: tracksClockRef.current,
             },
           }),
         );
@@ -624,7 +645,7 @@ export function AnonPlanFlow({
             dwellMins: s.dwellMins,
             walkToNextMins: s.walkToNextMins,
           })),
-          tracksClock: when === "now",
+          tracksClock: tracksClockRef.current,
           source: "anon" as const,
           savedRowId: null,
         });
