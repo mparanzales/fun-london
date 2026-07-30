@@ -63,7 +63,7 @@ import { PlanTogetherCard } from "./plan-together-card";
 import { buildAnonPlan } from "@/lib/plan-preview-action";
 import type { AnonPlanPayload } from "@/lib/plan-preview-shape";
 import { ANYWHERE } from "@/lib/plan-engine";
-import { track } from "@/lib/analytics";
+import { track, type SetupControl } from "@/lib/analytics";
 // Both are import-safe from this file: analytics-keys has ZERO imports, and
 // analytics-reasons imports only types (erased at build). The moat guard test
 // pins this file's import list, so nothing with a data path may be added.
@@ -168,16 +168,15 @@ export function AnonPlanFlow({
   // Not from Build (a defaults-only visitor legitimately has no setup event),
   // not from a restore, not from an effect.
   const setupStartedRef = useRef(false);
-  const markSetupStarted = () => {
+  const markSetupStarted = (control: SetupControl) => {
     if (setupStartedRef.current) return;
     setupStartedRef.current = true;
+    // Reports WHICH control was touched first, not the chosen values. At this
+    // instant the setter has not run yet, so any dimension value would be the
+    // mount-time default on 100% of events. See plan-flow.tsx for the full note.
     track("plan_setup_started", {
       plan_surface: "anon",
-      area_kind: areaSel.kind,
-      vibe,
-      budget,
-      when,
-      daypart: resolveAnonTiming(when, customDate, customTime).daypart,
+      first_control: control,
     });
   };
 
@@ -557,7 +556,7 @@ export function AnonPlanFlow({
           timeStr={customTime}
           minDate={minDate}
           onChange={(next) => {
-            markSetupStarted();
+            markSetupStarted("when");
             setWhen(next.choice);
             setCustomDate(next.dateStr);
             setCustomTime(next.timeStr);
@@ -571,7 +570,7 @@ export function AnonPlanFlow({
           venues={[]}
           neighbourhoods={neighbourhoods}
           onChange={(a) => {
-            markSetupStarted();
+            markSetupStarted("where");
             setAreaSel(a);
           }}
         />
@@ -586,7 +585,7 @@ export function AnonPlanFlow({
                 key={v}
                 type="button"
                 onClick={() => {
-                  markSetupStarted();
+                  markSetupStarted("vibe");
                   setVibe(v);
                 }}
                 className={
@@ -619,7 +618,7 @@ export function AnonPlanFlow({
               key={b}
               type="button"
               onClick={() => {
-                markSetupStarted();
+                markSetupStarted("budget");
                 setBudget(b);
               }}
               className={

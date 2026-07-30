@@ -28,7 +28,6 @@ import { searchCatalog } from "@/lib/search-action";
 import { loadFeedPage } from "@/lib/feed-action";
 import { recordSignal } from "@/lib/signals";
 import { track } from "@/lib/analytics";
-import { writeEntrySurface } from "@/lib/analytics-keys";
 import type { FeedFilter, FeedSort } from "@/lib/queries";
 import {
   FEED_PAGE_SIZE,
@@ -477,6 +476,12 @@ export function ExploreFeed({
   const priceKey = [...price].sort().join(",");
   const regionKey = [...regions].sort().join(",");
 
+  // feed_end_reached fires ONCE per distinct feed view. The key is deliberately
+  // GEO-FREE: viewKey() embeds lat/lng to 3 decimals, and putting that anywhere
+  // near an analytics payload is a trilateration risk. Category + sort + the
+  // three filter dimensions identify a view well enough for this counter.
+  const endFiredRef = useRef<Set<string>>(new Set());
+
   // Fire feed_end_reached at most once per distinct feed view.
   //
   // 🧨 Deliberately NOT hung off the IntersectionObserver sentinel. That
@@ -582,12 +587,6 @@ export function ExploreFeed({
   // vector); this set just hides the card immediately so the tap visibly did
   // something. Survives back-navigation via the snapshot below; on a real
   // reload the ranker owns the ordering again.
-  // feed_end_reached fires ONCE per distinct feed view. The key is deliberately
-  // GEO-FREE: viewKey() embeds lat/lng to 3 decimals, and putting that anywhere
-  // near an analytics payload is a trilateration risk. Category + sort + the
-  // three filter dimensions identify a view well enough for this counter.
-  const endFiredRef = useRef<Set<string>>(new Set());
-
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const onCardDismissed = useCallback((venueId: string) => {
     setDismissedIds((prev) => {

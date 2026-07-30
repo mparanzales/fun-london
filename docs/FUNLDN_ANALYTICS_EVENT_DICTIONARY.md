@@ -59,8 +59,20 @@ effect. Latched by `setupStartedRef`. On the signed-in surface the latch sits
 inside `editInputs`, the single choke point for all four setup controls; on the
 anon surface it is `markSetupStarted()`, wired to each control.
 
-Props: `plan_surface` (`solo` | `anon`), `area_kind`, `vibe`, `budget`, `when`,
-`daypart` (anon only).
+Props: `plan_surface` (`solo` | `anon`) and `first_control`
+(`when` | `where` | `vibe` | `budget`).
+
+🧨 **It deliberately carries NO dimension values.** The first version sent
+`area_kind`, `vibe`, `budget` and `when`, and all four were **wrong by
+construction**: `track()` runs before the state setter applies the selection, and
+the latch fires only once, so every one of them was pinned to the mount-time
+default on 100% of events. A property that is constant on every event is worse
+than a missing one, because a dashboard will happily break down by it. Caught by
+the analytics-schema review gate. The chosen values already ride on
+`plan_generate` / `plan_preview_built`.
+
+`first_control` is the honest and more useful replacement: it answers which part
+of the brief people reach for first.
 
 **Two documented limitations.** (a) The latch is per-mount: a visitor who builds
 anonymously, signs in, and lands on a fresh `PlanFlow` can emit a second event.

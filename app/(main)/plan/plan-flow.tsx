@@ -37,7 +37,12 @@ import {
   type PlanDaypart,
 } from "@/lib/plan-engine";
 import type { PlanArea } from "@/lib/regions";
-import { track, type SaveMode, type SwapMethod } from "@/lib/analytics";
+import {
+  track,
+  type SaveMode,
+  type SwapMethod,
+  type SetupControl,
+} from "@/lib/analytics";
 import { saveFailReason } from "@/lib/analytics-reasons";
 import { writePlanHandoff, writeSignInTrigger } from "@/lib/analytics-keys";
 import { recordSignal } from "@/lib/signals";
@@ -521,7 +526,7 @@ export function PlanFlow({
 
   // Editing any input invalidates a re-opened saved plan, the saved flag, and
   // any per-stop swaps (the base plan is about to change).
-  const editInputs = (fn: () => void) => {
+  const editInputs = (fn: () => void, control: SetupControl = "where") => {
     // plan_setup_started, fired ONCE. editInputs is the single choke point for
     // every setup control on this surface (When, Where, Vibe, Budget) and is
     // called from nothing else, so the latch here cannot be reached by a page
@@ -535,12 +540,17 @@ export function PlanFlow({
     // fixable without firing on Build, which would defeat the point.
     if (!setupStartedRef.current) {
       setupStartedRef.current = true;
+      // 🧨 The payload carries WHICH CONTROL was touched first, and no
+      // dimension values. The obvious version of this event sent area_kind /
+      // vibe / budget / when, and every one of them was WRONG BY
+      // CONSTRUCTION: track() runs before fn() applies the selection, and the
+      // latch fires only once, so all four were pinned to the mount-time
+      // defaults on 100% of events. A property that is constant on every event
+      // is worse than a missing one, because a dashboard will happily break
+      // down by it. The chosen values already ride on plan_generate.
       track("plan_setup_started", {
         plan_surface: "solo",
-        area_kind: areaSel.kind,
-        vibe,
-        budget,
-        when,
+        first_control: control,
       });
     }
     setOpenedSaved(null);
@@ -591,7 +601,7 @@ export function PlanFlow({
   const pickNearYou = () => {
     editInputs(() => {
       setAreaSel({ kind: "nearYou" });
-    });
+    }, "where");
     if (center) return; // already located — just reselect
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setGeoState("denied");
@@ -605,7 +615,9 @@ export function PlanFlow({
       },
       () => {
         setGeoState("denied");
-        editInputs(() => setAreaSel({ kind: "anywhere" }));
+        // Geolocation denial, not a user selection: do not let it be the
+        // first_control value.
+        editInputs(() => setAreaSel({ kind: "anywhere" }), "where");
       },
       { timeout: 8000, maximumAge: 300_000 },
     );
@@ -666,7 +678,7 @@ export function PlanFlow({
                 setWhen(choice);
                 setCustomDate(dateStr);
                 setCustomTime(timeStr);
-              })
+              }, "when")
             }
           />
         </Group>
@@ -679,7 +691,7 @@ export function PlanFlow({
                 <button
                   key={v.v}
                   type="button"
-                  onClick={() => editInputs(() => setVibe(v.v))}
+                  onClick={() => editInputs(() => setVibe(v.v), "vibe")}
                   className={
                     "px-3.5 py-3 rounded-[14px] border-[1.5px] text-fg text-left flex items-center gap-2 text-[13px] font-bold " +
                     (on
@@ -704,7 +716,7 @@ export function PlanFlow({
                 setAreaSel(a);
                 setCenter(null);
                 setGeoState("idle");
-              })
+              }, "where")
             }
             nearYou={{ state: geoState, onPick: pickNearYou }}
           />
@@ -718,7 +730,7 @@ export function PlanFlow({
                 <button
                   key={b}
                   type="button"
-                  onClick={() => editInputs(() => setBudget(b))}
+                  onClick={() => editInputs(() => setBudget(b), "budget")}
                   className={
                     "h-11 rounded-xl border-[1.5px] text-fg font-extrabold text-[13px] " +
                     (on

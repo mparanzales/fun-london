@@ -45,6 +45,12 @@ export type ViewportBucket = "mobile" | "tablet" | "desktop";
 
 export type PlanSurface = "solo" | "anon" | "group";
 
+// Which setup control the visitor touched FIRST. This is what plan_setup_started
+// reports instead of the chosen dimension values, because at the instant the
+// event fires the selection has not been applied yet, so every dimension value
+// would be the mount-time default on every event.
+export type SetupControl = "when" | "where" | "vibe" | "budget";
+
 // Why a generation attempt produced nothing usable. Deliberately COARSE
 // categories, never a raw exception string.
 //
@@ -505,7 +511,10 @@ export function reportError(
       ...commonProps(),
       surface,
       ...(typeof digest === "string" ? { digest } : {}),
-      ...extra,
+      // `extra` goes through the same guard as a track() payload. It is caller
+      // supplied from inside an error boundary, which is exactly where someone
+      // reaches for "just attach the state that broke".
+      ...sanitizeProps("reportError", extra),
     });
   } catch {
     // Never let analytics throw into product code — least of all here. This
