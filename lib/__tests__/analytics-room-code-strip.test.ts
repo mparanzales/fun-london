@@ -120,13 +120,17 @@ describe("nested values: missed by v1, which only looked at top-level strings", 
     );
   });
 
-  it("survives a cyclic-ish deep structure without hanging", () => {
+  it("terminates on a pathologically deep structure, and stops redacting past the cap", () => {
     let deep: Record<string, unknown> = { href: `?room=${CODE}` };
     for (let i = 0; i < 50; i++) deep = { nest: deep };
-    // Past the depth cap the value is returned untouched rather than walked
-    // forever. Nothing the app sends is anywhere near this deep; the assertion
-    // is that it TERMINATES.
     expect(() => stripRoomCodes(deep)).not.toThrow();
+    // HONEST about the trade: past MAX_SANITIZE_DEPTH the sub-tree is returned
+    // by reference, so anything below it is NOT redacted. Asserted rather than
+    // glossed over, because the file header promises the code is absent from
+    // the output and here it is not. The bound is unreachable from real
+    // payloads: the deepest posthog sends is $exception_list frames at depth 5
+    // of 6, and $elements sits at depth 3.
+    expect(leaks(deep)).toBe(true);
   });
 });
 
@@ -167,6 +171,85 @@ describe("object KEYS, the leak that survived the first hardening", () => {
       $heatmap_data: { "https://funldn.com/explore": [{ x: 1 }] },
     };
     expect(stripRoomCodes(props)).toEqual(props);
+  });
+});
+
+describe("redacting a key must not silently drop the other bucket", () => {
+  it("merges two heatmap buckets that collapse to the same redacted key", () => {
+    // One visitor, two rooms, inside a single heatmap flush window. Before the
+    // merge the second key overwrote the first and its clicks vanished: the
+    // same "looks fine on a dashboard" data loss the greedy match caused.
+    const out = stripRoomCodes({
+      $heatmap_data: {
+        "https://funldn.com/plan/together?room=AAAA11": [{ x: 1, y: 1 }],
+        "https://funldn.com/plan/together?room=BBBB22": [{ x: 9, y: 9 }],
+      },
+    }) as { $heatmap_data: Record<string, unknown> };
+    const keys = Object.keys(out.$heatmap_data);
+    expect(keys).toHaveLength(1); // they legitimately collapse
+    expect(out.$heatmap_data[keys[0]]).toEqual([
+      { x: 1, y: 1 },
+      { x: 9, y: 9 },
+    ]); // and BOTH buckets survive
+    expect(JSON.stringify(out)).not.toContain("AAAA11");
+    expect(JSON.stringify(out)).not.toContain("BBBB22");
+  });
+});
+
+describe("load-bearing init options are pinned, not defended by a comment", () => {
+  // Each of these is the ONLY thing keeping a whole category of payload off a
+  // transport that sanitize_properties cannot see. A comment does not fail CI.
+  async function initOptions(): Promise<Record<string, unknown>> {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_KEY", "phc_test_key");
+    let opts: Record<string, unknown> | undefined;
+    vi.doMock("posthog-js", () => ({
+      default: {
+        init: (_k: string, o?: Record<string, unknown>) => void (opts = o),
+        capture: vi.fn(),
+        identify: vi.fn(),
+        reset: vi.fn(),
+        opt_in_capturing: vi.fn(),
+        opt_out_capturing: vi.fn(),
+        captureException: vi.fn(),
+      },
+    }));
+    vi.stubGlobal("window", {
+      innerWidth: 375,
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+      },
+      sessionStorage: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+      },
+    });
+    const mod = await import("@/lib/analytics");
+    mod.initAnalytics();
+    vi.unstubAllGlobals();
+    return opts ?? {};
+  }
+
+  it("keeps session recording off (its $snapshot path skips the sanitizer)", async () => {
+    expect((await initOptions()).disable_session_recording).toBe(true);
+  });
+
+  it("keeps console-log capture off (its /i/v1/logs path sends url.full raw)", async () => {
+    const logs = (await initOptions()).logs as { captureConsoleLogs?: boolean };
+    expect(logs?.captureConsoleLogs).toBe(false);
+  });
+
+  it("keeps dead-click capture off (it reads the BARE room code as text)", async () => {
+    expect((await initOptions()).capture_dead_clicks).toBe(false);
+  });
+
+  it("stays on the EU host and stays cookieless", async () => {
+    const o = await initOptions();
+    expect(o.api_host).toBe("https://eu.i.posthog.com");
+    expect(o.persistence).toBe("localStorage");
   });
 });
 

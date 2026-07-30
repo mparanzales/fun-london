@@ -425,7 +425,19 @@ function redactRoomCodesDeep(value: unknown, depth: number): unknown {
       // shipped. Found by capturing a real $$heatmap payload off production,
       // not by reading the code: heatmaps are enabled by the PostHog project's
       // remote config, so nothing in this repository says they are on.
-      out[redactRoomCodesInString(k)] = redactRoomCodesDeep(v, depth + 1);
+      const rk = redactRoomCodesInString(k);
+      const rv = redactRoomCodesDeep(v, depth + 1);
+      // Redaction can COLLAPSE two distinct keys into one: two rooms visited
+      // inside a single heatmap flush window both become "...?room=redacted".
+      // Overwriting would silently discard the first bucket's clicks, which is
+      // the same "looks fine on a dashboard" data loss the greedy-match bug
+      // caused. Concatenate when both sides are arrays; otherwise last write
+      // wins, which is the only sane merge for a scalar.
+      const prev = out[rk];
+      out[rk] =
+        rk in out && Array.isArray(prev) && Array.isArray(rv)
+          ? [...prev, ...rv]
+          : rv;
     }
     return out;
   }
@@ -490,11 +502,29 @@ export function initAnalytics(): void {
     disable_session_recording: true, // explicit: no screen recordings
     // 🧨 A Plan Together room code is a BEARER SECRET and it lives in the URL
     // (/plan/together?room=CODE). PostHog attaches $current_url (and referrer /
-    // pathname) to EVERY captured event, including autocaptured clicks — so
+    // pathname) to EVERY captured event, including autocaptured clicks, so
     // without this hook a code lifted from the analytics feed would be a
-    // working key to a live room, defeating the membership check. Strip it
-    // from every URL-bearing property before anything leaves the browser.
+    // working key to a live room, defeating the membership check.
+    //
+    // ⚠️ SCOPE, stated precisely because the old comment overstated it:
+    // sanitize_properties runs on the CAPTURE path only. posthog-js has other
+    // request paths that never touch it, and two of them carry the raw page
+    // URL. They are shut off below rather than left to a hook that cannot see
+    // them.
     sanitize_properties: stripRoomCodes,
+    // 🧨 OFF because these send the raw URL on paths sanitize_properties never
+    // sees, and BOTH are switched on by the PostHog project's REMOTE CONFIG,
+    // so nothing in this repository would otherwise say they are running. That
+    // is exactly how the $heatmap_data leak got in.
+    //
+    //   logs           -> POSTs to /i/v1/logs with url.full = location.href
+    //                     verbatim, on its own transport. No kill switch other
+    //                     than this option.
+    //   dead clicks    -> captures $el_text, and the lobby renders the BARE
+    //                     room code as text. A bare code has no "room=" prefix,
+    //                     so no redaction pattern can ever match it.
+    logs: { captureConsoleLogs: false },
+    capture_dead_clicks: false,
     loaded: (ph) => {
       if (!analyticsAllowed()) {
         ph.opt_out_capturing();
