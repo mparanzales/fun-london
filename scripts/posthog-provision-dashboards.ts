@@ -20,13 +20,13 @@
 // posthog:verify, and issue a second key with the write scopes, run this once,
 // then delete that key from the PostHog settings page.
 //
-// ⚠️ Dashboard 5 (generation failures + latency) is DELIBERATELY PARTIAL AS OF
-// 2026-07-30. On main at that date the anon builder's failure branches
-// (`limited`, `soft` in anon-plan-flow.tsx) fire no event at all, and no event
-// carries a duration, so dashboard 5 ships honest proxies and a flat panel means
-// NOT INSTRUMENTED rather than "no failures". Branch feat/analytics-foundation
-// adds the real events; when it is deployed and data has arrived, rewrite those
-// panels and drop the warning (see the manifest doc for the ordered steps).
+// ⚠️ Dashboard 5 (generation failures + latency) still ships PROXIES as of
+// 2026-07-30. PR #189 merged, so main now emits plan_generate_failed,
+// plan_preview_failed and duration_ms, but the panels were NOT switched over
+// because nobody has confirmed those events are actually arriving yet (that
+// needs the read key). A flat panel there means NOT YET MEASURED, not "no
+// failures". Finish it by verifying arrival first, then rewriting the panels,
+// then deleting the warning (see the manifest doc for the ordered steps).
 // ─────────────────────────────────────────────────────────────────────────
 
 import { ph, resolveProjectId, API_HOST } from "./posthog-api";
@@ -270,7 +270,7 @@ const DASHBOARDS: Dashboard[] = [
   {
     name: "5. Generation failures and latency (PARTIAL)",
     description:
-      "⚠️ PARTIAL AS OF 2026-07-30, and dated on purpose so this text cannot silently become false. At the time of writing main emits no plan-generation failure event and no duration, so the panels below are PROXIES and a flat line means NOT INSTRUMENTED rather than zero failures. The real events (plan_generate_failed, plan_preview_failed, duration_ms) are built on branch feat/analytics-foundation. ONCE THAT BRANCH IS DEPLOYED AND DATA HAS ARRIVED, replace these panels and delete this warning: see docs/FUNLDN_ANALYTICS_DASHBOARD_MANIFEST.md for the ordered transition.",
+      "⚠️ STILL PROXIES AS OF 2026-07-30 (dated on purpose so this text cannot silently become false). UPDATE: PR #189 is now MERGED, so main DOES emit plan_generate_failed, plan_preview_failed and duration_ms. The panels below were deliberately NOT switched over yet, because at the time of writing nobody had confirmed those events are actually ARRIVING (that needs the read key). So: a flat line here still means NOT YET MEASURED, not zero failures. To finish: run pnpm posthog:verify -- --all, confirm the three names have non-zero counts, THEN replace these panels with a failure trend broken down by reason and a latency panel on duration_ms, and only then delete this warning. Ordered steps in docs/FUNLDN_ANALYTICS_DASHBOARD_MANIFEST.md.",
     insights: [
       {
         name: "Soft failure: nights that did not fill",

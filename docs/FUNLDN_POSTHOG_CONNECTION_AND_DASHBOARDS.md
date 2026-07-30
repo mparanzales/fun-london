@@ -115,11 +115,33 @@ Matching is **by name**. Renaming an insight in the PostHog UI will make the nex
 run create a duplicate; rename it in
 `scripts/posthog-provision-dashboards.ts` instead.
 
+## Final verified state (2026-07-30)
+
+What has actually been checked, and what has not. Nothing below is inferred.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| PR #189 landed on `main` | ✅ | Verified **by content**, not by the Merged badge: `export function stripRoomCodes`, `NESTED_URL_PARAM_RE`, `MAX_SANITIZE_DEPTH`, `plan_setup_started`, `flushPendingEvents` and `first_control` are all present on `origin/main` @ `3ff37ed`. This repo has a documented squash-merge hazard, so the badge is not evidence. |
+| Production is running the #189 sanitizer | ✅ | The deployed bundle carries the new stripper's distinctive markers (`%3f`, `redirect_uri`, the `return\|returnto\|next` alternation) that the old version did not have, AND it was confirmed **functionally**: a percent-encoded room URL on prod was captured leaving the browser as `$current_url = "https://www.funldn.com/sign-in?return=redacted"`, with a positive control proving payloads were being captured at all. |
+| A residual leak in the same area | 🔴 → fixed in [PR #192](https://github.com/mparanzales/fun-london/pull/192) | The same capture showed the code still present in `$heatmap_data`, whose object is **keyed by the page URL**. #189 sanitised values, not keys. Heatmaps are enabled by the PostHog project's remote config, so no code review could have found it. |
+| `venue_save`, `venue_unsave` | ✅ | Observed reaching the capture endpoint on prod, signed out (2026-07-29). |
+| `together_room_create`, `together_room_join` | ⏳ | The secure environment now exists in prod (#187 merged and verified live). What remains is a signed-in session, or one run of `pnpm posthog:verify`. |
+| #189's ten new events | ⏳ | Code- and test-verified; **arrival unconfirmed**, which needs the read key. |
+| Permanent read-only key | ⏳ | **Absent.** Checked by name in `.env.local` and the shell; no value was ever printed. |
+| Temporary provisioning key | ⏳ | **Never created**, so nothing to revoke. |
+| Dashboards provisioned | ⏳ | Not run. Dry run: 6 dashboards, 26 insights, offline. |
+| `fl_probe_manual` excluded | ✅ by construction | Every one of the 26 insights is scoped to explicit event names, so an unnamed event cannot be swept in. Pinned by `scripts/__tests__/posthog-dashboards.test.ts`. A project-level filter is still worth adding in the PostHog UI for ad-hoc exploration. |
+| Verifier covers every event | ✅ | It no longer keeps a hand-maintained list. It reads the `AnalyticsEvent` union from `lib/analytics.ts` at runtime and refuses to run if the parse returns an implausibly small list. The old hand-list had drifted to **13 of 33 events missing**. |
+
 ## Known limitations
 
 - ⚠️ **The provisioning payload shapes follow the documented PostHog API but have
   never been executed against a live project**, because no key exists yet. The
-  first real run is the test. If a `FunnelsQuery` or `TrendsQuery` field name has
+  first real run is the test.
+- ⚠️ **Dashboard 5 still ships proxies**, deliberately. #189 merged so the real
+  events exist in code, but nobody has confirmed they are ARRIVING. Verify
+  arrival first, then rewrite the panels, then delete the warning. Doing it in
+  any other order puts a panel on the wall that nobody has checked. If a `FunnelsQuery` or `TrendsQuery` field name has
   drifted, the script fails loudly with PostHog's own error message attached,
   which is where the useful text is.
 - **Dashboard 5 is partial by construction.** See the manifest.

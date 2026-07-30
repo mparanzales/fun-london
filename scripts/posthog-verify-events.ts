@@ -13,12 +13,14 @@
 // Usage:
 //   pnpm posthog:verify              # last 30 days
 //   pnpm posthog:verify -- --days=90
-//   pnpm posthog:verify -- --all     # every event in the AnalyticsEvent union
+//   pnpm posthog:verify -- --all     # every event, READ FROM the union at runtime
 //
 // Needs a personal API key with the READ scopes only:
 //   query:read   (this script)      + project:read
 // ─────────────────────────────────────────────────────────────────────────
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { hogql, resolveProjectId, API_HOST } from "./posthog-api";
 
 // The four the cofounders asked to see proven. Zero on any of these is a
@@ -30,27 +32,54 @@ const REQUIRED = [
   "together_room_join",
 ] as const;
 
-// The rest of the union in lib/analytics.ts, reported for context under
-// --all. Kept in sync by hand; the union is the source of truth.
-const OTHERS = [
-  "$pageview",
-  "venue_reserve_click",
-  "event_ticket_click",
-  "booking_self_logged",
-  "plan_generate",
-  "plan_reshuffle",
-  "plan_save",
-  "plan_open_maps",
-  "plan_swap",
-  "together_swipe",
-  "share",
-  "search_query",
-  "sign_in_complete",
-  "plan_preview_built",
-  "plan_stop_opened",
-  "plan_stash_restored",
-  "detail_wall_dismissed",
-] as const;
+// Every OTHER event, read from the union in lib/analytics.ts at runtime.
+//
+// 🧨 This list used to be maintained BY HAND, with a comment saying so. By the
+// time PR #189 merged it was missing 13 of the 33 events in the union, so
+// `--all` quietly reported on 20 and said nothing about the rest. A verifier
+// that silently checks less than it claims is worse than no verifier: it is the
+// green tick over the nine-week dead digest, again.
+//
+// So it is derived. The union is a plain TypeScript string union, which is
+// trivially parseable and is the actual source of truth.
+function readUnionEvents(): string[] {
+  const src = readFileSync(
+    fileURLToPath(new URL("../lib/analytics.ts", import.meta.url)),
+    "utf8",
+  );
+  const start = src.indexOf("export type AnalyticsEvent =");
+  if (start === -1) {
+    throw new Error(
+      "Could not find the AnalyticsEvent union in lib/analytics.ts. " +
+        "The verifier refuses to check a list it cannot derive.",
+    );
+  }
+  // Strip comments BEFORE looking for the terminating semicolon. The union is
+  // heavily commented and one of those comments ends in a semicolon
+  // ("...anon /plan ships to move;"), which truncated the parse at 22 of 33
+  // events on the first attempt. Silently. Exactly the failure this function
+  // was written to remove, reproduced inside the fix for it.
+  const body = src
+    .slice(start)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  const end = body.indexOf(";");
+  const names = [...body.slice(0, end).matchAll(/\|\s*"([^"]+)"/g)].map(
+    (m) => m[1],
+  );
+
+  // A parse that silently returns almost nothing is the failure mode this
+  // change exists to remove, so make it loud. The union has been well above 20
+  // members since #189; 10 is a floor no real refactor would cross.
+  if (names.length < 10) {
+    throw new Error(
+      `Parsed only ${names.length} events from the AnalyticsEvent union. ` +
+        "That is implausible, so the parse is broken. Fix it rather than " +
+        "letting the verifier check a truncated list.",
+    );
+  }
+  return names;
+}
 
 const daysArg = process.argv.find((a) => a.startsWith("--days="));
 const DAYS = daysArg ? Number(daysArg.split("=")[1]) : 30;
@@ -60,7 +89,19 @@ type Row = [string, number, number, string];
 
 async function main(): Promise<void> {
   const projectId = await resolveProjectId();
-  const wanted = ALL ? [...REQUIRED, ...OTHERS] : [...REQUIRED];
+  // Derived, never hand-listed. `$pageview` is autocaptured rather than
+  // declared in the union, so it is added explicitly.
+  const wanted = ALL
+    ? [
+        ...new Set([
+          ...REQUIRED,
+          "$pageview",
+          ...readUnionEvents().filter(
+            (e) => !(REQUIRED as readonly string[]).includes(e),
+          ),
+        ]),
+      ]
+    : [...REQUIRED];
   const list = wanted.map((e) => `'${e}'`).join(", ");
 
   console.log(`PostHog project ${projectId} at ${API_HOST}`);
