@@ -484,7 +484,15 @@ export function AnonPlanFlow({
       // the owner's slot immediately after clearing the anon one. An
       // owner-scoped key appearing WITH A VALUE means "somebody signed in on
       // this browser and took the night", and nothing else produces it —
-      // sign-out and eviction only ever remove.
+      // sign-out and eviction only ever remove, and this flow writes the anon
+      // slot only. All three owner-scoped writers (the claim, activate's
+      // re-persist, the persist effect) run inside a signed-in PlanFlow, so
+      // every one of them means this tab is stale.
+      //
+      // Accepted cost of being one-way: after sign-in then sign-out, a tab
+      // still mounted from before stops persisting until it is refreshed. It
+      // under-persists rather than handing a night to the next person, and a
+      // reload clears it.
       if (
         e.key &&
         e.key.startsWith(ACTIVE_PLAN_PREFIX) &&
