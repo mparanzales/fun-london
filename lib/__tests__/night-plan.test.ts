@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   NIGHT_PLAN_VERSION,
   fromEnginePlan,
@@ -337,6 +339,39 @@ describe("parseNightPlan · startsAt must be usable, not merely a string", () =>
     const iso = new Date("2026-07-30T19:30:00.000Z").toISOString();
     expect(parseNightPlan({ ...plan(), startsAt: iso })?.startsAt).toBe(iso);
     expect(parseNightPlan({ ...plan(), startsAt: null })?.startsAt).toBeNull();
+  });
+});
+
+describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
+  // The unit tests above prove clearAnonPlanKeys WIPES the keys. They cannot
+  // see WHERE IT IS CALLED FROM, and that is what was wrong: it was wired to
+  // the two profile sign-out buttons, which a session expiry, a sign-out in
+  // another tab, cleared cookies and a deleted account all bypass -- leaving
+  // one person's night on the browser for the next one. A green unit test and
+  // a live bleed at the same time, so the call site gets pinned too.
+  const code = (rel: string) =>
+    readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+
+  it("calls clearAnonPlanKeys INSIDE the isSignOutTransition block", () => {
+    const src = code("../../components/auth-user-context.tsx");
+    const block = src.match(
+      /if\s*\(isSignOutTransition\([^)]*\)\)\s*\{([\s\S]*?)\n\s*\}/,
+    );
+    expect(
+      block,
+      "no isSignOutTransition block in auth-user-context",
+    ).not.toBeNull();
+    expect(block![1]).toContain("clearAnonPlanKeys()");
+  });
+
+  it("does not depend on the profile sign-out buttons", () => {
+    // If this ever needs to come back, the transition above is still the
+    // authority; a button is a convenience, never the guarantee.
+    expect(code("../../app/(main)/profile/profile-body.tsx")).not.toContain(
+      "clearAnonPlanKeys",
+    );
   });
 });
 

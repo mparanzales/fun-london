@@ -117,7 +117,13 @@ const ROLES = new Set<PlanRole>(["Start", "Then", "Finish"]);
 const VIBES = new Set<PlanVibe>(["Chill", "Lively", "Fancy", "Unique"]);
 const BUDGETS = new Set<PlanBudget>(["£", "££", "Any"]);
 
-function isStop(v: unknown): v is NightPlanStop {
+/** Exported so callers that rebuild a NightPlan from another shape validate
+ *  with the SAME rule the parser uses, rather than a hand-written echo of it
+ *  that drifts. A looser copy in the anon restore path accepted a NaN dwell,
+ *  an empty slug and an unknown role: each rendered perfectly and then failed
+ *  parseNightPlan on the canonical write, where the failure is swallowed — so
+ *  the night looked fine and was silently unclaimable. */
+export function isStop(v: unknown): v is NightPlanStop {
   if (typeof v !== "object" || v === null) return false;
   const s = v as Record<string, unknown>;
   return (

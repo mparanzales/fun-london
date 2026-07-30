@@ -75,12 +75,14 @@ import {
   throwFailReason,
 } from "@/lib/analytics-reasons";
 import {
+  isStop,
   parseNightPlan,
   NIGHT_PLAN_VERSION,
   type NightPlan,
 } from "@/lib/night-plan";
 import {
   writeActivePlan,
+  activePlanKey,
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
@@ -269,13 +271,23 @@ export function AnonPlanFlow({
     if (res.ok) {
       setResult(res);
       if (offset === 1) setReshuffles(1);
-      // 🧨 CLAMP, exactly as the server does (lib/plan-preview.ts). At 22:00
-      // "Today" resolves to 13:00 client-side, but the server plans from
-      // max(chosen, now) — so storing the raw value made the banner read
-      // "from 1:00 pm" over stops arriving at 10:00 pm, and the CLAIMED night
-      // was then relinked from 13:00. The night someone made an account to
-      // keep came back with different times than the one they were looking at.
-      const startsAt = new Date(Math.max(Date.parse(t.whenISO), Date.now()));
+      // 🧨 CLAMP TO [now, now + 7d], the same window the server applies
+      // (lib/plan-preview.ts). Both ends matter. At 22:00 "Today" resolves to
+      // 13:00 client-side while the server plans from max(chosen, now), so an
+      // unclamped lower bound made the banner read "from 1:00 pm" over stops
+      // arriving at 10:00 pm — and the CLAIMED night was then relinked from
+      // 13:00, so the night someone made an account to keep came back with
+      // different times. The upper bound is the same disagreement from the
+      // other side: the date input has no max, so a date ten days out plans
+      // from now+7d on the server and read "from 8:00 pm" over stops arriving
+      // in the afternoon.
+      const nowMs = Date.now();
+      const startsAt = new Date(
+        Math.min(
+          Math.max(Date.parse(t.whenISO), nowMs),
+          nowMs + 7 * 24 * 60 * 60 * 1000,
+        ),
+      );
       setStartISO(startsAt.toISOString());
       setStartLabel(
         startsAt
@@ -379,17 +391,14 @@ export function AnonPlanFlow({
         !payload.stops.every(
           (s) =>
             s &&
-            typeof s.slug === "string" &&
+            // What the SCREEN needs...
             typeof s.name === "string" &&
             typeof s.rating === "number" &&
-            typeof s.dwellMins === "number" &&
-            // role + walkToNextMins are what isStop (lib/night-plan.ts)
-            // requires. Validating a narrower set here let a drifted shape
-            // render perfectly and then fail parseNightPlan on the canonical
-            // write -- which is swallowed -- so the night looked fine and was
-            // silently unclaimable.
-            typeof s.role === "string" &&
-            (s.walkToNextMins === null || typeof s.walkToNextMins === "number"),
+            // ...and what the canonical model needs, checked with the parser's
+            // own rule rather than a second copy of it. The slug doubles as
+            // the venueId on this side (the anon payload never carries
+            // catalogue ids), which is what isStop requires to be non-empty.
+            isStop({ ...s, venueId: s.slug }),
         )
       ) {
         window.localStorage.removeItem(ANON_RESULT_KEY);
@@ -420,10 +429,17 @@ export function AnonPlanFlow({
   const claimedElsewhere = useRef(false);
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (
-        (e.key === ANON_RESULT_KEY || e.key === ANON_PLAN_STASH_KEY) &&
-        e.newValue === null
-      ) {
+      // 🧨 THE CANONICAL SLOT ONLY. Watching ANON_RESULT_KEY as well looked
+      // like belt-and-braces and was a live conversion bug: only
+      // claimAnonPlan/clearAnonPlanKeys ever remove the canonical slot, but
+      // the result key is ALSO removed by ordinary TTL and shape eviction. So
+      // leaving /plan open in one tab and opening it in a second an hour later
+      // -- nobody signing in -- evicted the stale entry there, fired this
+      // event here, and permanently stopped the first tab persisting anything.
+      // Build, Save, sign up, and land on an empty setup form: exactly the
+      // moment the feature exists for. Same on any deploy that bumps
+      // ANON_RESULT_VERSION.
+      if (e.key === activePlanKey(null) && e.newValue === null) {
         claimedElsewhere.current = true;
       }
     };
