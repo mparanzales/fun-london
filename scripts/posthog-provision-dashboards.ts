@@ -29,7 +29,11 @@
 // then deleting the warning (see the manifest doc for the ordered steps).
 // ─────────────────────────────────────────────────────────────────────────
 
-import { ph, resolveProjectId, API_HOST } from "./posthog-api";
+import { ph, resolveProjectId, API_HOST, useWriteKey } from "./posthog-api";
+
+// This script WRITES, so it authenticates with the temporary provisioning key
+// rather than the permanent read-only one.
+useWriteKey();
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -151,7 +155,7 @@ const DASHBOARDS: Dashboard[] = [
       {
         name: "Anon previews and sign-ins, by day",
         description:
-          "Two raw daily counts and their ratio. ⚠️ signins_per_preview is NOT a conversion rate: it divides two independent daily event counts, so the sign-ins in a day need not be the same people as the previews in that day, and a sign-in that never previewed still lands in the numerator. Read it as a coarse trend line for spotting the effect of a copy or wall change, and use the funnel insights on this dashboard for real per-person conversion.",
+          "Two raw daily counts and their ratio. ⚠️ signins_per_preview_pct is NOT a conversion rate: it divides two independent daily counts, so the sign-ins in a day need not be the same people as the previews, and a sign-in that never previewed still lands in the numerator. Use it as a coarse trend line; use the funnels on this dashboard for real per-person conversion.",
         query: table(
           `SELECT toDate(timestamp) AS day,
                   countIf(event = 'plan_preview_built') AS previews,
@@ -270,7 +274,7 @@ const DASHBOARDS: Dashboard[] = [
   {
     name: "5. Generation failures and latency (PARTIAL)",
     description:
-      "⚠️ STILL PROXIES AS OF 2026-07-30 (dated on purpose so this text cannot silently become false). UPDATE: PR #189 is now MERGED, so main DOES emit plan_generate_failed, plan_preview_failed and duration_ms. The panels below were deliberately NOT switched over yet, because at the time of writing nobody had confirmed those events are actually ARRIVING (that needs the read key). So: a flat line here still means NOT YET MEASURED, not zero failures. To finish: run pnpm posthog:verify -- --all, confirm the three names have non-zero counts, THEN replace these panels with a failure trend broken down by reason and a latency panel on duration_ms, and only then delete this warning. Ordered steps in docs/FUNLDN_ANALYTICS_DASHBOARD_MANIFEST.md.",
+      "⚠️ PROXIES, not real failure data (as of 2026-07-30, dated so it cannot silently become false). PR #189 emits plan_generate_failed, plan_preview_failed and duration_ms, but none had arrived when these panels were built. A flat line means NOT YET MEASURED, not zero failures. Finish: verify non-zero counts, rebuild on reason + duration_ms, then delete this note. See FUNLDN_ANALYTICS_DASHBOARD_MANIFEST.md.",
     insights: [
       {
         name: "Soft failure: nights that did not fill",

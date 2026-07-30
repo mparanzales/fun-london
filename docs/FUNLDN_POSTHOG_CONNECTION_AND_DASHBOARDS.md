@@ -180,10 +180,25 @@ What has actually been checked, and what has not. Nothing below is inferred.
 | #189's ten new events | ⏳ **all zero, as expected** | Checked over 90 days on 2026-07-30: every one reads `never`. #189 merged the same afternoon, so production has not yet had traffic through those paths. This is why Dashboard 5 stays on proxies. Re-run `pnpm posthog:verify -- --all` in a few days. |
 | `sign_in_complete` | 🔎 **0 over 90 days** | Empirical confirmation of the bug #189 fixed: `SignInTracker` mounted before `AnalyticsGate`, so the event was dropped before PostHog initialised. It has literally never arrived. Expect it to start appearing now. |
 | Permanent read-only key | ✅ **created and working** | Created 2026-07-30. Never printed, never committed. |
-| Temporary provisioning key | ⏳ | **Never created**, so nothing to revoke. |
-| Dashboards provisioned | ⏳ | Not run. Dry run: 6 dashboards, 26 insights, offline. |
-| `fl_probe_manual` excluded | ✅ by construction | Every one of the 26 insights is scoped to explicit event names, so an unnamed event cannot be swept in. Pinned by `scripts/__tests__/posthog-dashboards.test.ts`. A project-level filter is still worth adding in the PostHog UI for ad-hoc exploration. |
+| Temporary provisioning key | ⏳ **created, used once, awaiting revocation** | Needs only `dashboard:write` + `insight:write` (see the note below on `POSTHOG_PROJECT_ID`). Delete it and prove it dead with `pnpm posthog:revoked-check`. |
+| Dashboards provisioned | ✅ **done 2026-07-30** | 6 dashboards, 26 insights. Verified **against the live project**, not from the script's own scoreboard: 4+4+5+4+5+4 = 26 insights, no duplicate dashboard names. |
+| Provisioning is idempotent | ✅ **proven** | Second run: `dashboards_created: 0`, `dashboards_reused: 6`, `insights_created: 0`, `insights_updated: 26`. |
+| `fl_probe_manual` excluded | ✅ **by construction, and confirmed live** (0 insights in the project reference it) | Every one of the 26 insights is scoped to explicit event names, so an unnamed event cannot be swept in. Pinned by `scripts/__tests__/posthog-dashboards.test.ts`. A project-level filter is still worth adding in the PostHog UI for ad-hoc exploration. |
 | Verifier covers every event | ✅ | It no longer keeps a hand-maintained list. It reads the `AnalyticsEvent` union from `lib/analytics.ts` at runtime and refuses to run if the parse returns an implausibly small list. The old hand-list had drifted to **13 of 33 events missing**. |
+
+### Two things learned provisioning for real
+
+**Pin `POSTHOG_PROJECT_ID` in `.env.local`.** Then the write key needs *only*
+`dashboard:write` + `insight:write` — no `project:read`, because nothing has to
+resolve the project. Tighter, and it is one fewer scope to remember to revoke.
+The value is not a credential, but it is not recorded in this repository either.
+
+**PostHog caps `description` at 400 characters** on insights and dashboards. Two
+descriptions were over and the first provisioning run failed part-way through,
+after creating two dashboards. That was harmless *because provisioning is
+idempotent*: shortening them and re-running reused what existed and continued.
+Had it not been idempotent, the recovery would have been manual cleanup. Keep
+long-form caveats in this repository's docs and keep the in-product text short.
 
 ## Known limitations
 
@@ -203,6 +218,10 @@ What has actually been checked, and what has not. Nothing below is inferred.
   reporting.** No production event was deleted to make this true.
 - **Access scope:** dashboards are visible to the PostHog project's members. There
   is no per-dashboard sharing configured and no public link is created.
+- **The read-only key cannot LIST dashboards** (`dashboard:read` was not granted,
+  and is not needed by `pnpm posthog:verify`). If you later want to audit
+  dashboards through the API with the permanent key, add `dashboard:read` to it.
+  Scopes can be edited on an existing key; it does not need recreating.
 - **Every count is a floor.** All capture is behind the opt-out consent gate, so
   ratios are usable and absolute volumes are not.
 

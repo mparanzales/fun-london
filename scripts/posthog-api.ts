@@ -30,7 +30,36 @@ export const API_HOST = (
   process.env.POSTHOG_API_HOST ?? "https://eu.posthog.com"
 ).replace(/\/$/, "");
 
+// Which key this process should use.
+//
+// 🧨 TWO KEYS EXIST FOR A REASON, so the code has to actually honour it. The
+// docs described a permanent READ-ONLY key and a temporary WRITE key, and the
+// client read only the first, which meant provisioning would have quietly
+// authenticated as the read-only key and 403'd. Worse, the reverse mistake
+// (reads running on the write key) would have worked, hiding the fact that the
+// read key was over-scoped.
+//
+// Default is read. The provisioning script opts in explicitly.
+let keyMode: "read" | "write" = "read";
+
+/** Called once, at the top of a script that needs to WRITE. */
+export function useWriteKey(): void {
+  keyMode = "write";
+}
+
 export function requireKey(): string {
+  if (keyMode === "write") {
+    const write = process.env.POSTHOG_PROVISIONING_API_KEY;
+    if (write) return checkedKey(write, "POSTHOG_PROVISIONING_API_KEY");
+    console.error(
+      "POSTHOG_PROVISIONING_API_KEY is not set, and this command WRITES.\n" +
+        "Create a temporary key with dashboard:write + insight:write, run this\n" +
+        "once, then delete it and prove it dead with `pnpm posthog:revoked-check`.\n" +
+        "Refusing to fall back to the read-only key: that would fail with a\n" +
+        "403 halfway through and leave the six dashboards half-created.",
+    );
+    process.exit(1);
+  }
   const key = process.env.POSTHOG_PERSONAL_API_KEY;
   if (!key) {
     console.error(
@@ -43,10 +72,14 @@ export function requireKey(): string {
     );
     process.exit(1);
   }
+  return checkedKey(key, "POSTHOG_PERSONAL_API_KEY");
+}
+
+function checkedKey(key: string, varName: string): string {
   if (key.startsWith("phc_")) {
     console.error(
-      "That is the PROJECT key (phc_), which is write-only: it can send\n" +
-        "events but cannot read them back. A personal API key (phx_) is\n" +
+      `${varName} holds the PROJECT key (phc_), which is write-only: it can\n` +
+        "send events but cannot read them back. A personal API key (phx_) is\n" +
         "what these scripts need.",
     );
     process.exit(1);
