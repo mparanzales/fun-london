@@ -44,6 +44,8 @@ function stubWindow() {
   localStore = new Map<string, string>();
   const sessionStore = new Map<string, string>();
   vi.stubGlobal("window", {
+    // A production host: initAnalytics refuses to send from anywhere else.
+    location: { hostname: "www.funldn.com" },
     innerWidth: 375,
     localStorage: {
       getItem: (k: string) => localStore.get(k) ?? null,

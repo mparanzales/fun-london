@@ -215,6 +215,8 @@ describe("load-bearing init options are pinned, not defended by a comment", () =
       },
     }));
     vi.stubGlobal("window", {
+      // A production host: initAnalytics refuses to send from anywhere else.
+      location: { hostname: "www.funldn.com" },
       innerWidth: 375,
       localStorage: {
         getItem: () => null,
@@ -347,6 +349,8 @@ describe("the persisted first-touch URL is scrubbed before init reads it", () =>
       },
     }));
     vi.stubGlobal("window", {
+      // A production host: initAnalytics refuses to send from anywhere else.
+      location: { hostname: "www.funldn.com" },
       innerWidth: 375,
       localStorage: {
         getItem: (k: string) => store.get(k) ?? null,
@@ -386,6 +390,8 @@ describe("it is wired into posthog.init", () => {
       },
     }));
     vi.stubGlobal("window", {
+      // A production host: initAnalytics refuses to send from anywhere else.
+      location: { hostname: "www.funldn.com" },
       innerWidth: 375,
       localStorage: {
         getItem: () => null,
@@ -414,5 +420,44 @@ describe("it is wired into posthog.init", () => {
     );
     expect(JSON.stringify(cleaned)).not.toContain(CODE);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("the OTHER vendor gets the same treatment", () => {
+  // 🧨 track() fans out to TWO analytics providers, and every protection in
+  // this file was aimed at one of them. <Analytics /> from @vercel/analytics
+  // auto-tracks pageviews with the full URL, so /plan/together?room=CODE
+  // shipped the bearer credential to Vercel in the clear while PostHog's copy
+  // was being carefully scrubbed.
+
+  it("redacts a room code out of a pageview URL", async () => {
+    const { redactRoomCodesInString } = await import("@/lib/analytics");
+    const out = redactRoomCodesInString(
+      `https://www.funldn.com/plan/together?room=${CODE}`,
+    );
+    expect(out).not.toContain(CODE);
+    expect(out).toContain("/plan/together"); // the useful part survives
+  });
+
+  it("is actually wired into the mounted <Analytics />", async () => {
+    // Asserting the redactor works proves nothing if nobody calls it. This is
+    // the wiring, which is the half that has been missing before.
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    // Comments stripped FIRST. The JSX comment above the mount quotes both
+    // `<Analytics />` and `beforeSend` while explaining the fix, so a raw scan
+    // matches the documentation and stays green after the prop is deleted.
+    // Verified by removing the prop and watching this go red.
+    const gate = readFileSync(
+      fileURLToPath(
+        new URL("../../components/analytics-gate.tsx", import.meta.url),
+      ),
+      "utf8",
+    )
+      .replace(/^\s*\/\/.*$/gm, "")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(gate).toMatch(/<Analytics[\s\S]{0,200}beforeSend/);
+    expect(gate).toContain("redactRoomCodesInString");
   });
 });

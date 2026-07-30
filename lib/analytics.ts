@@ -219,6 +219,9 @@ const CONSENT_KEY = "fl.consent.v1"; // "granted" | "denied"
 // no-ops until then — e.g. before the gate mounts, or when no key is configured.
 let posthogReady = false;
 
+// One-shot, so a gate that remounts does not spam the console.
+let envGateAnnounced = false;
+
 function analyticsAllowed(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -226,6 +229,51 @@ function analyticsAllowed(): boolean {
   } catch {
     return true;
   }
+}
+
+// ── Which deployments may talk to the production PostHog project ────────
+//
+// 🧨 THE PROBLEM. There is exactly ONE PostHog project, and its key is a
+// NEXT_PUBLIC_ var, so every surface that has the env var configured ships it
+// to the browser: the local dev server, every Vercel PREVIEW deployment, and
+// production alike. Everything they do — a dev reloading a page forty times, a
+// preview build being clicked through during review, an automated smoke test —
+// lands in the same funnels the product decisions are read from. Dashboard
+// numbers built on that are not measuring users.
+//
+// AN ALLOWLIST OF RUNTIME HOSTNAMES, deliberately, on both counts:
+//
+//   • ALLOWLIST, not a denylist of localhost/*.vercel.app. A denylist has to
+//     predict every non-production origin that will ever exist (preview alias
+//     domains, a LAN IP for phone testing, 127.0.0.1, a tunnel host, a future
+//     branch domain). Miss one and it silently pollutes production. The failure
+//     direction here is the safe one: an origin nobody listed sends nothing.
+//
+//   • RUNTIME HOSTNAME, not NEXT_PUBLIC_VERCEL_ENV and not SITE_URL. Those are
+//     configuration, and configuration is exactly what is wrong on a preview:
+//     a project-wide NEXT_PUBLIC_SITE_URL is inherited by preview builds, so it
+//     reads "www.funldn.com" on a deployment that is not it. What the browser
+//     is actually pointed at cannot be misconfigured into lying.
+//
+// Adding a production domain means editing this set. That is a real cost, and
+// it is the right way round: the mistake it forces is "analytics went quiet on
+// a new domain", which the dashboards show immediately, rather than "preview
+// traffic has been in the conversion funnel for a month", which they never do.
+const PRODUCTION_HOSTS = new Set(["funldn.com", "www.funldn.com"]);
+
+// Escape hatch for deliberately exercising the pipeline from a dev server —
+// verifying an event actually arrives, which is otherwise impossible without
+// shipping to production. Opt-in per environment file, never committed as "1".
+const FORCE_ENABLE = "NEXT_PUBLIC_ANALYTICS_FORCE_ENABLE";
+
+export function analyticsEnvironmentAllowed(): boolean {
+  if (typeof window === "undefined") return false;
+  if (process.env.NEXT_PUBLIC_ANALYTICS_FORCE_ENABLE === "1") return true;
+  // Optional chaining is not defensive noise: this runs inside initAnalytics,
+  // which must never throw into the provider tree, and a `window` without a
+  // `location` is exactly what a test double or an embedded webview gives you.
+  // Undefined is not in the set, so the answer is "no" — the safe direction.
+  return PRODUCTION_HOSTS.has(window.location?.hostname);
 }
 
 // ── Common properties ───────────────────────────────────────────────────
@@ -389,7 +437,7 @@ const ROOM_PARAM_RE = /((?:[?&]|%3f|%26)room(?:=|%3d))[^&#"'\s;%\\]*/gi;
 const NESTED_URL_PARAM_RE =
   /((?:[?&]|%3f|%26)(?:return|returnto|next|redirect|redirect_uri|redirect_to)(?:=|%3d))[^&#"'\s;]*/gi;
 
-function redactRoomCodesInString(value: string): string {
+export function redactRoomCodesInString(value: string): string {
   return value
     .replace(NESTED_URL_PARAM_RE, "$1redacted")
     .replace(ROOM_PARAM_RE, "$1redacted");
@@ -519,65 +567,128 @@ export function initAnalytics(): void {
   if (posthogReady || typeof window === "undefined") return;
   const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
   if (!key) return;
+  // Dev and preview never reach the production project unless asked to. Note
+  // this drops the queue: without it, 20 events captured before the gate
+  // mounted would sit in memory waiting for an init that is never coming.
+  if (!analyticsEnvironmentAllowed()) {
+    pendingEvents = [];
+    pendingIdentify = null;
+    // Say so ONCE, or the next person to wonder why their event is missing
+    // repeats the whole 2026-07-29 "PostHog is broken" investigation. Safe to
+    // use console here for the reason that matters: this branch is the one
+    // where PostHog was never initialised, so its console patch cannot exist
+    // to pick the line up. (Do NOT reason from `logs.captureConsoleLogs: false`
+    // — see the note at that option: it does not override remote config.)
+    if (!envGateAnnounced) {
+      envGateAnnounced = true;
+      console.info(
+        `[analytics] disabled on ${window.location?.hostname ?? "this host"}: not a production host. Set ${FORCE_ENABLE}=1 to send anyway.`,
+      );
+    }
+    return;
+  }
+  // The mirror image, and the more dangerous silence of the two: a preview
+  // build with the hatch left on is otherwise indistinguishable from
+  // production, since the only other signal is on the disabled branch above.
+  if (
+    process.env.NEXT_PUBLIC_ANALYTICS_FORCE_ENABLE === "1" &&
+    !PRODUCTION_HOSTS.has(window.location?.hostname)
+  ) {
+    console.warn(
+      `[analytics] SENDING TO PRODUCTION POSTHOG from ${window.location?.hostname ?? "this host"} because ${FORCE_ENABLE}=1.`,
+    );
+  }
   scrubPersistedInitialUrl(key);
-  posthog.init(key, {
-    api_host:
-      process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
-    person_profiles: "identified_only", // no anon person profiles → cheaper, less PII
-    persistence: "localStorage", // cookieless — matches the consent-banner copy
-    capture_pageview: true, // "app open" / page views
-    autocapture: true, // broad capture: clicks, inputs, etc.
-    disable_session_recording: true, // explicit: no screen recordings
-    // 🧨 A Plan Together room code is a BEARER SECRET and it lives in the URL
-    // (/plan/together?room=CODE). PostHog attaches $current_url (and referrer /
-    // pathname) to EVERY captured event, including autocaptured clicks, so
-    // without this hook a code lifted from the analytics feed would be a
-    // working key to a live room, defeating the membership check.
-    //
-    // ⚠️ SCOPE, stated precisely because the old comment overstated it:
-    // sanitize_properties runs on the CAPTURE path only. posthog-js has other
-    // request paths that never touch it, and two of them carry the raw page
-    // URL. They are shut off below rather than left to a hook that cannot see
-    // them.
-    sanitize_properties: stripRoomCodes,
-    // 🧨 OFF because these send the raw URL on paths sanitize_properties never
-    // sees, and BOTH are switched on by the PostHog project's REMOTE CONFIG,
-    // so nothing in this repository would otherwise say they are running. That
-    // is exactly how the $heatmap_data leak got in.
-    //
-    //   logs           -> POSTs to /i/v1/logs with url.full = location.href
-    //                     verbatim, on its own transport. No kill switch other
-    //                     than this option.
-    //   dead clicks    -> captures $el_text, and the lobby renders the BARE
-    //                     room code as text. A bare code has no "room=" prefix,
-    //                     so no redaction pattern can ever match it.
-    logs: { captureConsoleLogs: false },
-    capture_dead_clicks: false,
-    // 🧨 HEATMAPS OFF. This is the one that was actually ENABLED: the project's
-    // remote config returns "heatmaps": true, and nothing in this product uses
-    // them. $heatmap_data is an object KEYED BY THE PAGE URL, which is how a
-    // room code shipped in a key while every value in the payload was clean.
-    // Turning the feature off removes the whole category rather than relying on
-    // the redactor to keep winning.
-    capture_heatmaps: false,
-    loaded: (ph) => {
-      if (!analyticsAllowed()) {
-        ph.opt_out_capturing();
-        pendingEvents = []; // declined: never send what was queued
-        return;
-      }
-      if (pendingIdentify) {
-        try {
-          ph.identify(pendingIdentify);
-        } catch {
-          // Never let analytics throw into product code.
+  // Wrapped for the same reason every other posthog call in this file is: this
+  // runs in AnalyticsGate's effect, mounted inside AuthedProviders around the
+  // whole app, so an SDK throw here would unmount the tree to the nearest
+  // boundary. It was the one unguarded call in a file whose stated invariant is
+  // that analytics must never throw into product code.
+  try {
+    posthog.init(key, {
+      api_host:
+        process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
+      person_profiles: "identified_only", // no anon person profiles → cheaper, less PII
+      persistence: "localStorage", // cookieless — matches the consent-banner copy
+      capture_pageview: true, // "app open" / page views
+      autocapture: true, // broad capture: clicks, inputs, etc.
+      disable_session_recording: true, // explicit: no screen recordings
+      // 🧨 A Plan Together room code is a BEARER SECRET and it lives in the URL
+      // (/plan/together?room=CODE). PostHog attaches $current_url (and referrer /
+      // pathname) to EVERY captured event, including autocaptured clicks, so
+      // without this hook a code lifted from the analytics feed would be a
+      // working key to a live room, defeating the membership check.
+      //
+      // ⚠️ SCOPE, stated precisely because the old comment overstated it:
+      // sanitize_properties runs on the CAPTURE path only. posthog-js has other
+      // request paths that never touch it, and two of them carry the raw page
+      // URL. They are shut off below rather than left to a hook that cannot see
+      // them.
+      sanitize_properties: stripRoomCodes,
+      // 🧨 OFF because these send the raw URL on paths sanitize_properties never
+      // sees, and BOTH can be switched on by the PostHog project's REMOTE CONFIG,
+      // so nothing in this repository would otherwise say they are running. That
+      // is exactly how the $heatmap_data leak got in.
+      //
+      //   logs           -> POSTs to /i/v1/logs with url.full = location.href
+      //                     verbatim, on its own transport.
+      //   dead clicks    -> captures $el_text, and the lobby renders the BARE
+      //                     room code as text. A bare code has no "room=" prefix,
+      //                     so no redaction pattern can ever match it.
+      //
+      // ⚠️ THESE TWO LINES ARE NOT EQUALLY STRONG, and an earlier version of this
+      // comment claimed they were ("no kill switch other than this option"). They
+      // are not, in posthog-js 1.407.3:
+      //
+      //   capture_dead_clicks — a real override. dead-clicks-autocapture.js
+      //     returns the client value whenever it is a boolean, so `false` wins
+      //     over remote config. Same for capture_heatmaps (heatmaps.js:117).
+      //
+      //   logs.captureConsoleLogs — NOT an override. posthog-logs.js reads the
+      //     client value once in its constructor, and then onRemoteConfig looks
+      //     at `result.config.logs.captureConsoleLogs` ONLY: a remote `true`
+      //     enables console capture no matter what is written here. There is no
+      //     client-side kill switch. This line documents intent; the thing that
+      //     actually holds is the PROJECT SETTING, verified against
+      //     GET https://eu.i.posthog.com/array/<key>/config, which returned
+      //     `"logs":{"captureConsoleLogs":false}` on 2026-07-30. That is a remote
+      //     value someone can flip in the PostHog UI without touching this repo,
+      //     so it is a standing dependency, not a fix.
+      logs: { captureConsoleLogs: false },
+      capture_dead_clicks: false,
+      // 🧨 HEATMAPS OFF. This is the one that was actually ENABLED, and still is:
+      // the project's remote config returned "heatmaps": true again on
+      // 2026-07-30, and nothing in this product uses them. $heatmap_data is an
+      // object KEYED BY THE PAGE URL, which is how a room code shipped in a key
+      // while every value in the payload was clean. Turning the feature off
+      // removes the whole category rather than relying on the redactor to keep
+      // winning — and unlike the logs option above, this one genuinely overrides
+      // the remote value, so this line is what is holding.
+      capture_heatmaps: false,
+      loaded: (ph) => {
+        if (!analyticsAllowed()) {
+          ph.opt_out_capturing();
+          pendingEvents = []; // declined: never send what was queued
+          return;
         }
-      }
-      // Identify FIRST, then flush, so queued events land on the identified
-      // person rather than an anonymous distinct_id that has to be merged.
-      flushPendingEvents();
-    },
-  });
+        if (pendingIdentify) {
+          try {
+            ph.identify(pendingIdentify);
+          } catch {
+            // Never let analytics throw into product code.
+          }
+        }
+        // Identify FIRST, then flush, so queued events land on the identified
+        // person rather than an anonymous distinct_id that has to be merged.
+        flushPendingEvents();
+      },
+    });
+  } catch {
+    // Analytics is dead for this document. The app is not.
+    pendingEvents = [];
+    pendingIdentify = null;
+    return;
+  }
   posthogReady = true;
 }
 

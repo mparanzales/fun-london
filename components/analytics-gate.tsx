@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import { setAnalyticsConsent } from "@/lib/analytics";
+import { setAnalyticsConsent, redactRoomCodesInString } from "@/lib/analytics";
 
 const CONSENT_KEY = "fl.consent.v1";
 
@@ -41,7 +41,19 @@ export function AnalyticsGate() {
 
   return on ? (
     <>
-      <Analytics />
+      {/*
+        🧨 THE OTHER HALF OF track()'s FAN-OUT. Everything else in this change
+        is about keeping a room code out of PostHog, but <Analytics /> is a
+        SECOND vendor and it auto-tracks pageviews with the full URL, so
+        /plan/together?room=CODE shipped the bearer credential to Vercel in the
+        clear. `beforeSend` is the only redaction hook it offers, and returning
+        the event with a cleaned `url` is the documented way to use it.
+        Returning null instead would drop the pageview entirely, which costs
+        real analytics to fix a leak that redaction already closes.
+      */}
+      <Analytics
+        beforeSend={(e) => ({ ...e, url: redactRoomCodesInString(e.url) })}
+      />
       <SpeedInsights />
     </>
   ) : null;
