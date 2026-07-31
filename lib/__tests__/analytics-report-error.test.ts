@@ -51,6 +51,8 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   const store = new Map<string, string>();
   vi.stubGlobal("window", {
+    // A production host: initAnalytics refuses to send from anywhere else.
+    location: { hostname: "www.funldn.com" },
     localStorage: {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => void store.set(k, v),

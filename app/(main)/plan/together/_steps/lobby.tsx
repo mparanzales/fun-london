@@ -68,7 +68,11 @@ export function Lobby({
         <span className="text-[11px] font-bold text-muted-fg uppercase tracking-wider">
           Room
         </span>
-        <span className="text-2xl font-extrabold tracking-[0.3em] text-primary">
+        {/* ph-no-capture: the room code is a BEARER CREDENTIAL. PostHog's
+            autocapture reads element text, and a BARE code has no "room="
+            prefix, so no redaction pattern can match it. This class makes
+            posthog skip the element and its subtree entirely. */}
+        <span className="ph-no-capture text-2xl font-extrabold tracking-[0.3em] text-primary">
           {room.code}
         </span>
       </div>
