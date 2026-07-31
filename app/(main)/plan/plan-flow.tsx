@@ -1174,20 +1174,24 @@ export function PlanFlow({
     // computed.alternatives, so this single path serves both.
     const alts = alternatives[i] ?? [];
     if (alts.length === 0) return;
-    setSwaps((prev) => {
-      // Positions 0..len-1: 0 = original venue, 1..len-1 = alternatives.
-      const len = alts.length + 1;
-      const pos = ((((prev[i] ?? -1) + 1 + dir) % len) + len) % len;
-      const idx = pos - 1; // −1 = back to the original
-      const next = { ...prev };
-      if (idx < 0) delete next[i];
-      else next[i] = idx;
-      // Record where we came FROM, so Undo restores this exact arrangement
-      // rather than guessing. Pushed inside the updater so it cannot capture a
-      // stale `swaps` when two replacements land in the same tick.
-      setUndoStack((stack) => [...stack, prev]);
-      return next;
-    });
+    // 🧨 COMPUTED HERE, NOT INSIDE A setSwaps UPDATER. The first version
+    // pushed the undo entry from inside the updater, on the reasoning that it
+    // could not then capture a stale `swaps`. But a state updater must be
+    // pure: StrictMode double-invokes it (this repo enables it), so every
+    // replacement recorded TWO undo entries and the first tap of Undo appeared
+    // to do nothing. Each replacement is its own click and therefore its own
+    // render, so reading `swaps` from the closure is correct.
+    const prev = swaps;
+    // Positions 0..len-1: 0 = original venue, 1..len-1 = alternatives.
+    const len = alts.length + 1;
+    const pos = ((((prev[i] ?? -1) + 1 + dir) % len) + len) % len;
+    const idx = pos - 1; // −1 = back to the original
+    const next = { ...prev };
+    if (idx < 0) delete next[i];
+    else next[i] = idx;
+    setSwaps(next);
+    // Where we came FROM, so Undo restores this exact arrangement.
+    setUndoStack((stack) => [...stack, prev]);
     setSaveState("idle");
     // `method` is passed in by the caller, never derived from `dir`: a LEFT
     // swipe and the Change button's default argument both produce dir === 1.
