@@ -339,7 +339,7 @@ export function PlanFlow({
     // none of those fields.
     plan: NightPlan | null;
   } | null>(null);
-  // Previous `swaps` states, newest last. One entry per replacement, so Undo
+  // Previous `edited` states, newest last. One entry per replacement, so Undo
   // walks back through them rather than only reverting the last one — a user
   // who taps Change four times and dislikes the third needs more than a single
   // step back, and cycling forward until it wraps is not the same thing.
@@ -535,11 +535,16 @@ export function PlanFlow({
       // list was built with, so the two cannot disagree.
       //
       // 🧨 Tested with `withinWalkOfAll` against the ADJACENT stops — the same
-      // predicate, and the same neighbours, the list itself was built with.
-      // The first version used withinWalkOfAny over every other stop, which is
-      // strictly looser, so the one venue added here by hand could have been
-      // the single option that broke the walk. A second copy of a rule that
-      // disagrees with the first is how this whole defect started.
+      // predicate the list itself was built with. An earlier version used the
+      // looser withinWalkOfAny over every other stop, so the one venue added
+      // here by hand could have been the single option that broke the walk.
+      //
+      // The neighbours are NOT identical to the list's, and deliberately so:
+      // `alternativesFor` self-anchors a stop that has none, this does not. On
+      // a one-stop night that makes the check vacuous and the original always
+      // reachable — which is the point. Copying the self-anchor in here would
+      // measure the original against the venue that REPLACED it, so a stop
+      // that had drifted could never be put back. Do not "restore parity".
       return lists.map((list, i) => {
         const original = baseStops[i]?.venue;
         if (!original || original.id === forStops[i]?.venue.id) return list;
