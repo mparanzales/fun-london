@@ -17,12 +17,12 @@ import * as dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { tidyText } from "@/lib/text";
 import { sizedImageUrl } from "@/lib/img";
+import { computePlan, planRationale, type Plan } from "@/lib/plan-engine";
 import {
-  computePlan,
-  planRationale,
-  type Plan,
-  type PlanVibe,
-} from "@/lib/plan-engine";
+  briefForWeek,
+  upcomingFriday19,
+  fmtLondonTime,
+} from "@/lib/digest-night";
 import type { Venue, VenueType, PriceTier, TimeOfDay } from "@/lib/types";
 
 dotenv.config({ path: ".env.local" });
@@ -278,64 +278,6 @@ function rowToVenue(r: PlanRow): Venue {
   } as Venue;
 }
 
-// Rotate the brief by ISO week so each digest draws a different night, and
-// two sends in the same week draw the same one (idempotent re-runs).
-const NIGHT_AREAS = [
-  "Soho",
-  "Shoreditch",
-  "Fitzrovia",
-  "Covent Garden",
-  "Islington",
-  "Camden",
-  "Borough",
-  "Notting Hill",
-];
-const NIGHT_VIBES: PlanVibe[] = ["Chill", "Lively", "Unique", "Fancy"];
-
-function isoWeek(d: Date): number {
-  const t = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
-  );
-  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
-  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return Math.ceil(((t.getTime() - y0.getTime()) / 86400000 + 1) / 7);
-}
-
-// A Date whose Europe/London wall clock reads `hour`:00 on the given day.
-// Works across GMT/BST without hardcoding an offset.
-function londonAt(y: number, m: number, d: number, hour: number): Date {
-  const guess = new Date(Date.UTC(y, m, d, hour));
-  const wall = Number(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Europe/London",
-      hour: "numeric",
-      hour12: false,
-    }).format(guess),
-  );
-  return new Date(guess.getTime() + (hour - wall) * 3600000);
-}
-
-function upcomingFriday19(): Date {
-  const now = new Date();
-  const day = now.getUTCDay();
-  const add = (5 - day + 7) % 7 || 7; // next Friday, never today
-  const f = new Date(now.getTime() + add * 86400000);
-  return londonAt(f.getUTCFullYear(), f.getUTCMonth(), f.getUTCDate(), 19);
-}
-
-function fmtLondonTime(d: Date): string {
-  // Assembled from parts: Intl's joined string carries a narrow no-break
-  // space before the meridiem, which has no place in an email.
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).formatToParts(d);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("hour")}:${get("minute")} ${get("dayPeriod").toUpperCase()}`;
-}
-
 async function weeklyNight(): Promise<Plan | null> {
   try {
     const PAGE = 1000;
@@ -355,13 +297,10 @@ async function weeklyNight(): Promise<Plan | null> {
       rows.push(...page);
       if (page.length < PAGE) break;
     }
-    const week = isoWeek(new Date());
+    const brief = briefForWeek(new Date());
     const plan = computePlan(rows.map(rowToVenue), {
-      area: {
-        kind: "neighbourhood",
-        name: NIGHT_AREAS[week % NIGHT_AREAS.length],
-      },
-      vibe: NIGHT_VIBES[week % NIGHT_VIBES.length],
+      area: { kind: "neighbourhood", name: brief.area },
+      vibe: brief.vibe,
       budget: "Any",
       daypart: "evening",
       when: upcomingFriday19(),
@@ -380,6 +319,20 @@ async function weeklyNight(): Promise<Plan | null> {
 // Shares lib/text.ts with the website, so a title reads the same in the inbox
 // as it does on the page: mojibake repair + the no-dashes brand rule. Quotes
 // are escaped because several values land inside HTML attributes.
+// URLs: escape for an HTML attribute WITHOUT running the prose tidier.
+// tidyText replaces a dash with ", ", and a space injected into an href is an
+// unrecoverable broken link. Everything the digest links to is ASCII today,
+// so this is a guard rather than a bug fix, but it costs nothing and the
+// failure would be invisible until a subscriber clicked.
+function escAttr(u: string): string {
+  return (u ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function esc(s: string): string {
   return tidyText(s ?? "")
     .replace(/&/g, "&amp;")
@@ -448,7 +401,7 @@ function nightStop(
     </td>
     <td valign="top" style="padding:2px 0 22px 4px;">
       <div style="${FONT}font-size:10px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:${VIOLET_PALE};">${ROLE_LABEL[step.role] ?? step.role}${arrive}</div>
-      <a href="${SITE_URL}/venue/${esc(v.slug)}" style="${FONT}color:#ffffff;font-weight:800;font-size:17px;line-height:1.3;text-decoration:none;">${esc(v.name)}</a>
+      <a href="${SITE_URL}/venue/${escAttr(v.slug)}" style="${FONT}color:#ffffff;font-weight:800;font-size:17px;line-height:1.3;text-decoration:none;">${esc(v.name)}</a>
       <div style="${FONT}color:${NIGHT_MUTED};font-size:12px;margin-top:2px;">${esc(v.neighbourhood)} &middot; ${esc(v.type)} &middot; ${esc(v.price)}</div>
       <div style="${FONT}color:${NIGHT_FG};font-size:13px;font-style:italic;margin-top:4px;">${esc(v.vibe)}</div>${
         step.walkToNextMins != null && !last
@@ -457,7 +410,7 @@ function nightStop(
       }
     </td>
     <td width="72" valign="top" align="right" style="padding-bottom:22px;">
-      <img src="${esc(sizedImageUrl(v.imgUrl, 144))}" width="60" height="60" alt="${esc(v.name)}"
+      <img src="${escAttr(sizedImageUrl(v.imgUrl, 144))}" width="60" height="60" alt="${esc(v.name)}"
         style="border-radius:12px;object-fit:cover;display:block;">
     </td>
   </tr>`;
@@ -526,8 +479,8 @@ function grid(cells: GridCell[]): string {
 
 function venueCell(v: VenueLite): GridCell {
   return {
-    href: `${SITE_URL}/venue/${esc(v.slug)}`,
-    img: esc(sizedImageUrl(v.img_url, 512)),
+    href: `${SITE_URL}/venue/${escAttr(v.slug)}`,
+    img: escAttr(sizedImageUrl(v.img_url, 512)),
     title: esc(v.name),
     metaStrong: esc(v.neighbourhood),
     meta: esc(v.type),
@@ -536,8 +489,8 @@ function venueCell(v: VenueLite): GridCell {
 
 function eventCell(e: EventLite): GridCell {
   return {
-    href: `${SITE_URL}/event/${esc(e.id)}`,
-    img: esc(sizedImageUrl(e.img_url, 512)),
+    href: `${SITE_URL}/event/${escAttr(e.id)}`,
+    img: escAttr(sizedImageUrl(e.img_url, 512)),
     title: esc(e.name),
     metaStrong: esc(e.venue_name),
     meta: `${esc(e.date_label)} &middot; ${esc(e.time_label)}`,
@@ -548,8 +501,8 @@ function heroEvent(e: EventLite): string {
   // The lead story: full-width photography, then the same information order
   // as the app card. Outlook cannot object-fit; alt is the WebP fallback.
   return `<div style="padding-top:16px;">
-    <a href="${SITE_URL}/event/${esc(e.id)}" style="text-decoration:none;">
-      <img src="${esc(sizedImageUrl(e.img_url, 800))}" width="392" height="240"
+    <a href="${SITE_URL}/event/${escAttr(e.id)}" style="text-decoration:none;">
+      <img src="${escAttr(sizedImageUrl(e.img_url, 800))}" width="392" height="240"
         alt="${esc(e.name)}"
         style="width:100%;height:240px;border-radius:16px;object-fit:cover;display:block;">
       <div style="${FONT}color:${INK};font-weight:800;font-size:20px;line-height:1.25;margin-top:12px;">${esc(e.name)}</div>
