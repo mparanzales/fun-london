@@ -284,6 +284,52 @@ describe("🧨 sequential replacements stay walkable", () => {
     }
   });
 
+  it("🧨 a MIDDLE stop must be walkable with BOTH neighbours, not either one", () => {
+    // The rule this pins is `withinWalkOfAll` over the ADJACENT stops. The
+    // any-rule looks equivalent and is not, and the first version of this
+    // suite could not tell them apart: its fixture scored every candidate
+    // identically, so pool order always surfaced the near one and the far one
+    // was never reached. Here the far candidate is deliberately the BEST
+    // ranked, so an any-rule would put it at the head of the list.
+    //
+    // s0 --1.2km-- s1 --1.2km-- s2, and a candidate 0.1km from s0, i.e. 2.3km
+    // from s2. Near one neighbour, far from the other.
+    const KM = 1 / 111;
+    const s0 = at("s0", "Restaurant", HERE);
+    const s1 = at("s1", "Bar", { lat: HERE.lat + 1.2 * KM, lng: HERE.lng });
+    const s2 = at("s2", "Live Music", {
+      lat: HERE.lat + 2.4 * KM,
+      lng: HERE.lng,
+    });
+    const nearS0Only = at(
+      "near-s0-only",
+      "Bar",
+      { lat: HERE.lat + 0.1 * KM, lng: HERE.lng },
+      { rating: 5 }, // outranks everything, so ordering cannot hide it
+    );
+    const betweenBoth = at(
+      "between-both",
+      "Bar",
+      { lat: HERE.lat + 1.3 * KM, lng: HERE.lng },
+      { rating: 3 },
+    );
+    const stops = [
+      { venue: s0, role: "Start" as const },
+      { venue: s1, role: "Then" as const },
+      { venue: s2, role: "Finish" as const },
+    ];
+    const [, forMiddle] = alternativesFor(
+      [s0, s1, s2, nearS0Only, betweenBoth],
+      stops,
+      EVENING,
+    );
+    // Walkable with both ends: offered.
+    expect(forMiddle.map((v) => v.id)).toContain("between-both");
+    // Walkable with only ONE end, and top-ranked: must still be refused.
+    // Under the any-rule this is `forMiddle[0]`.
+    expect(forMiddle.map((v) => v.id)).not.toContain("near-s0-only");
+  });
+
   it("options are measured against the CURRENT neighbours, not the originals", () => {
     // Directly: move stop 0 far along the chain, then ask for stop 1's
     // options. Every one must be walkable with stop 0 WHERE IT NOW IS.

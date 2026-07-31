@@ -57,7 +57,16 @@ night by construction rather than by remembering to clear.
   falls back to "anywhere", because the picker renders an unresolvable name as
   a highlighted chip labelled the literal word "Area", with no drill-down.
 - **Per-stop swaps are available on EVERY night**, restored and reopened
-  included. They used to be hidden on all of them, because
+  included, and their options are recomputed against the night's CURRENT
+  stops and bounded by BOTH adjacent ones. Anchoring them to the night's
+  original stops kept the option ORDER stable and let the route come apart:
+  stop 2's candidates were measured against the original stop 1, so once stop
+  1 had moved the pair could end up twice the walk radius apart. A weaker
+  "near any other stop" rule failed the same way more slowly — a three-stop
+  night walks itself apart one legal hop at a time, which a generated test
+  caught at the seventh replacement. Coherence was chosen over stable
+  ordering, so a position in the list is not stable across taps; the cycle
+  tracks which venues have been SHOWN instead, so every option is reachable. They used to be hidden on all of them, because
   `computed.alternatives[i]` is relative to a *generated* plan's other stops,
   so offering it against a night the engine did not just produce could build a
   route nobody can walk. That was engine work, not adapter work, and it is

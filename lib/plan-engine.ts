@@ -49,7 +49,10 @@ export type Plan = {
   // arrival time (Stage 4.2), independent of how the pool was widened.
   poolStage: "area" | "budget" | "all";
   poolSize: number; // candidates considered after widening
-  // Per-stop swap options: alternatives[i] is the ranked list of other venues
+  // Per-stop swap options for a freshly generated plan. The solo UI no longer
+  // reads this — it derives its own from the stops on screen via
+  // alternativesFor — but the group surface still does. alternatives[i] is the
+  // ranked list of other venues
   // that fit stop i's role, stay within a short walk of the OTHER stops (so a
   // swap keeps the night walkable) and are open at that stop's arrival. Powers
   // "don't like this one — change it" without rebuilding the whole plan.
