@@ -29,10 +29,12 @@
 // lib/supabase/client, lib/signals, or lib/queries (pinned by
 // plan-preview-guard).
 //
-// The built night SURVIVES sign-in: on result render it is stashed in
-// localStorage (not sessionStorage — magic links open in a new tab), and
-// PlanFlow hydrates it through its openSaved path after the OAuth
-// round-trip.
+// The built night SURVIVES sign-in: on result render it is written to the
+// owner-scoped active-plan store under the anonymous slot (localStorage, not
+// sessionStorage — magic links open in a new tab), and PlanFlow claims it
+// into the new account via claimAnonPlan() after the OAuth round-trip. The
+// legacy one-shot stash is still written alongside for anyone mid-flight
+// across this deploy; PlanFlow reads it from its own separate effect.
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -52,6 +54,8 @@ import {
 import { AuthWall } from "@/components/auth-wall";
 import {
   WhenPicker,
+  WHENS,
+  maxDateFrom,
   AreaPicker,
   Group,
   toISODate,
@@ -72,17 +76,52 @@ import {
   planFailReasonFromServer,
   throwFailReason,
 } from "@/lib/analytics-reasons";
+import { isStop, parseNightPlan, NIGHT_PLAN_VERSION } from "@/lib/night-plan";
+import {
+  writeActivePlan,
+  activePlanKey,
+  ACTIVE_PLAN_PREFIX,
+  ANON_PLAN_STASH_KEY,
+  ANON_RESULT_KEY,
+} from "@/lib/active-plan";
+import type { PlanRole } from "@/lib/plan-engine";
+// Static vocabulary only: a neighbourhood -> region map and the region list,
+// with a type-only import of Venue. No queries, no client. On the allowlist
+// and covered by the transitive check in plan-preview-guard.
+import { REGIONS } from "@/lib/regions";
 
-export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
+// The signed-out night, kept so it survives a refresh and a tap through to a
+// venue page and back.
+//
+// 🧨 THIS IS A SEPARATE KEY FROM THE CANONICAL STORE, ON PURPOSE. A NightPlan
+// holds venue ids and slugs only — that is what keeps it on the safe side of
+// the anon moat — and this component has NO catalogue to hydrate them against,
+// so it cannot rebuild a screen from one. What it can keep is the payload it
+// was already handed: AnonPlanPayload is card-level by construction
+// (lib/plan-preview-shape.ts, pinned by plan-preview-guard), it is already in
+// this browser, and putting it in this browser's own localStorage moves it
+// nowhere new.
+//
+// Without this, every stop card on the result screen was a trap: the screen
+// invites a tap, and coming back landed on an empty setup form. Rebuilding
+// then spends one of the 12 builds an hour the server allows, so a visitor who
+// checked all three stops could be shown the sign-up wall for running out of
+// builds we made them spend.
+// One hour, matching the legacy stash rather than the canonical 12h: this
+// payload carries server-computed `isOpenNow` booleans, and a stale "open now"
+// is a wrong claim about a real business.
+const ANON_RESULT_TTL_MS = 60 * 60 * 1000;
+// Bump when the stored shape changes in a way an old reader cannot tolerate.
+const ANON_RESULT_VERSION = 1;
 
-// Mirrors plan-flow's resolveTiming (plan-flow.tsx:72) for the anon brief —
+// Mirrors plan-flow's resolveTiming for the anon brief —
 // deliberately NOT imported from there: plan-flow drags in the supabase
 // browser client and the signals module, which this file must never bundle.
 function resolveAnonTiming(
   choice: WhenChoice,
   dateStr: string,
   timeStr: string,
-): { daypart: "day" | "evening"; whenISO: string } {
+): { daypart: "day" | "evening"; whenISO: string; tracksClock: boolean } {
   const now = new Date();
   const at = (h: number) => {
     const d = new Date(now);
@@ -94,11 +133,15 @@ function resolveAnonTiming(
     return {
       daypart: "day",
       whenISO: (isDayNow ? now : at(13)).toISOString(),
+      // See plan-flow's resolveTiming: "Today" during the day IS the live
+      // clock, and classing it as a fixed time re-pins it to a stale stamp.
+      tracksClock: isDayNow,
     };
   if (choice === "evening")
     return {
       daypart: "evening",
       whenISO: (isDayNow ? at(19) : now).toISOString(),
+      tracksClock: !isDayNow,
     };
   if (choice === "custom") {
     const d = new Date(`${dateStr || toISODate(now)}T${timeStr || "20:00"}`);
@@ -107,9 +150,14 @@ function resolveAnonTiming(
     return {
       daypart: h >= 5 && h < 17 ? "day" : "evening",
       whenISO: when.toISOString(),
+      tracksClock: false,
     };
   }
-  return { daypart: isDayNow ? "day" : "evening", whenISO: now.toISOString() };
+  return {
+    daypart: isDayNow ? "day" : "evening",
+    whenISO: now.toISOString(),
+    tracksClock: true,
+  };
 }
 
 // "3h 40m" from total minutes, no degenerate separators.
@@ -155,6 +203,12 @@ export function AnonPlanFlow({
   const [building, setBuilding] = useState(false);
   const [result, setResult] = useState<AnonPlanPayload | null>(null);
   const [startLabel, setStartLabel] = useState<string | null>(null);
+  // The night's start as an ISO string. Kept beside the formatted label so the
+  // canonical NightPlan can carry a real `startsAt`: it was hardcoded null
+  // while this component was holding the value and rendering arrival times
+  // from it, so signing in to KEEP a night handed back a version with its
+  // clock stripped.
+  const [startISO, setStartISO] = useState<string | null>(null);
   const [failure, setFailure] = useState<"limited" | "soft" | null>(null);
   // One free reshuffle (offset 1); the 2nd raises the wall. The engine is
   // deterministic per offset, so a walled FIRST reshuffle would protect
@@ -228,8 +282,39 @@ export function AnonPlanFlow({
     if (res.ok) {
       setResult(res);
       if (offset === 1) setReshuffles(1);
+      // 🧨 CLAMP TO [now, now + 7d], the same window the server applies
+      // (lib/plan-preview.ts). Both ends matter. At 22:00 "Today" resolves to
+      // 13:00 client-side while the server plans from max(chosen, now), so an
+      // unclamped lower bound made the banner read "from 1:00 pm" over stops
+      // arriving at 10:00 pm — and the CLAIMED night was then relinked from
+      // 13:00, so the night someone made an account to keep came back with
+      // different times. The upper bound is the same disagreement from the
+      // other side: the date input has no max, so a date ten days out plans
+      // from now+7d on the server and read "from 8:00 pm" over stops arriving
+      // in the afternoon.
+      const nowMs = Date.now();
+      const startsAt = new Date(
+        Math.min(
+          Math.max(Date.parse(t.whenISO), nowMs),
+          nowMs + 7 * 24 * 60 * 60 * 1000,
+        ),
+      );
+      // 🧨 If the clamp RAISED the start to now, the night effectively starts
+      // now however the resolver labelled it — "Today" picked after 17:00
+      // resolves to 1pm, and max(…, now) then moves it forward. Pinning that
+      // stamp would re-date a day out into the evening on restore, so the
+      // clamp's verdict wins over the resolver's.
+      //
+      // RAISED only (`>`), never merely "changed". The clamp has an upper
+      // bound too — now + 7d — and hitting THAT means a deliberately
+      // scheduled night was pulled back, which is still a fixed time. `!==`
+      // would have flipped it to live and let a plan for next Saturday drift
+      // onto the current clock.
+      tracksClockRef.current =
+        t.tracksClock || startsAt.getTime() > Date.parse(t.whenISO);
+      setStartISO(startsAt.toISOString());
       setStartLabel(
-        new Date(t.whenISO)
+        startsAt
           .toLocaleTimeString("en-GB", {
             hour: "numeric",
             minute: "2-digit",
@@ -284,9 +369,208 @@ export function AnonPlanFlow({
   // Stash the built night so it survives the sign-in round-trip. Written on
   // RESULT RENDER (not on Save tap) — the sign-up band and the reshuffle
   // wall are also doors into /sign-in and must be covered too.
+  // Freshness is anchored to the ORIGINAL build, not to the last write. Keyed
+  // on the payload's identity so a restore -> re-persist cycle carries its
+  // stamp forward instead of restarting the hour on every tap-through.
+  const resultStamp = useRef<{ src: AnonPlanPayload | null; at: number }>({
+    src: null,
+    at: 0,
+  });
+  const rehydrated = useRef(false);
+  useEffect(() => {
+    if (rehydrated.current) return;
+    rehydrated.current = true;
+    try {
+      const raw = window.localStorage.getItem(ANON_RESULT_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as {
+        v?: number;
+        payload?: AnonPlanPayload;
+        startLabel?: string | null;
+        startISO?: string | null;
+        savedAt?: number;
+        brief?: {
+          vibe?: (typeof VIBES)[number]["v"];
+          budget?: (typeof BUDGETS)[number];
+          areaSel?: AreaSel;
+          when?: WhenChoice;
+          customDate?: string;
+          customTime?: string;
+          reshuffles?: number;
+          tracksClock?: boolean;
+        };
+      };
+      // 🧨 `age >= 0` as well as `<= TTL`. A device clock nudged forward makes
+      // a plain "now - savedAt > TTL" test false forever, so the night becomes
+      // immortal rather than expiring. Same clause as isFresh().
+      const savedAt = saved?.savedAt;
+      const age = typeof savedAt === "number" ? Date.now() - savedAt : NaN;
+      if (
+        saved?.v !== ANON_RESULT_VERSION ||
+        typeof savedAt !== "number" ||
+        !(age >= 0 && age <= ANON_RESULT_TTL_MS)
+      ) {
+        window.localStorage.removeItem(ANON_RESULT_KEY);
+        return;
+      }
+      const brief = saved.brief;
+      const payload = saved.payload;
+      // 🧨 VALIDATE THE STOPS, not just that some exist. The result screen does
+      // `s.rating.toFixed(1)`, so one shapeless stop — a truncated write, a
+      // field renamed across a deploy — throws during render on EVERY mount
+      // for the next hour, turning signed-out /plan into a permanent error
+      // screen for that browser. Anything we cannot render, we drop.
+      if (
+        !Array.isArray(payload?.stops) ||
+        payload.stops.length === 0 ||
+        !payload.stops.every(
+          (s) =>
+            s &&
+            // What the SCREEN needs...
+            typeof s.name === "string" &&
+            typeof s.rating === "number" &&
+            // ...and what the canonical model needs, checked with the parser's
+            // own rule rather than a second copy of it. The slug doubles as
+            // the venueId on this side (the anon payload never carries
+            // catalogue ids), which is what isStop requires to be non-empty.
+            isStop({ ...s, venueId: s.slug }),
+        )
+      ) {
+        window.localStorage.removeItem(ANON_RESULT_KEY);
+        return;
+      }
+      resultStamp.current = { src: payload, at: savedAt };
+      // Restore the brief BEFORE the night, so a reshuffle straight off the
+      // restored screen generates against what the visitor actually asked
+      // for. Each field is applied only if present, so an entry written
+      // before `brief` existed degrades to today's behaviour rather than
+      // wiping the controls.
+      // 🧨 VALIDATED against the same closed sets the controls offer. The
+      // stops go through the parser's own isStop; the brief was the one part
+      // of this entry taken on trust — and a bad vibe or budget makes
+      // parseNightPlan return null on the canonical write below, which is
+      // swallowed, so the sign-in claim finds nothing while the screen looks
+      // perfect. The conversion dies silently.
+      if (brief) {
+        if (VIBES.some((v) => v.v === brief.vibe)) setVibe(brief.vibe!);
+        if (BUDGETS.includes(brief.budget as (typeof BUDGETS)[number]))
+          setBudget(brief.budget!);
+        // The VARIANT payload too, not just the kind: a corrupt
+        // {kind:"region", region:"Mars"} is refused server-side, so every
+        // Build then dead-ends on "That didn't build" until the user happens
+        // to re-pick an area.
+        const a = brief.areaSel;
+        if (
+          // No "nearYou": this surface mounts AreaPicker without that option,
+          // so no anon build can emit it, and restoring one leaves the Where
+          // group with nothing highlighted while builds fall through to
+          // Anywhere.
+          a?.kind === "anywhere" ||
+          (a?.kind === "region" && REGIONS.includes(a.region)) ||
+          (a?.kind === "neighbourhood" &&
+            typeof a.name === "string" &&
+            a.name.length > 0)
+        )
+          setAreaSel(a);
+        if (WHENS.some((w) => w.v === brief.when)) setWhen(brief.when!);
+        if (typeof brief.customDate === "string")
+          setCustomDate(brief.customDate);
+        if (typeof brief.customTime === "string")
+          setCustomTime(brief.customTime);
+        if (typeof brief.reshuffles === "number")
+          setReshuffles(brief.reshuffles);
+      }
+      setResult(payload);
+      setStartLabel(
+        typeof saved.startLabel === "string" ? saved.startLabel : null,
+      );
+      // Same reasoning as the brief: unparseable here makes parseNightPlan
+      // reject the canonical write below, which is swallowed, so the claim
+      // finds nothing while the screen looks perfect.
+      // Entries written before the field existed still parse (the version is
+      // unchanged), so fall back to the brief's own `when`. Defaulting to
+      // false would pin a pre-deploy "Right now" night to its build stamp —
+      // the exact under-detection this replaced — for the TTL window after
+      // deploy.
+      tracksClockRef.current =
+        typeof brief?.tracksClock === "boolean"
+          ? brief.tracksClock
+          : brief?.when === "now";
+      setStartISO(
+        typeof saved.startISO === "string" &&
+          Number.isFinite(Date.parse(saved.startISO))
+          ? saved.startISO
+          : null,
+      );
+      setStep("result");
+    } catch {
+      /* corrupt or private mode — fall through to the setup screen */
+    }
+    // Mount only. The reshuffle counter IS restored, reversing an earlier
+    // note here: dropping it turned a tap through to a venue and back into a
+    // free extra reshuffle, which is a loophole rather than a kindness. The
+    // server-side limit (lib/plan-preview-action.ts) is the real perimeter
+    // either way, so the client counter should describe the same reality
+    // rather than a friendlier one.
+  }, []);
+
+  // 🧨 STOP WRITING ONCE ANOTHER TAB HAS CLAIMED THIS NIGHT. Magic links open
+  // in a NEW TAB — that is why this flow uses localStorage at all (see the
+  // header) — so the claim happens in tab B while tab A is still mounted with
+  // the night in React state and no idea anyone signed in. One Reshuffle or
+  // Edit -> Build in tab A rewrote all three anon keys, signed in, undoing the
+  // clear. The `storage` event fires in the OTHER tabs on exactly that write,
+  // so tab A learns about the claim without importing an auth hook here (which
+  // the moat allowlist forbids, correctly).
+  // One-way once a claim is seen: this tab's night now belongs to an account,
+  // and re-arming the anon keys from here would hand it to whoever is next on
+  // this browser. NOT reset by a new Build — see the listener for why that was
+  // a mistake.
+  // Whether the night on screen tracks the live clock, as decided by
+  // resolveAnonTiming. A ref, not state: the persist effect reads it and
+  // nothing renders from it.
+  const tracksClockRef = useRef(true);
+  const claimedElsewhere = useRef(false);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      // 🧨 WATCH THE CLAIM, NOT A REMOVAL. Every earlier version of this
+      // keyed on a key being DELETED, and deletion is ambiguous: ordinary TTL
+      // eviction, a version bump and sign-out all delete anon keys without
+      // anyone signing in, and each silently disabled persistence in this tab.
+      // Resetting the latch on the next Build then reopened the original hole,
+      // because magic links open a NEW TAB, so a stale anon tab is the normal
+      // case rather than an exotic one.
+      //
+      // A claim is unambiguous and needs no marker key: claimAnonPlan WRITES
+      // the owner's slot immediately after clearing the anon one. An
+      // owner-scoped key appearing WITH A VALUE means "somebody signed in on
+      // this browser and took the night", and nothing else produces it —
+      // sign-out and eviction only ever remove, and this flow writes the anon
+      // slot only. All three owner-scoped writers (the claim, activate's
+      // re-persist, the persist effect) run inside a signed-in PlanFlow, so
+      // every one of them means this tab is stale.
+      //
+      // Accepted cost of being one-way: after sign-in then sign-out, a tab
+      // still mounted from before stops persisting until it is refreshed. It
+      // under-persists rather than handing a night to the next person, and a
+      // reload clears it.
+      if (
+        e.key &&
+        e.key.startsWith(ACTIVE_PLAN_PREFIX) &&
+        e.key !== activePlanKey(null) &&
+        e.newValue !== null
+      ) {
+        claimedElsewhere.current = true;
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const stashed = useRef("");
   useEffect(() => {
     if (!result) return;
+    if (claimedElsewhere.current) return;
     try {
       const json = JSON.stringify({
         stops: result.stops.map((s) => ({
@@ -301,12 +585,106 @@ export function AnonPlanFlow({
         savedAt: Date.now(),
       });
       if (json !== stashed.current) {
+        // Legacy one-shot stash. Still written so a user who is mid-flight
+        // across this deploy — anon night stashed by the OLD code, sign-in
+        // completed against the NEW code — is not stranded. The reader in
+        // plan-flow keeps handling it. Remove once a deploy cycle has passed.
         window.localStorage.setItem(ANON_PLAN_STASH_KEY, json);
+        // The screen itself, so a tap through to a venue and back returns to
+        // this night rather than to an empty form.
+        if (resultStamp.current.src !== result) {
+          resultStamp.current = { src: result, at: Date.now() };
+        }
+        window.localStorage.setItem(
+          ANON_RESULT_KEY,
+          JSON.stringify({
+            v: ANON_RESULT_VERSION,
+            payload: result,
+            startLabel,
+            startISO,
+            savedAt: resultStamp.current.at,
+            // 🧨 THE BRIEF, not just the night. AnonPlanPayload carries no
+            // vibe, budget, area or when — it is a render payload — so
+            // restoring only the night left all four controls on their mount
+            // defaults. A visitor who asked for Fancy / £ / Soho / Tonight,
+            // tapped a stop to look at it and came back then got a
+            // Chill / ££ / anywhere night from Reshuffle, with nothing on
+            // screen admitting the brief had changed. It also poisoned the
+            // canonical write below, so the CLAIMED night and the saved row's
+            // prose described a brief the user never chose — the exact
+            // failure the comment further down says it fixed, reintroduced
+            // through the restore door.
+            brief: {
+              vibe,
+              budget,
+              areaSel,
+              when,
+              customDate,
+              customTime,
+              reshuffles,
+              // Whether the start is a snapshot of the clock. Without this the
+              // restored night is re-classified from the raw `when` choice,
+              // which under-detects: "Today" during the day and "Tonight" in
+              // the evening are both live too.
+              tracksClock: tracksClockRef.current,
+            },
+          }),
+        );
+        // Canonical store. WRITE-ONLY on this side, deliberately: this is
+        // what claimAnonPlan() hands to the account after sign-in, and
+        // nothing here reads it back. Anon-side refresh restore is NOT
+        // possible from a NightPlan alone — it holds ids and slugs only (the
+        // moat), and this component has no catalogue to hydrate them
+        // against; it would need a second server round-trip. Out of scope
+        // here rather than half-built.
+        const np = parseNightPlan({
+          version: NIGHT_PLAN_VERSION,
+          // The ORIGINAL build, not this write. plan-flow goes to real
+          // trouble (genStampRef) to keep freshness anchored to generation;
+          // re-stamping here made the two halves of one feature disagree.
+          createdAt: new Date(resultStamp.current.at).toISOString(),
+          // The anon payload carries no title (it has no vibe control to
+          // build the signed-in one from). Derive a plain one that keeps the
+          // "Day Out" / "Night" convention the daypart inference in
+          // fromSavedRow keys on, so a claimed night reads consistently.
+          title: `${result.area} ${result.daypart === "day" ? "Day Out" : "Night"}`,
+          area: result.area,
+          // The REAL brief the visitor set. An earlier draft hardcoded
+          // Chill/££ with a comment claiming this flow had no such controls —
+          // it has both, right here in this component, so a visitor who chose
+          // Fancy/£ would have signed in and found their brief silently
+          // reverted, and their next reshuffle generating against it.
+          vibe,
+          budget,
+          daypart:
+            result.daypart === "day" ? ("day" as const) : ("evening" as const),
+          startsAt: startISO,
+          stops: result.stops.map((s) => ({
+            // The anon payload is slug-keyed by design (it never carries
+            // catalogue ids), so the slug is the id here too. hydrateStops
+            // resolves by id first and falls back to slug, so this works
+            // either way once it reaches a catalogue.
+            venueId: s.slug,
+            slug: s.slug,
+            role: s.role as PlanRole,
+            dwellMins: s.dwellMins,
+            walkToNextMins: s.walkToNextMins,
+          })),
+          tracksClock: tracksClockRef.current,
+          source: "anon" as const,
+          savedRowId: null,
+        });
+        if (np) writeActivePlan(null, np);
         stashed.current = json;
       }
     } catch {
       /* private mode — the night just won't survive sign-in */
     }
+    // `result` ONLY. vibe/budget are read here but must not re-trigger it:
+    // they describe the brief that PRODUCED this night, and re-stashing when
+    // the user moves a control without rebuilding would file the night under
+    // a brief that never generated it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
 
   const signInHref = "/sign-in?return=%2Fplan";
@@ -555,6 +933,7 @@ export function AnonPlanFlow({
           dateStr={customDate}
           timeStr={customTime}
           minDate={minDate}
+          maxDate={maxDateFrom(minDate)}
           onChange={(next) => {
             markSetupStarted("when");
             setWhen(next.choice);

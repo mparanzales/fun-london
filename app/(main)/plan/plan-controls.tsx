@@ -41,18 +41,28 @@ export function toISODate(d: Date): string {
  * The four When choices + a date/time picker for "Pick a day". Controlled: the
  * parent owns { choice, dateStr, timeStr } and maps it to its own timing model.
  * `dateStr` "" means "today"; `minDate` is the floor (no planning the past).
+ * The ceiling is 7 days out, because lib/plan-preview.ts clamps a requested
+ * start to now + 7d — without it the picker accepted a date three weeks away
+ * and quietly planned for next week, and a stored night beyond the freshness
+ * window was dropped on the next visit with no explanation.
  */
 export function WhenPicker({
   choice,
   dateStr,
   timeStr,
   minDate,
+  maxDate,
   onChange,
 }: {
   choice: WhenChoice;
   dateStr: string;
   timeStr: string;
   minDate: string;
+  /** Optional ceiling. Passed by the surface that has one — the anon flow's
+   *  server clamps to now + 7d — rather than imposed on every caller: Plan
+   *  Together and the signed-in solo flow run the engine locally and have no
+   *  such limit. */
+  maxDate?: string;
   onChange: (next: {
     choice: WhenChoice;
     dateStr: string;
@@ -86,6 +96,7 @@ export function WhenPicker({
             type="date"
             value={dateStr || minDate}
             min={minDate}
+            max={maxDate || undefined}
             onChange={(e) =>
               onChange({ choice, dateStr: e.target.value, timeStr })
             }
@@ -119,6 +130,16 @@ export type AreaSel =
 
 // Translate the UI selection into the engine's PlanArea. Anywhere + nearYou both
 // scope to anywhere (nearYou additionally passes a centre, handled by the caller).
+/** Seven days past `minDate`, matching the server's clamp. Empty in, empty
+ *  out: before mount there is no local date to count from. */
+export function maxDateFrom(minDate: string): string {
+  if (!minDate) return "";
+  const d = new Date(`${minDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  d.setDate(d.getDate() + 7);
+  return toISODate(d);
+}
+
 export function toPlanArea(sel: AreaSel): PlanArea {
   if (sel.kind === "region") return { kind: "region", region: sel.region };
   if (sel.kind === "neighbourhood")

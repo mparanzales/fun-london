@@ -90,10 +90,13 @@ export type SaveFailReason =
 // structural zero as a tracking bug:
 //   • no "update"        — the plans write is insert-only and there is no
 //                          UPDATE policy on the table.
-//   • no "restored_anon" — the Save button is unmounted in exactly the state a
-//                          restored anon stash creates, so the value could
-//                          never be produced. The `anon_origin` boolean on the
-//                          same events carries that information instead.
+//   • no "restored_anon" — a restored or claimed night IS savable (that is the
+//                          conversion path), so this would be a real state.
+//                          It is not a SaveMode because it is orthogonal to
+//                          the other four: a claimed night can also be a
+//                          duplicate or a resave after a swap. The
+//                          `plan_origin` dimension carries it, and
+//                          `anon_origin` carries the anon-specific half.
 export type SaveMode =
   "new" | "duplicate" | "resave_after_swap" | "resave_after_reshuffle";
 
@@ -155,6 +158,14 @@ export type AnalyticsEvent =
   | "plan_save" // user saved a generated plan to their account (funnel end)
   // The save split. "tapped" is intent, "succeeded" fires only after the
   // insert comes back clean, "failed" only after a real failed write.
+  // A restored/reopened night lost at least one stop because its venue is no
+  // longer in the catalogue (hidden, deleted, or re-slugged by an ingest run).
+  // The user still gets the surviving stops; this is how we find out it
+  // happened, since a night rendered short and silent looks fine.
+  // A night built signed-out was carried through sign-in and adopted by the
+  // new account. The conversion moment this whole transfer path exists for.
+  | "plan_anon_claimed"
+  | "plan_restored_partial"
   | "plan_save_tapped"
   | "plan_save_succeeded"
   | "plan_save_failed"
