@@ -292,9 +292,21 @@ describe("the purge is scheduled, bounded and privacy-conscious", () => {
         `purge script must not .${verb}() through PostgREST`,
       ).not.toMatch(new RegExp(`from\\([^)]+\\)[\\s\\S]{0,120}?\\.${verb}\\(`));
     }
-    // and the function owns BOTH sweeps
-    expect(M4_SQL).toContain("delete from public.plan_rooms");
-    expect(M4_SQL).toContain("delete from public.plan_room_join_attempts");
+    // ...and the FUNCTION owns every sweep, asserted against the migration that
+    // currently DEFINES it. 0005 does a `create or replace` on
+    // purge_expired_plan_rooms, so 0004's body is no longer what runs: pinning
+    // M4 here would have been pinning a superseded artifact, green forever
+    // regardless of what the live function does.
+    const M5_SQL = read("supabase/migrations/0005_create_room_throttle.sql")
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("--"))
+      .join("\n");
+    const purge = M5_SQL.slice(
+      M5_SQL.indexOf("function public.purge_expired_plan_rooms"),
+    );
+    expect(purge).toContain("delete from public.plan_rooms");
+    expect(purge).toContain("delete from public.plan_room_join_attempts");
+    expect(purge).toContain("delete from public.plan_room_create_attempts");
   });
 
   it("🧨 it never reads or logs a room code, topic, user id or email", () => {

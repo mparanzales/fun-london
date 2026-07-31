@@ -55,6 +55,18 @@ const sb = createClient(SUPABASE_URL, SERVICE, {
 const handle = (id: string) =>
   createHash("sha256").update(id).digest("hex").slice(0, 8);
 
+/**
+ * Every user-keyed throttle ledger the purge is responsible for.
+ *
+ * One list, so adding a third cannot leave the alarm watching two. These rows
+ * are keyed by USER, not by room, so no room deletion cascades them away and
+ * nothing else sweeps them.
+ */
+const LEDGERS = [
+  "plan_room_join_attempts",
+  "plan_room_create_attempts",
+] as const;
+
 async function main() {
   console.log(`Plan Together room purge${DRY_RUN ? " (dry run)" : ""}\n`);
 
@@ -63,7 +75,9 @@ async function main() {
   // anything — a silently no-op cron is how this project has lost weeks before.
   const before = await counts();
   console.log(
-    `rooms ${before.rooms} · members ${before.members} · throttle rows ${before.attempts}`,
+    `rooms ${before.rooms} · members ${before.members} · ` +
+      `join-throttle rows ${before.joinAttempts} · ` +
+      `create-throttle rows ${before.createAttempts ?? "n/a"}`,
   );
 
   // Mirrors the function's window purely to COUNT and to preview. Nothing is
@@ -82,18 +96,32 @@ async function main() {
   // The function returns a ROOM count, so a ledger sweep that silently stopped
   // working would print `throttle N -> N` and still exit 0. Count what should
   // go so the summary can be checked against what did.
-  const { count: staleLedger, error: ledgerErr } = await sb
-    .from("plan_room_join_attempts")
-    .select("*", { head: true, count: "exact" })
-    .lt("window_start", cutoff);
-  if (ledgerErr) {
-    // Swallowing this would make the FATAL below unreachable: a failed read
-    // returns a null count, which reads as "nothing was eligible".
-    console.error(
-      `could not count the throttle ledger: ${ledgerErr.code ?? "?"}`,
-    );
-    process.exit(1);
+  //
+  // 🧨 BOTH LEDGERS. 0005 added plan_room_create_attempts and taught the SQL to
+  // sweep it, but this alarm still watched only the join table -- so a
+  // create-ledger sweep that stopped working would have gone unnoticed
+  // indefinitely, which is the very failure the comment above describes.
+  const staleByLedger: Record<string, number> = {};
+  for (const ledger of LEDGERS) {
+    const { count, error } = await sb
+      .from(ledger)
+      .select("*", { head: true, count: "exact" })
+      .lt("window_start", cutoff);
+    if (error) {
+      // A ledger whose migration has not landed yet is not a failure; anything
+      // else is. Swallowing the rest would make the FATAL below unreachable,
+      // because a failed read returns a null count, which reads as "nothing
+      // was eligible".
+      if (error.code === UNDEFINED_TABLE) {
+        staleByLedger[ledger] = 0;
+        continue;
+      }
+      console.error(`could not count ${ledger}: ${error.code ?? "?"}`);
+      process.exit(1);
+    }
+    staleByLedger[ledger] = count ?? 0;
   }
+  const staleLedger = Object.values(staleByLedger).reduce((a, b) => a + b, 0);
   console.log(
     `\n${n} room(s) and ${staleLedger ?? 0} throttle row(s) are more than 7 days past their window.`,
   );
@@ -135,7 +163,12 @@ async function main() {
   if (after) {
     console.log(`rooms      ${before.rooms} -> ${after.rooms}`);
     console.log(`members    ${before.members} -> ${after.members}`);
-    console.log(`throttle   ${before.attempts} -> ${after.attempts}`);
+    // Reported per ledger. One combined "throttle" number would let a sweep
+    // that stopped working on ONE table hide inside the other's movement.
+    console.log(`join-thr   ${before.joinAttempts} -> ${after.joinAttempts}`);
+    console.log(
+      `create-thr ${before.createAttempts ?? "n/a"} -> ${after.createAttempts ?? "n/a"}`,
+    );
   } else {
     console.log("(post-purge counts unavailable; the purge itself succeeded)");
   }
@@ -154,26 +187,34 @@ async function main() {
     // Re-count the STALE rows rather than comparing totals: a join arriving
     // between the two counts would otherwise false-FATAL a nightly job, and a
     // noisy alert is an alert that gets muted.
-    const { count: stillStale, error: recountErr } = await sb
-      .from("plan_room_join_attempts")
-      .select("*", { head: true, count: "exact" })
-      .lt("window_start", cutoff);
-    if (recountErr) {
-      console.error(
-        `could not re-count the throttle ledger: ${recountErr.code ?? "?"}`,
-      );
-      process.exit(1);
+    const remaining: string[] = [];
+    for (const ledger of LEDGERS) {
+      const { count, error } = await sb
+        .from(ledger)
+        .select("*", { head: true, count: "exact" })
+        .lt("window_start", cutoff);
+      if (error) {
+        console.error(`could not re-count ${ledger}: ${error.code ?? "?"}`);
+        process.exit(1);
+      }
+      if ((count ?? 0) > 0) remaining.push(`${ledger}: ${count}`);
     }
-    if ((stillStale ?? 0) > 0) {
+    if (remaining.length) {
+      // Names WHICH ledger, so the next person does not have to guess which
+      // half of the sweep stopped working.
       console.error(
-        `\nFATAL: ${stillStale} throttle row(s) are still past the cutoff after the purge. ` +
-          `The sweep inside purge_expired_plan_rooms may have stopped working.`,
+        `\nFATAL: throttle rows are still past the cutoff after the purge ` +
+          `(${remaining.join("; ")}). The sweep inside ` +
+          `purge_expired_plan_rooms may have stopped working.`,
       );
       process.exit(1);
     }
   }
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Purge complete."}`);
 }
+
+/** PostgREST for "that relation does not exist in the schema cache". */
+const UNDEFINED_TABLE = "PGRST205";
 
 async function counts() {
   const one = async (table: string) => {
@@ -183,10 +224,34 @@ async function counts() {
     if (error) throw new Error(`${table}: ${error.code ?? "?"}`);
     return count ?? 0;
   };
+  // 🧨 A LEDGER THAT DOES NOT EXIST YET MUST NOT STOP THE PURGE. counts() runs
+  // BEFORE the purge RPC, and it threw on any missing table -- so merging this
+  // branch before 0005 is applied to a database would kill the 3am job on
+  // plan_room_create_attempts and rooms would simply never be purged. The
+  // retention obligation would lapse while the alert said something else.
+  //
+  // Deleting data is the job; counting it is the evidence. Absence is reported
+  // as null and called out loudly below, and the purge still runs.
+  const maybe = async (table: string) => {
+    try {
+      return await one(table);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes(UNDEFINED_TABLE)) {
+        console.warn(
+          `${table} does not exist on this database (migration not applied ` +
+            `yet). Counting skipped; the purge itself is unaffected.`,
+        );
+        return null;
+      }
+      throw e;
+    }
+  };
   return {
     rooms: await one("plan_rooms"),
     members: await one("plan_room_members"),
-    attempts: await one("plan_room_join_attempts"),
+    joinAttempts: await one("plan_room_join_attempts"),
+    createAttempts: await maybe("plan_room_create_attempts"),
   };
 }
 

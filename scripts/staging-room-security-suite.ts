@@ -380,9 +380,16 @@ async function main() {
         ? `error: ${anonAttemptsErr.code}`
         : `NO ERROR — anon still holds a table grant (${anonAttempts?.length ?? 0} rows)`,
     );
-    const { error: anonCreate } = await anon.rpc("create_plan_room", {
-      p_code: randomCode(),
-    });
+    // 🧨 NO ARGUMENT, and that is the fix rather than a tidy-up. This passed
+    // `p_code` and asserted 42501 (permission denied). 0005 DROPS that
+    // parameter, so the call now misses the function entirely and PostgREST
+    // answers PGRST202 ("could not find the function in the schema cache").
+    // The assertion would read that as "not 42501" and report that anon CAN
+    // execute create_plan_room — a false ALARM on a security gate, which
+    // costs as much trust as a false pass. Calling it the way the real client
+    // does tests the invariant that matters: anon cannot execute the function
+    // the app actually uses.
+    const { error: anonCreate } = await anon.rpc("create_plan_room");
     record(
       "AN-2",
       "anon",
@@ -656,7 +663,9 @@ async function main() {
         .select("user_id, joined_at")
         .eq("room_id", hoRoom.id)
         .order("joined_at", { ascending: true });
-      const order = (hoOrder ?? []).map((r) => (r as { user_id: string }).user_id);
+      const order = (hoOrder ?? []).map(
+        (r) => (r as { user_id: string }).user_id,
+      );
       const bBeforeC =
         order.indexOf(B.id) > -1 &&
         order.indexOf(C.id) > -1 &&
@@ -990,6 +999,44 @@ async function main() {
       trippedAt > 0
         ? `tripped at attempt ${trippedAt}`
         : "25 attempts, never tripped",
+    );
+
+    // ── CREATE THROTTLE (0005) ───────────────────────────────────────────
+    //
+    // 🧨 EXECUTED, not asserted about a .sql file. 0005's whole thesis is that
+    // join got a server-side throttle and create never did; shipping it with
+    // only string assertions over the migration text would have reproduced
+    // that same asymmetry one layer up — the SQL proven by inspection, the
+    // behaviour proven by nothing. This calls the real RPC over PostgREST,
+    // which is exactly the path the Upstash counter cannot see.
+    //
+    // Burns actor D for an hour, so it runs last alongside T-1. D is a fresh
+    // account per run, so the budget is always full when we start.
+    let createTrippedAt = -1;
+    for (let i = 1; i <= 14; i++) {
+      const { data: made, error } = await D.client
+        .rpc("create_plan_room")
+        .single<{ id: string }>();
+      // Keyed on the SQLSTATE, not the message. Everything else in this track
+      // keys on 53400, and a reworded `raise exception` would otherwise turn
+      // the one EXECUTED proof of this throttle into "never tripped".
+      if (error?.code === "53400") {
+        createTrippedAt = i;
+        break;
+      }
+      // Captured so CLEAN-1 actually verifies these rooms. Without it the
+      // claim "every temporary room removed" was broader than the check --
+      // they survived only via the auth.users cascade.
+      if (made?.id) roomIds.push(made.id);
+    }
+    record(
+      "T-2",
+      "throttle",
+      "direct RPC create is throttled SERVER-SIDE (bypassing the app limit)",
+      verdict(createTrippedAt === 11),
+      createTrippedAt > 0
+        ? `tripped at attempt ${createTrippedAt} (expected 11)`
+        : "14 attempts, never tripped",
     );
   } catch (e) {
     fatal = e instanceof Error ? e.message : String(e);

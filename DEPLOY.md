@@ -200,9 +200,9 @@ shipped. What is still absent:
 - **Automated publication** — `pnpm ingest:from-pending` is run by hand after a human
   approves candidates at `/admin/candidates`.
 - 🧨 **~~A migrations directory~~ — OUT OF DATE.** `supabase/migrations/` now exists and is
-  **not** optional. `0001_plan_rooms.sql` and `0004_server_side_room_codes.sql` create the
-  Plan Together room tables, their RLS, and the `revoke ... from anon` that keeps
-  signed-out callers off them. `supabase/schema.sql` does **not** contain those objects, so
+  **not** optional. `0001_plan_rooms.sql`, `0004_server_side_room_codes.sql` and
+  `0005_create_room_throttle.sql` create the Plan Together room tables, their RLS, and the
+  `revoke ... from anon` that keeps signed-out callers off them. `supabase/schema.sql` does **not** contain those objects, so
   a project bootstrapped from `schema.sql` alone comes up without them.
 
 **Order for a fresh project:** `schema.sql`, then `supabase/migrations/` in filename order,
@@ -213,6 +213,12 @@ Realtime policies in `supabase/manual/` (`0002`, then `0003`), then
 **For an existing project, applying `0004` is a required step BEFORE the room-hygiene
 client merges** — it changes `create_plan_room`'s signature and the new client calls it with
 no argument. Full order in `docs/FUNLDN_GROUP_SECURITY_IMPLEMENTATION.md` §3 step 5a.
+
+**`0005` drops that signature entirely** (`create_plan_room()` takes no parameter) and adds
+the create-side throttle. The deployed client already calls it with no argument, so no client
+change is coupled to it — but apply the file as ONE transaction: it drops the old signature
+and creates the new one, and a half-applied file leaves two signatures, which makes every
+`create_plan_room` call ambiguous (PostgREST HTTP 300).
 
 ---
 
