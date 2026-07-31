@@ -60,7 +60,7 @@ night by construction rather than by remembering to clear.
   saved one. `computed.alternatives[i]` is relative to a *generated* plan's
   other stops, so offering them against any night the engine did not just
   produce could build a route that is no longer walkable. Making that correct
-  is engine work, not adapter work. The gate is `!openedSaved`.
+  is engine work, not adapter work. The gate is whether that stop has alternatives.
 - **A restored night is not a reopened one.** Only `source === "saved"` is
   read-only; a restored generated or claimed night keeps Save and Try-another.
 

@@ -389,6 +389,14 @@ export function PlanFlow({
   // Whether the saved-plans list actually loaded. loadSavedPlans swallows its
   // error, so without this a failed load would make every save look like "new".
   const savedListLoadedRef = useRef(false);
+  // 🧨 The same fact as the ref above, in state, because the SAVE BUTTON now
+  // depends on it. `alreadySaved` is false while the list is in flight or
+  // after it errors, and a reopened saved night restores from localStorage
+  // instantly — so the button read "Save this night", enabled, on a night that
+  // was already saved. `plans` is insert-only with no delete UI, so that
+  // duplicate is permanent. The button is the only signal a reopened night is
+  // already saved, so it must not guess.
+  const [savedListLoaded, setSavedListLoaded] = useState(false);
 
   // Current time, set AFTER mount so the open-now plan filter can't cause an
   // SSR/client hydration mismatch: the server renders fail-open (when=undefined),
@@ -565,9 +573,11 @@ export function PlanFlow({
     if (error) {
       console.error("[plans] load failed:", error);
       savedListLoadedRef.current = false;
+      setSavedListLoaded(false);
       return;
     }
     savedListLoadedRef.current = true;
+    setSavedListLoaded(true);
     setSavedPlans((data as SavedPlanRow[]) ?? []);
   }, [authUserId]);
 
@@ -733,7 +743,19 @@ export function PlanFlow({
       // the whole night has already finished, drop the clock and keep the
       // stops. A night still IN PROGRESS keeps its times: the remaining stops
       // are the point.
-      const start = np.startsAt ? new Date(np.startsAt) : undefined;
+      // 🧨 `tracksClock` MEANS the stored start was a snapshot of the clock,
+      // not a time anybody chose (lib/night-plan.ts) — so re-anchor it to now
+      // rather than replaying it. Without this, a "Right now" night built at
+      // 13:00 and reopened at 16:00 read "arrive ~1:00 pm" on every card,
+      // three hours behind, in the boldest text on the screen. Safe only
+      // because the persist below no longer writes startsAt back: the
+      // re-timing stays on screen and never reaches disk, so it cannot drift
+      // the stored night forward and trip isFresh into deleting it.
+      const start = np.tracksClock
+        ? new Date()
+        : np.startsAt
+          ? new Date(np.startsAt)
+          : undefined;
       let steps = relinkSteps(stops, start);
       if (start) {
         const endsAt =
@@ -847,13 +869,15 @@ export function PlanFlow({
       );
       setStep("result");
 
-      // 🧨 A REOPENED SAVED ROW IS NOT PERSISTED HERE. The active slot holds
-      // the night you are WORKING on; a saved row is already durable in the
-      // database and one tap away in "Your saved nights". Storing it made the
-      // read-only state sticky: for the next 12 hours every visit to /plan
-      // landed on a night with no Save, no Try another and no per-stop
-      // Change, and the only way out was Edit -> Build. Glancing at a saved
-      // night should not take the surface hostage.
+      // 🧨 A REOPENED SAVED ROW *IS* PERSISTED, and that is a reversal. It
+      // was excluded because storing it made a night with no Save, no Try
+      // another and no per-stop Change land on every /plan visit for 12 hours
+      // — glancing at a saved night took the surface hostage. This branch
+      // removed the hostage part: a reopened night now has all three. What
+      // the exclusion cost instead was the edit, since every stop card is a
+      // Link to a venue page. So the occupancy is accepted deliberately: for
+      // 12 hours, /plan opens on the night you last looked at, which is the
+      // same promise every other restored night makes.
       // Re-persist from the HYDRATED venues, so an anon-origin night (whose
       // ids are slugs) is re-keyed to real catalogue ids, and so a night that
       // lost stops is stored in its relinked form rather than its stale one.
@@ -887,7 +911,13 @@ export function PlanFlow({
     const existingSig = existing?.stops.map((s) => s.venueId).join("|");
     const atRisk =
       !!existing &&
-      existing.source !== "saved" &&
+      // No `source !== "saved"` clause. It was a valid proxy for "this night
+      // exists elsewhere" only while a reopened saved row was never persisted.
+      // It is now, replacements included, so the clause silently skipped the
+      // guard for exactly the night with unsaved changes: reopen, replace a
+      // stop, Edit, tap another saved row, and the replacement was gone. The
+      // signature test below already answers it — an untouched reopened row
+      // matches a saved signature and is not at risk; an edited one does not.
       !savedPlans.some(
         (p) => p.steps.map((s) => s.venueId).join("|") === existingSig,
       );
@@ -897,8 +927,12 @@ export function PlanFlow({
     // what its own invisibility provokes. The card's two buttons are the only
     // way past it.
     if (atRisk) {
+      // Fire once per episode, not once per tap: the card renders above a long
+      // list, so re-tapping is common and would inflate the conflict rate.
+      if (!pendingSaved) {
+        track("plan_reopen_conflict", { stops: existing.stops.length });
+      }
       setPendingSaved(row);
-      track("plan_reopen_conflict", { stops: existing.stops.length });
       return;
     }
     setPendingSaved(null);
@@ -1856,7 +1890,7 @@ export function PlanFlow({
             />
           </button>
 
-          {/* 🧨 Save shows on a reopened saved row too. It was hidden because
+          {/* Save shows on a reopened saved row too. It was hidden because
               the plans write is insert-only, so re-saving means a duplicate
               row — but hiding the control is not a way to say that, and this
               branch made the night editable, so the user could replace a stop
@@ -1871,7 +1905,14 @@ export function PlanFlow({
             <button
               type="button"
               onClick={onSave}
-              disabled={saveState !== "idle" || alreadySaved}
+              disabled={
+                saveState !== "idle" ||
+                alreadySaved ||
+                // A reopened saved row before its list has loaded: we cannot
+                // yet tell "already saved" from "new", and guessing wrong
+                // writes a permanent duplicate.
+                (active?.source === "saved" && !savedListLoaded)
+              }
               className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold disabled:opacity-70"
             >
               {saveState === "saved" || alreadySaved ? (
