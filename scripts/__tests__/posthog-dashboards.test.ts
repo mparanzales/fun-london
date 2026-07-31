@@ -277,26 +277,46 @@ describe("every insight is scoped to real production traffic", () => {
     // from a host the dashboards silently ignore, so the funnels would read
     // zero while every other signal looked healthy.
     //
-    // ⚠️ CROSS-PR DEPENDENCY, stated rather than hidden. PRODUCTION_HOSTS is
-    // introduced by the analytics-gate PR, which merges BEFORE this one. On a
-    // main that does not have it yet there is nothing to compare against. That
-    // is a real ordering constraint, so this asserts the constant is either
-    // absent (gate not merged) or an exact match (gate merged) — and never the
-    // third case, which is the only dangerous one: present and DIFFERENT.
-    const analytics = readFileSync(
-      fileURLToPath(new URL("../../lib/analytics.ts", import.meta.url)),
-      "utf8",
-    );
-    expect(analytics.length).toBeGreaterThan(0); // positive control: file read
-    const decl = analytics.match(/PRODUCTION_HOSTS[^;]*;/)?.[0];
-    if (!decl) {
-      // Not merged yet. Record the fact rather than passing silently, so the
-      // reason this assertion is dormant is visible in the run.
-      expect(analytics).not.toContain("PRODUCTION_HOSTS");
-      return;
+    // This was DORMANT while the app-side gate sat in a different PR: with
+    // nothing to compare against, it took an early return. PR #192 is on main
+    // now, so the dormancy branch is gone and the constant is REQUIRED. A test
+    // that can silently decline to run is the failure this repo keeps paying
+    // for, and leaving the branch in "just in case" is how it becomes permanent.
+    //
+    // Searched across the plausible homes rather than one hardcoded path: the
+    // constant could reasonably have landed in analytics-keys.ts or the gate
+    // component, and pinning a single file would have made a MOVE look exactly
+    // like a deletion, silently.
+    const CANDIDATES = [
+      "lib/analytics.ts",
+      "lib/analytics-keys.ts",
+      "components/analytics-gate.tsx",
+    ];
+    let decl: string | undefined;
+    let foundIn = "";
+    for (const rel of CANDIDATES) {
+      const body = readFileSync(
+        fileURLToPath(new URL(`../../${rel}`, import.meta.url)),
+        "utf8",
+      );
+      const m = body.match(/PRODUCTION_HOSTS\s*=[^;]*;/)?.[0];
+      if (m) {
+        decl = m;
+        foundIn = rel;
+        break;
+      }
     }
-    const appHosts = [...decl.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-    expect(appHosts.length).toBeGreaterThan(0);
+    expect(
+      decl,
+      `PRODUCTION_HOSTS was not found in any of ${CANDIDATES.join(", ")}. ` +
+        "Either the app-side gate was removed (in which case dev and preview " +
+        "are reporting to production again) or it moved somewhere this test " +
+        "does not look. Both need a human.",
+    ).toBeTruthy();
+    expect(foundIn).toBeTruthy();
+
+    const appHosts = [...decl!.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(appHosts.length).toBeGreaterThan(0); // positive control
     expect([...dashHosts].sort()).toEqual([...appHosts].sort());
   });
 });
