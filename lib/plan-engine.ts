@@ -533,23 +533,17 @@ export function computePlan(
   // region / Anywhere pick reads as a real place ("a night around Shoreditch").
   const resolvedArea = chosen[0]?.venue.neighbourhood || scopeLabel(area);
 
-  // Per-stop swap options (Stage 4.x — "change this one"): for each stop, the
-  // best other venues that fit its role, stay within a short walk of the OTHER
-  // stops (so a swap keeps the night walkable) and are open at its arrival.
-  const chosenIds = new Set(chosen.map((c) => c.venue.id));
-  const maxRadius = Math.max(...radiusLadder);
-  const alternatives: Venue[][] = chosen.map((c, i) => {
-    const others = chosen.filter((_, j) => j !== i).map((x) => x.venue);
-    return pool
-      .filter(
-        (v) =>
-          !chosenIds.has(v.id) &&
-          matchRole(v, c.role) &&
-          (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
-          (others.length === 0 || minKmToChosen(v, others) <= maxRadius),
-      )
-      .sort((a, b) => scoreOf(b) - scoreOf(a))
-      .slice(0, 8);
+  // Per-stop swap options (Stage 4.x — "change this one"). Delegated so that
+  // the UI can compute the SAME options for a night the engine did not just
+  // produce — a restored or reopened one — instead of reusing this array,
+  // whose indices belong to these stops and no others.
+  const alternatives = alternativesFor(pool, chosen, {
+    vibe,
+    budget,
+    daypart,
+    when,
+    tasteScores,
+    maxRadiusKm: Math.max(...radiusLadder),
   });
 
   return {
@@ -563,6 +557,62 @@ export function computePlan(
     poolSize: pool.length,
     alternatives,
   };
+}
+
+/**
+ * The "change this one" options for a given set of stops.
+ *
+ * 🧨 WHY THIS IS EXPORTED, AND WHY THE UI MUST NOT REUSE `Plan.alternatives`.
+ * That array is indexed to the stops the engine returned. A restored, claimed
+ * or reopened night has DIFFERENT stops, so `alternatives[i]` there describes
+ * some other night's stop i — offering it would swap in a venue chosen for a
+ * walk that no longer exists, and could build a route nobody can walk. The
+ * previous release hid the control entirely rather than risk that; this makes
+ * the mismatch impossible instead, because the options are always derived from
+ * the stops actually on screen.
+ *
+ * `computePlan` calls this too, so the two paths cannot drift apart.
+ *
+ * The pool is the CALLER'S: `computePlan` passes its own area-scoped, possibly
+ * widened pool so its behaviour is unchanged, and the UI passes what it has.
+ * No budget filtering happens here — the engine's widest rung deliberately
+ * drops the budget constraint, and re-applying it would silently narrow it.
+ */
+export function alternativesFor(
+  pool: Venue[],
+  stops: { venue: Venue; role: PlanRole; arriveAt?: Date | null }[],
+  opts: {
+    vibe: PlanVibe;
+    budget: PlanBudget;
+    daypart: PlanDaypart;
+    when?: Date;
+    tasteScores?: Record<string, number> | null;
+    /** Defaults to the engine's widest walk radius. */
+    maxRadiusKm?: number;
+  },
+): Venue[][] {
+  const { vibe, daypart, when, tasteScores } = opts;
+  const maxRadius =
+    opts.maxRadiusKm ?? RADIUS_LADDER_KM[RADIUS_LADDER_KM.length - 1];
+  const scoreOf = (v: Venue) =>
+    vibeScore(v, vibe) +
+    (tasteScores ? PLAN_TASTE_WEIGHT * (tasteScores[v.id] ?? 0) : 0);
+  const chosenIds = new Set(stops.map((c) => c.venue.id));
+  return stops.map((c, i) => {
+    // Every OTHER stop, so a replacement stays within a short walk of the
+    // night it is joining rather than of the one it came from.
+    const others = stops.filter((_, j) => j !== i).map((x) => x.venue);
+    return pool
+      .filter(
+        (v) =>
+          !chosenIds.has(v.id) &&
+          roleMatchesForDaypart(v, c.role, daypart) &&
+          (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
+          (others.length === 0 || minKmToChosen(v, others) <= maxRadius),
+      )
+      .sort((a, b) => scoreOf(b) - scoreOf(a))
+      .slice(0, 8);
+  });
 }
 
 // Recompute a plan's steps (dwell, walk-to-next, and the arrival clock) for a

@@ -8,7 +8,14 @@
 //   • "Try another combination" reshuffles within the same constraints.
 //   • Signed-in users can save a night to public.plans and re-open it.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import {
   type LucideIcon,
@@ -21,12 +28,15 @@ import {
   Clock,
   Footprints,
   RotateCw,
+  Undo2,
   Check,
   Star,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
+  alternativesFor,
+  withinBudget,
   relinkSteps,
   isDaytimeHour,
   ANYWHERE,
@@ -245,6 +255,17 @@ function toDisplay(
   };
 }
 
+/**
+ * useLayoutEffect on the client, useEffect on the server.
+ *
+ * React warns that useLayoutEffect does nothing during SSR — true, and
+ * harmless here, since the restore it drives reads localStorage and could
+ * never have run on the server anyway. This keeps the warning out of the logs
+ * without giving up the before-paint timing that removes the setup-form flash.
+ */
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export function PlanFlow({
   venues,
   authUserId,
@@ -291,17 +312,25 @@ export function PlanFlow({
   // instance and left the next one to be discovered the same way. Held in one
   // object, the desync is unrepresentable.
   //
-  // Only a night reopened from a saved ROW is read-only. A restored generated
-  // or claimed night keeps Save and Try-another; per-stop swaps stay hidden in
-  // all three cases, because `computed.alternatives[i]` is relative to a
-  // different set of stops and offering them could produce a night that is no
-  // longer walkable.
+  // Only a night reopened from a saved ROW is read-only, and even that now
+  // means "no Save" rather than "no changes" — see `alternatives` below, which
+  // gives EVERY night on screen real swap options computed from its own stops.
+  //
+  // `base` is the night as it was activated. Per-stop replacements are held in
+  // `swaps` on top of it, exactly as they are for a live night on top of
+  // `computed`, so one mechanism serves both and one Undo unwinds both.
   const [active, setActive] = useState<{
-    display: DisplayPlan;
+    base: DisplayPlan;
     source: NightPlanSource;
   } | null>(null);
-  const openedSaved = active?.display ?? null;
+  const openedSaved = active?.base ?? null;
   const isReopenedSaved = active?.source === "saved";
+  // Previous `swaps` states, newest last. One entry per replacement, so Undo
+  // walks back through them rather than only reverting the last one — a user
+  // who taps Change four times and dislikes the third needs more than a single
+  // step back, and the alternative (cycling forward until it wraps) makes them
+  // count positions in a list they cannot see.
+  const [undoStack, setUndoStack] = useState<Record<number, number>[]>([]);
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
     "idle",
@@ -326,6 +355,9 @@ export function PlanFlow({
   const standDown = useCallback(() => {
     setActive(null);
     anonOriginRef.current = false;
+    activeSourcePlanRef.current = null;
+    // The replacement history belongs to the night being stood down.
+    setUndoStack([]);
   }, []);
   // 🧨 Freshness is measured from GENERATION, not from the last write. The
   // effect below re-persists on every swap, and stamping a fresh createdAt
@@ -387,14 +419,76 @@ export function PlanFlow({
     [venues, areaSel, vibe, budget, offset, timing, center, tasteScores],
   );
 
+  /**
+   * Swap options for the night on screen.
+   *
+   * 🧨 A RESTORED NIGHT GETS ITS OWN, computed from its own stops. It used to
+   * get none: `computed.alternatives` is indexed to the stops the ENGINE last
+   * produced, so on any other night `alternatives[i]` describes a different
+   * stop i entirely, and offering it could swap in a venue picked for a walk
+   * that no longer exists. The previous release hid the control rather than
+   * risk that, which left a night you could look at and not touch — and the
+   * swipe silently did nothing, which reads as a dead target rather than as a
+   * decision. `alternativesFor` makes the mismatch impossible instead: the
+   * options are always derived from the stops they belong to.
+   *
+   * Derived from `base`, not from `display`, for the same reason the live path
+   * indexes `computed`: if the list were recomputed after each replacement,
+   * position 2 would mean a different venue every time and cycling could never
+   * return you to where you started.
+   */
+  const activeAlternatives = useMemo(() => {
+    if (!active) return null;
+    // Mirror the engine's own widening: keep the budget unless honouring it
+    // would leave too little to choose from.
+    const inBudget = venues.filter((v) => withinBudget(v.price, budget));
+    return alternativesFor(
+      inBudget.length >= 3 ? inBudget : venues,
+      active.base.steps,
+      {
+        vibe,
+        budget,
+        daypart: active.base.daypart,
+        when: timing?.when,
+        tasteScores,
+      },
+    );
+  }, [active, venues, budget, vibe, timing, tasteScores]);
+
+  const alternatives = activeAlternatives ?? computed.alternatives;
+
   // Memoised because the persist effect below depends on it: an unmemoised
   // `display` is a new object every render, so the effect's dep array never
   // matched and a synchronous localStorage write fired on every single render
   // of the result screen.
-  const display: DisplayPlan = useMemo(
-    () => openedSaved ?? toDisplay(computed, swaps, timing?.when),
-    [openedSaved, computed, swaps, timing],
-  );
+  const display: DisplayPlan = useMemo(() => {
+    if (!active) return toDisplay(computed, swaps, timing?.when);
+    // Same shape as toDisplay, over the restored night's own base and options.
+    // relinkSteps is what keeps a replacement honest: it recomputes dwell, the
+    // walk to the NEXT stop and every arrival after it, in place, so the route
+    // stays coherent and the map (which renders display.steps) follows.
+    const items = active.base.steps.map((s, i) => {
+      const alt = swaps[i];
+      const v =
+        alt != null && alt >= 0 ? activeAlternatives?.[i]?.[alt] : undefined;
+      return { venue: v ?? s.venue, role: s.role };
+    });
+    const steps = relinkSteps(items, timing?.when);
+    return {
+      // Title and area stay the night's own. A reopened "Fancy Night in
+      // Shoreditch" that swaps one stop is still that night; re-deriving them
+      // from the first stop the way a freshly generated plan does would rename
+      // the thing the user saved out from under them.
+      title: active.base.title,
+      area: active.base.area,
+      daypart: active.base.daypart,
+      totalMins: steps.reduce(
+        (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+        0,
+      ),
+      steps,
+    };
+  }, [active, activeAlternatives, computed, swaps, timing]);
 
   // Editorial eyebrow, same convention as the Explore header: 06:00–17:59 reads
   // "today,", 18:00–05:59 "tonight,". `now` is null until mount, so SSR + first
@@ -622,7 +716,7 @@ export function PlanFlow({
       }
 
       setActive({
-        display: {
+        base: {
           title: np.title,
           area: np.area,
           daypart: np.daypart,
@@ -648,6 +742,10 @@ export function PlanFlow({
       // anywhere in London, which is not another take on THIS night at all.
       // A wrong guess widens the pool and the engine still returns a night; no
       // guess changes the brief out from under the user.
+      activeSourcePlanRef.current = np;
+      // A newly activated night starts with no replacements and no history.
+      setSwaps({});
+      setUndoStack([]);
       setVibe(np.vibe);
       setBudget(np.budget);
       // The night's own daypart, so "Try another combination" regenerates
@@ -744,7 +842,35 @@ export function PlanFlow({
     [venueById, venueBySlug, owner],
   );
 
+  // A saved row the user tapped while an unsaved night was still in the active
+  // slot. Held until they choose, rather than resolved by guessing.
+  const [pendingSaved, setPendingSaved] = useState<SavedPlanRow | null>(null);
+
   const openSaved = (row: SavedPlanRow) => {
+    // 🧨 REOPENING USED TO DESTROY AN UNSAVED NIGHT IN SILENCE. Two taps from a
+    // live result — "← Edit", then a row in this list — overwrote the active
+    // slot, and the night built ten seconds earlier was unrecoverable by
+    // refresh or Back. Both nights are legitimate here, so this asks instead
+    // of picking one: the saved row is durable in the database and losing it
+    // costs nothing, while the night in the slot exists nowhere else.
+    const existing = readActivePlan(owner);
+    const existingSig = existing?.stops.map((s) => s.venueId).join("|");
+    const atRisk =
+      !!existing &&
+      existing.source !== "saved" &&
+      !savedPlans.some(
+        (p) => p.steps.map((s) => s.venueId).join("|") === existingSig,
+      );
+    if (atRisk && !pendingSaved) {
+      setPendingSaved(row);
+      track("plan_reopen_conflict", { stops: existing.stops.length });
+      return;
+    }
+    setPendingSaved(null);
+    reallyOpenSaved(row);
+  };
+
+  const reallyOpenSaved = (row: SavedPlanRow) => {
     // Saved rows carry no vibe or budget (see lib/night-plan.ts), so the
     // current control values stand in. They affect regeneration only.
     const np = fromSavedRow(
@@ -772,8 +898,22 @@ export function PlanFlow({
   //
   // Owner-scoped keys mean a signed-out visitor can never restore the previous
   // user's night on a shared browser (lib/active-plan.ts).
+  // The NightPlan a restored night came from, so re-persisting it after a
+  // replacement carries its own createdAt, source, offset and clock intent
+  // instead of minting fresh ones — which would restart the freshness window
+  // and relabel its provenance on every change.
+  const activeSourcePlanRef = useRef<NightPlan | null>(null);
   const restoredForRef = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
+  // 🧨 BEFORE THE BROWSER PAINTS, not after. `step` initialises to "setup", so
+  // running this as a normal effect meant the setup form was painted first and
+  // then replaced — on the refresh, the walk back from a venue page and the
+  // post-sign-in landing, i.e. the three moments this whole feature exists
+  // for, the first thing on screen was the tall questionnaire the user had
+  // already filled in. It read as "it forgot", which is precisely the feeling
+  // being removed. useLayoutEffect runs synchronously after the DOM is
+  // committed and before paint, so the swap is never visible; browser scroll
+  // restoration then lands on the result markup rather than the form.
+  useIsomorphicLayoutEffect(() => {
     // Wait for the catalogue: hydrating against an empty list would drop every
     // stop and look identical to "there was nothing saved".
     if (venues.length === 0) return;
@@ -839,10 +979,38 @@ export function PlanFlow({
   // the journey back, or the sign-in round trip all return to the same night.
   useEffect(() => {
     if (step !== "result") return;
-    // A restored, claimed or re-opened night was already persisted by
-    // `activate`, in its hydrated and relinked form. Re-persisting from
-    // `computed` here would overwrite it with an unrelated night.
-    if (active) return;
+    // A REOPENED SAVED ROW is never stored as the active night — the row is
+    // already durable in the database, and storing it made the read-only state
+    // land on every later visit to /plan.
+    if (active?.source === "saved") return;
+    // Any other restored night IS re-persisted, from `display`, so a per-stop
+    // replacement survives a refresh and the walk to a venue page. Writing
+    // from `computed` here would overwrite it with the unrelated night the
+    // engine happens to be holding, which is why this used to bail out
+    // entirely — correct while a restored night could not be changed, wrong
+    // now that it can.
+    if (active) {
+      const src = activeSourcePlanRef.current;
+      // No source plan means the night came from the legacy one-shot stash,
+      // which carries none of these fields. Leave it alone rather than mint a
+      // NightPlan with invented provenance.
+      if (!src || display.steps.length === 0) return;
+      writeActivePlan(owner, {
+        ...src,
+        title: display.title,
+        area: display.area,
+        daypart: display.daypart,
+        startsAt: display.steps[0]?.arriveAt?.toISOString() ?? null,
+        stops: display.steps.map((s) => ({
+          venueId: s.venue.id,
+          slug: s.venue.slug,
+          role: s.role,
+          dwellMins: s.dwellMins,
+          walkToNextMins: s.walkToNextMins,
+        })),
+      });
+      return;
+    }
     // 🧨 A zero-stop result is the dead-end screen, not a night. This effect
     // runs ABOVE that screen's early return, so without this a good stored
     // night was destroyed by a failed build: Edit -> pick an empty area ->
@@ -935,7 +1103,7 @@ export function PlanFlow({
       );
       const daypart = stash.daypart === "day" ? "day" : "evening";
       setActive({
-        display: {
+        base: {
           title: `${stash.area || "London"} ${daypart === "day" ? "Day Out" : "Night"}`,
           area: stash.area || "London",
           daypart,
@@ -989,6 +1157,7 @@ export function PlanFlow({
     standDown();
     setSaveState("idle");
     setSwaps({});
+    setUndoStack([]);
     fn();
   };
 
@@ -1000,7 +1169,10 @@ export function PlanFlow({
     dir: 1 | -1 = 1,
     method: SwapMethod = "button",
   ) => {
-    const alts = computed.alternatives[i] ?? [];
+    // `alternatives`, not `computed.alternatives`: on a restored night these
+    // are computed from that night's own stops, and on a live one they ARE
+    // computed.alternatives, so this single path serves both.
+    const alts = alternatives[i] ?? [];
     if (alts.length === 0) return;
     setSwaps((prev) => {
       // Positions 0..len-1: 0 = original venue, 1..len-1 = alternatives.
@@ -1010,6 +1182,10 @@ export function PlanFlow({
       const next = { ...prev };
       if (idx < 0) delete next[i];
       else next[i] = idx;
+      // Record where we came FROM, so Undo restores this exact arrangement
+      // rather than guessing. Pushed inside the updater so it cannot capture a
+      // stale `swaps` when two replacements land in the same tick.
+      setUndoStack((stack) => [...stack, prev]);
       return next;
     });
     setSaveState("idle");
@@ -1021,10 +1197,24 @@ export function PlanFlow({
     track("plan_swap", {
       stop: i, // legacy spelling, kept so existing insights keep working
       stop_index: i,
-      stop_role: computed.steps[i]?.role ?? null,
+      // From the night ON SCREEN. Reading computed.steps here would report the
+      // live engine's role for a stop the user is changing on a restored one.
+      stop_role: display.steps[i]?.role ?? null,
       dir,
       method,
     });
+  };
+
+  // Step back through replacements, one at a time. Not a full reset: undoing
+  // to the original is what tapping Change until it wraps already does, and
+  // the thing a user actually wants is "that last one was worse".
+  const undoReplace = () => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    setUndoStack((stack) => stack.slice(0, -1));
+    setSwaps(prev);
+    setSaveState("idle");
+    track("plan_swap_undo", { remaining: undoStack.length - 1 });
   };
 
   // "Near you" — ask the browser for location and keep the night within walking
@@ -1196,6 +1386,7 @@ export function PlanFlow({
               const duration_ms = Math.round(performance.now() - t0);
               setOffset(0);
               setSwaps({});
+              setUndoStack([]);
               standDown();
               // Build produces a DIFFERENT night, so the save flag from the
               // last one must not follow it. Without this: Build -> Try
@@ -1248,6 +1439,46 @@ export function PlanFlow({
         {/* Saved nights — signed-in re-open */}
         {savedPlans.length > 0 && (
           <Group label="Your saved nights">
+            {pendingSaved && (
+              <div className="mb-2.5 rounded-2xl border border-border bg-card p-4">
+                <div className="text-[14px] font-extrabold text-heading">
+                  You have a night in progress
+                </div>
+                <p className="text-[12px] text-muted-fg mt-1 leading-relaxed">
+                  Opening <b className="text-heading">{pendingSaved.title}</b>{" "}
+                  replaces the night you were building. Your saved nights stay
+                  saved either way.
+                </p>
+                <div className="flex flex-col gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const row = pendingSaved;
+                      setPendingSaved(null);
+                      reallyOpenSaved(row);
+                      track("plan_reopen_conflict_resolved", {
+                        choice: "open_saved",
+                      });
+                    }}
+                    className="h-11 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold"
+                  >
+                    Open the saved night
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingSaved(null);
+                      track("plan_reopen_conflict_resolved", {
+                        choice: "keep_current",
+                      });
+                    }}
+                    className="h-11 rounded-2xl border-[1.5px] border-border bg-card text-[14px] font-extrabold text-fg"
+                  >
+                    Keep the one I&apos;m building
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               {savedPlans.map((p) => (
                 <button
@@ -1352,6 +1583,16 @@ export function PlanFlow({
           />{" "}
           {fmtHours(display.totalMins)}
         </div>
+        {undoStack.length > 0 && (
+          <button
+            type="button"
+            onClick={undoReplace}
+            className="mt-2.5 inline-flex items-center gap-1.5 bg-white/15 text-white rounded-lg px-2.5 py-1 text-[11px] font-bold"
+          >
+            <Undo2 className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />
+            Undo change
+          </button>
+        )}
       </div>
 
       {/* fl-stagger: stops rise in sequence when a plan lands (the system's
@@ -1366,7 +1607,7 @@ export function PlanFlow({
               <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase">
                 {s.role}
               </div>
-              {!openedSaved && (computed.alternatives[i]?.length ?? 0) > 0 && (
+              {(alternatives[i]?.length ?? 0) > 0 && (
                 <button
                   type="button"
                   onClick={() => onSwap(i, 1, "button")}
@@ -1383,9 +1624,7 @@ export function PlanFlow({
               )}
             </div>
             <SwipeStop
-              enabled={
-                !openedSaved && (computed.alternatives[i]?.length ?? 0) > 0
-              }
+              enabled={(alternatives[i]?.length ?? 0) > 0}
               onSwipe={(dir) => onSwap(i, dir, "swipe")}
             >
               <Link
@@ -1516,6 +1755,7 @@ export function PlanFlow({
               const duration_ms = Math.round(performance.now() - t0);
               setSaveState("idle");
               setSwaps({});
+              setUndoStack([]);
               // 🧨 Stand down the restored night. Without this the button was
               // visible but inert on any restored or claimed night: `display`
               // kept returning the stored plan while `computed` moved on, so

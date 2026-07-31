@@ -171,6 +171,9 @@ export type AnalyticsEvent =
   | "plan_save_failed"
   | "plan_open_maps" // opened the plan's walking route in Google Maps
   | "plan_swap" // swapped a single stop for an alternative
+  | "plan_swap_undo" // stepped back through a stop replacement
+  | "plan_reopen_conflict" // tapped a saved night with an unsaved one live
+  | "plan_reopen_conflict_resolved" // and chose which to keep
   | "together_room_create"
   | "together_room_join"
   | "together_swipe"
