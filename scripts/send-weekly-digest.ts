@@ -331,18 +331,18 @@ function buildHtml(
           <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:${BRAND_VIOLET};">London &middot; this week</div>
           <div style="font-size:22px;font-weight:800;color:#1a1409;margin-top:4px;">Fun London</div>
           <div style="font-size:14px;color:#645c50;margin-top:4px;">
-            New places and what is on this week. All real, all independent.
+            New places and what is on this week.
             The night itself takes seconds to build.</div>
         </td></tr>
         ${venuesBlock}
         ${eventsBlock}
-        <tr><td style="padding-top:24px;">
+        <tr><td style="padding:24px 0 28px;">
           <a href="${SITE_URL}/plan"
             style="display:inline-block;background:${BRAND_VIOLET};color:#fff;
-            font-weight:800;font-size:14px;text-decoration:none;
-            padding:12px 22px;border-radius:12px;">Build my night</a>
+            font-weight:800;font-size:14px;line-height:1;text-decoration:none;
+            padding:14px 22px;border-radius:12px;">Build my night</a>
         </td></tr>
-        <tr><td style="padding-top:24px;border-top:1px solid #e3ddd2;margin-top:16px;">
+        <tr><td style="padding-top:20px;border-top:1px solid #e3ddd2;">
           <div style="font-size:11px;color:${MUTED_FG};padding-top:12px;line-height:1.5;">
             You are getting this because you turned on weekly emails in your Fun
             London profile.<br>
