@@ -73,7 +73,12 @@
     "prune-expired-events:dry": "tsx scripts/prune-expired-events.ts --dry-run",
     "prune-expired-events": "tsx scripts/prune-expired-events.ts",
     "backup-db:dry": "tsx scripts/backup-db.ts --dry-run",
-    "backup-db": "tsx scripts/backup-db.ts"
+    "backup-db": "tsx scripts/backup-db.ts",
+    "posthog:verify": "tsx scripts/posthog-verify-events.ts",
+    "posthog:verify:all": "tsx scripts/posthog-verify-events.ts --all",
+    "posthog:dashboards:dry": "tsx scripts/posthog-provision-dashboards.ts --dry-run",
+    "posthog:dashboards": "tsx scripts/posthog-provision-dashboards.ts",
+    "posthog:revoked-check": "tsx scripts/posthog-revoked-check.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
