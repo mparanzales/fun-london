@@ -84,8 +84,13 @@ caller.
 - A key in a commit, in terminal output, in a document, or pasted into chat.
 
 `POSTHOG_PROJECT_ID` is optional: the client resolves the project from the key via
-`/api/users/@me/`. The numeric project id is treated as sensitive by the same rule
-as everything else and is not recorded here.
+**`/api/projects/@current/`**. The numeric project id is treated as sensitive by
+the same rule as everything else and is not recorded here.
+
+> ⚠️ This sentence used to name `/api/users/@me/`, contradicting the scopes
+> section above, which says in bold **not** to grant `user:read`. A reader
+> following the old wording would have over-scoped the permanent key to reach an
+> endpoint the client abandoned for exactly that reason.
 
 ### Revocation confirmation
 
@@ -181,7 +186,9 @@ What has actually been checked, and what has not. Nothing below is inferred.
 | #189's ten new events (earlier note) | ⏳ | Checked over 90 days on 2026-07-30: every one reads `never`. #189 merged the same afternoon, so production has not yet had traffic through those paths. This is why Dashboard 5 stays on proxies. Re-run `pnpm posthog:verify -- --all` in a few days. |
 | `sign_in_complete` | 🔎 **0 over 90 days** | Empirical confirmation of the bug #189 fixed: `SignInTracker` mounted before `AnalyticsGate`, so the event was dropped before PostHog initialised. It has literally never arrived. Expect it to start appearing now. |
 | Permanent read-only key | ✅ **created and working** | Created 2026-07-30. Never printed, never committed. |
-| Temporary provisioning key | ⏳ **used, awaiting revocation IN THE CONSOLE** | 🧨 It cannot be revoked through the API: PostHog answers `GET /api/personal_api_keys/` with *"This action does not support personal API key access"*, by design. Key management requires a logged-in session, so this is a console action and no scope change would help. Delete it at `/settings/user-api-keys`, then prove it dead with `pnpm posthog:revoked-check` (exit 0 = a real 401/403; exit 2 = nothing was tested). |
+| Temporary provisioning key | ✅ **revoked in the console, and removed from `.env.local`** — see the caveat | 🧨 It cannot be revoked through the API: PostHog answers `GET /api/personal_api_keys/` with *"This action does not support personal API key access"*, by design, so this was a console action. Confirmed 2026-07-31: `POSTHOG_PROVISIONING_API_KEY` is absent from `.env.local` and from the shell, and the remaining permanent key `403`s on both writes. ⚠️ **What was NOT produced is a 401/403 round trip for the deleted key itself**, because doing that needs its value and the value is (correctly) gone. `pnpm posthog:revoked-check` exits **2** — "nothing was tested, this is NOT a pass" — which is the honest answer, not a failure. If you want that proof, capture the key value at deletion time and run the check immediately, before removing the line. |
+| Dashboards filtered to production traffic | 🔴 **in code, NOT on the live dashboards** | Every insight is now scoped to `$host IN ('funldn.com','www.funldn.com')`, mutation-tested four ways. Applying it live needs a write key, which has been revoked. **Until re-provisioned the live dashboards still count dev and preview traffic.** See Known limitations. |
+| Insights still correctly provisioned | ✅ **re-verified 2026-07-31** | All 26 code-defined insights exist in the project, 0 missing, 0 duplicate names. The 6 extra insights in the project are PostHog's own defaults (DAUs, WAUs, Retention, Growth accounting, Referring domain, Pageview funnel). Dashboard *grouping* was not re-checked: the read key has no `dashboard:read` and 403s on `/dashboards/`. |
 | Dashboards provisioned | ✅ **done 2026-07-30** | 6 dashboards, 26 insights. Verified **against the live project**, not from the script's own scoreboard: 4+4+5+4+5+4 = 26, no duplicate dashboard names, no duplicate insight names. |
 | Provisioning is idempotent | ✅ **proven twice** | Two further runs, both `dashboards_created: 0, dashboards_reused: 6, insights_created: 0, insights_updated: 26`. |
 | Filters and date ranges | ✅ **reviewed live** | All 18 visualisation insights carry `dateRange: -30d` and their breakdowns; the 8 HogQL tables carry their own window in SQL. 18 + 8 = 26. ⚠️ A first pass reported all of them as missing a date range: PostHog wraps `TrendsQuery`/`FunnelsQuery` in an `InsightVizNode`, so the range sits at `query.source.dateRange`, one level deeper than the naive check looked. The checker was wrong, not the dashboards. |
@@ -217,9 +224,26 @@ The last row is the one worth acting on: nothing stops any local `pnpm dev` sess
 
 ## Known limitations
 
-- ⚠️ **The provisioning payload shapes follow the documented PostHog API but have
-  never been executed against a live project**, because no key exists yet. The
-  first real run is the test.
+- 🧨 **THE PRODUCTION-TRAFFIC FILTERS ARE IN CODE BUT NOT YET ON THE LIVE
+  DASHBOARDS.** Every insight is now scoped to `$host IN ('funldn.com',
+  'www.funldn.com')` so that localhost, preview deployments and deliberate
+  probes stop being counted (see `PROD_HOSTS` / `PROD_ONLY_SQL` in
+  `scripts/posthog-provision-dashboards.ts`). Applying that to the live project
+  means re-running `pnpm posthog:dashboards`, which needs a WRITE-scoped key —
+  and the temporary provisioning key has been revoked, correctly, and must not
+  be recreated casually. So:
+
+  **Until someone re-provisions, the six dashboards on the wall are still
+  counting dev and preview traffic in their 30-to-90-day windows.** Treat their
+  absolute numbers as contaminated. The app-side gate (`PRODUCTION_HOSTS` in
+  `lib/analytics.ts`) stops NEW contamination at source the moment it deploys;
+  it cannot retract what is already stored.
+
+  To apply: create a fresh temporary key with `dashboard:write` + `insight:write`
+  ONLY, put it in `.env.local` as `POSTHOG_PROVISIONING_API_KEY`, run
+  `pnpm posthog:dashboards` (idempotent: it updates the 26 existing insights in
+  place and creates nothing), then delete the key and prove it with
+  `pnpm posthog:revoked-check`.
 - ⚠️ **Dashboard 5 still ships proxies**, deliberately. #189 merged so the real
   events exist in code, but nobody has confirmed they are ARRIVING. Verify
   arrival first, then rewrite the panels, then delete the warning. Doing it in
@@ -230,7 +254,9 @@ The last row is the one worth acting on: nothing stops any local `pnpm dev` sess
 - **`fl_probe_manual`** (distinct_id `fl-cdp-probe`) is one test event sitting in
   the production project from proving the capture endpoint was reachable during
   the 2026-07-29 investigation. Harmless but real. **Exclude it from all
-  reporting.** No production event was deleted to make this true.
+  reporting.** No production event was deleted to make this true. It is excluded
+  twice over: no insight names it, pinned by a test, and it was captured from a
+  headless localhost session so the `$host` filter above drops it anyway.
 - **Access scope:** dashboards are visible to the PostHog project's members. There
   is no per-dashboard sharing configured and no public link is created.
 - **The read-only key cannot LIST dashboards** (`dashboard:read` was not granted,

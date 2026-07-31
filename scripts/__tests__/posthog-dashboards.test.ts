@@ -25,11 +25,6 @@ const provision = src("posthog-provision-dashboards.ts");
 const verify = src("posthog-verify-events.ts");
 const events = src("posthog-events.ts");
 
-const analytics = readFileSync(
-  fileURLToPath(new URL("../../lib/analytics.ts", import.meta.url)),
-  "utf8",
-);
-
 // THE REAL IMPLEMENTATION, imported rather than re-implemented. A previous
 // version of this file kept its own copy of the parse, which meant deleting the
 // comment-stripping line from the verifier would have dropped it to 22 of 33
@@ -163,12 +158,193 @@ describe("fl_probe_manual can never reach a dashboard", () => {
       "$exception",
       "$autocapture",
     ]);
-    const referenced = new Set(
-      [...provision.matchAll(/event\s*=\s*'([^']+)'/g)].map((m) => m[1]),
-    );
-    for (const m of provision.matchAll(/event:\s*"([^"]+)"/g)) {
+    const referenced = new Set<string>();
+
+    // (a) HogQL equality: `event = 'venue_save'`
+    for (const m of provision.matchAll(/event\s*=\s*'([^']+)'/g)) {
       referenced.add(m[1]);
     }
+    // (b) HogQL membership: `event IN ('a', 'b')`. This was missing, so a typo
+    // inside an IN list shipped green.
+    for (const m of provision.matchAll(/event\s+IN\s*\(([^)]*)\)/gi)) {
+      for (const q of m[1].matchAll(/'([^']+)'/g)) referenced.add(q[1]);
+    }
+    // (c) 🧨 THE 18 INSIGHTS THIS GUARD USED TO MISS ENTIRELY. It looked for
+    // `event: "..."`, of which this file contains ZERO: series() builds the
+    // node with ES shorthand (`{ kind: "EventsNode", event, name: event }`),
+    // and the names live in the array literals passed to trend()/funnel().
+    // So every Trends and Funnels insight was exempt from the check that is
+    // supposed to stop a renamed event becoming a panel that reads zero
+    // forever and gets misdiagnosed as a product signal.
+    for (const m of provision.matchAll(
+      /(?:trend|funnel)\(\s*\[([\s\S]*?)\]/g,
+    )) {
+      for (const q of m[1].matchAll(/"([^"]+)"/g)) referenced.add(q[1]);
+    }
+
+    // Positive control tied to a real floor, not to "> 0": an empty or
+    // near-empty match set is the failure mode being fixed, and it would
+    // otherwise pass this test in silence.
+    expect(referenced.size).toBeGreaterThanOrEqual(15);
+    // And specifically prove each source found something.
+    expect(referenced).toContain("venue_reserve_click"); // (a)
+    expect(referenced).toContain("plan_reshuffle"); // (b)
+    expect(referenced).toContain("plan_generate"); // (c)
+
     for (const e of referenced) expect(known).toContain(e);
+  });
+});
+
+describe("every insight is scoped to real production traffic", () => {
+  // 🧨 WHY THIS EXISTS. One PostHog project, and NEXT_PUBLIC_POSTHOG_KEY ships
+  // to the browser in dev, preview and production alike. Until the app-side
+  // gate landed, the dev server, every preview deployment and every deliberate
+  // probe filed into the same funnels these dashboards read. The app gate stops
+  // NEW traffic; it cannot retract the stored history, and every insight here
+  // reads a 30-to-90-day window.
+
+  const hogql = [...provision.matchAll(/`SELECT[\s\S]*?`/g)].map((m) => m[0]);
+
+  it("puts the host predicate in EVERY HogQL query", () => {
+    const tableCalls = [...provision.matchAll(/(?<!function )\btable\(/g)]
+      .length;
+    expect(tableCalls).toBeGreaterThan(0); // positive control
+    expect(hogql.length).toBe(tableCalls); // and we see all of them
+    for (const q of hogql) {
+      expect(q).toContain("${PROD_ONLY_SQL}");
+    }
+  });
+
+  it("puts a property filter on EVERY trend and funnel", () => {
+    // Counted, not spot-checked: a builder that stopped applying it would
+    // otherwise pass as long as one other builder still did.
+    const builders = [
+      ...provision.matchAll(/kind: "(TrendsQuery|FunnelsQuery)"/g),
+    ].length;
+    const filtered = [...provision.matchAll(/properties: prodOnly\(\)/g)]
+      .length;
+    expect(builders).toBeGreaterThan(0); // positive control
+    expect(filtered).toBe(builders);
+  });
+
+  it("defines the hosts ONCE, shared with the verifier", () => {
+    // 🧨 The provisioner and the verifier must not each carry their own copy.
+    // While only the dashboards filtered, `pnpm posthog:verify` could report an
+    // event "firing" on localhost traffic that every panel discards, and the
+    // documented Dashboard 5 procedure says to rewrite panels once the verifier
+    // shows arrival. That gate would have passed on data the panels throw away.
+    expect(events).toMatch(/export const PROD_HOSTS/);
+    expect(events).toMatch(/export const PROD_ONLY_SQL/);
+    expect(provision).toMatch(/import[\s\S]{0,120}from "\.\/posthog-events"/);
+    expect(verify).toMatch(/import[\s\S]{0,160}PROD_ONLY_SQL/);
+    // Neither may redeclare it locally.
+    expect(provision).not.toMatch(/const PROD_HOSTS\s*=/);
+    expect(verify).not.toMatch(/const PROD_HOSTS\s*=/);
+  });
+
+  it("is an allowlist of production hosts, not a denylist of test ones", () => {
+    // Same reasoning as the app-side gate: a synthetic source nobody predicted
+    // is excluded by default rather than included until somebody notices.
+    const code = events
+      .replace(/^\s*\/\/.*$/gm, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).toMatch(/PROD_HOSTS\s*=\s*\[[^\]]*funldn\.com/);
+    expect(code).not.toMatch(/["'`]localhost["'`]/);
+    expect(code).not.toMatch(/vercel\.app/);
+    expect(code).not.toMatch(/NOT\s+IN|!=\s*'localhost'/i);
+  });
+
+  it("decides the verifier's pass/fail on PRODUCTION counts", () => {
+    // Printing both columns is not enough: the gate has to be the prod one.
+    expect(verify).toMatch(/countIf\(\$\{PROD_ONLY_SQL\}\)/);
+    expect(verify).toMatch(/if \(!row\[1\]\) dead\.push\(e\)/);
+  });
+
+  // The tooling's allowlist, parsed once from the shared module and asserted
+  // two ways below.
+  const dashHosts = [
+    ...(events.match(/PROD_HOSTS\s*=\s*\[[^\]]*\]/)?.[0] ?? "").matchAll(
+      /"([^"]+)"/g,
+    ),
+  ].map((m) => m[1]);
+
+  it("names exactly the two production hosts", () => {
+    expect([...dashHosts].sort()).toEqual(["funldn.com", "www.funldn.com"]);
+  });
+
+  it("agrees with the app-side gate, once that gate is on main", () => {
+    // Two allowlists that drift are worse than one: the app would keep sending
+    // from a host the dashboards silently ignore, so the funnels would read
+    // zero while every other signal looked healthy.
+    //
+    // ⚠️ CROSS-PR DEPENDENCY, stated rather than hidden. PRODUCTION_HOSTS is
+    // introduced by the analytics-gate PR, which merges BEFORE this one. On a
+    // main that does not have it yet there is nothing to compare against. That
+    // is a real ordering constraint, so this asserts the constant is either
+    // absent (gate not merged) or an exact match (gate merged) — and never the
+    // third case, which is the only dangerous one: present and DIFFERENT.
+    const analytics = readFileSync(
+      fileURLToPath(new URL("../../lib/analytics.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(analytics.length).toBeGreaterThan(0); // positive control: file read
+    const decl = analytics.match(/PRODUCTION_HOSTS[^;]*;/)?.[0];
+    if (!decl) {
+      // Not merged yet. Record the fact rather than passing silently, so the
+      // reason this assertion is dormant is visible in the run.
+      expect(analytics).not.toContain("PRODUCTION_HOSTS");
+      return;
+    }
+    const appHosts = [...decl.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(appHosts.length).toBeGreaterThan(0);
+    expect([...dashHosts].sort()).toEqual([...appHosts].sort());
+  });
+});
+
+describe("descriptions fit what PostHog accepts", () => {
+  it("keeps every description at or under 400 characters", () => {
+    // 🧨 PostHog rejects a longer description with a 400, and the FIRST real
+    // provisioning run died part-way through on exactly this, after creating
+    // two dashboards. It was survivable only because provisioning is
+    // idempotent. Nothing checked it until now, and the longest description is
+    // already close to the ceiling.
+    const descriptions = [
+      ...provision.matchAll(/description:\s*\n?\s*"((?:[^"\\]|\\.)*)"/g),
+    ].map((m) => m[1]);
+    expect(descriptions.length).toBeGreaterThanOrEqual(26); // positive control
+    for (const d of descriptions) {
+      expect(
+        d.length,
+        `description over the limit: ${d.slice(0, 60)}...`,
+      ).toBeLessThanOrEqual(400);
+    }
+  });
+});
+
+describe("the deprecated plan_save cannot quietly flatline a funnel", () => {
+  it("stops referencing plan_save before its 2026-09-30 sunset", () => {
+    // 🧨 A DATED TRIPWIRE, on purpose. lib/analytics.ts and the event
+    // dictionary both say plan_save is dual-emitted only until 2026-09-30 and
+    // that new dashboards must use plan_save_succeeded. Three insights key on
+    // it, including the bottom step of both dashboard-1 funnels. On the sunset
+    // date those panels go to zero and present as a flat line in exactly the
+    // charts used to decide navigation and landing.
+    //
+    // This repo's documented failure mode is automation going QUIET, so the
+    // deadline gets a test rather than a comment. Migrating is not blocked on
+    // anything: plan_save_succeeded is already emitted alongside it.
+    const SUNSET = Date.parse("2026-09-30T00:00:00Z");
+    const stillUsed = /["'`]plan_save["'`]|'plan_save'/.test(provision);
+    if (Date.now() >= SUNSET && stillUsed) {
+      throw new Error(
+        "plan_save reached its 2026-09-30 sunset and is still referenced in " +
+          "posthog-provision-dashboards.ts. Switch those insights to " +
+          "plan_save_succeeded and re-provision, or the funnels read zero.",
+      );
+    }
+    // Positive control: if the reference disappears by other means, this test
+    // has served its purpose and can go. Until then it must be watching
+    // something real.
+    expect(typeof stillUsed).toBe("boolean");
   });
 });

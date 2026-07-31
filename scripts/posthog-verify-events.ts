@@ -20,7 +20,11 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { hogql, resolveProjectId, API_HOST } from "./posthog-api";
-import { readUnionEvents, BUILTIN_EVENTS } from "./posthog-events";
+import {
+  readUnionEvents,
+  BUILTIN_EVENTS,
+  PROD_ONLY_SQL,
+} from "./posthog-events";
 
 // The four the cofounders asked to see proven. Zero on any of these is a
 // build failure, not a data point.
@@ -44,7 +48,8 @@ if (!Number.isFinite(DAYS) || DAYS <= 0 || DAYS > 3650) {
 }
 const ALL = process.argv.includes("--all");
 
-type Row = [string, number, number, string];
+// [event, production events, ALL events, production people, production last seen]
+type Row = [string, number, number, number, string];
 
 async function main(): Promise<void> {
   const projectId = await resolveProjectId();
@@ -67,17 +72,25 @@ async function main(): Promise<void> {
   console.log(`Window: last ${DAYS} days\n`);
 
   // One query, not one per event: cheaper, and a single failure surface.
+  // 🧨 PRODUCTION AND TOTAL, SIDE BY SIDE, using the SAME predicate the
+  // dashboards use. This counted everything, so it could report an event
+  // "firing" on the strength of localhost and preview traffic that every panel
+  // discards -- and the documented Dashboard 5 procedure says to rewrite panels
+  // once this shows arrival. The pass/fail decision below is made on the
+  // production column only; the total is printed so a gap is visible rather
+  // than inferred.
   const { results } = await hogql<Row>(
     projectId,
     `SELECT event,
-            count() AS events,
-            count(DISTINCT distinct_id) AS people,
-            max(timestamp) AS last_seen
+            countIf(${PROD_ONLY_SQL}) AS events,
+            count() AS all_events,
+            count(DISTINCT if(${PROD_ONLY_SQL}, distinct_id, NULL)) AS people,
+            maxIf(timestamp, ${PROD_ONLY_SQL}) AS last_seen
        FROM events
       WHERE timestamp > now() - INTERVAL ${DAYS} DAY
         AND event IN (${list})
       GROUP BY event
-      ORDER BY events DESC`,
+      ORDER BY all_events DESC`,
   );
 
   const seen = new Map<string, Row>();
@@ -85,9 +98,13 @@ async function main(): Promise<void> {
 
   const pad = (s: string, n: number) => s.padEnd(n);
   console.log(
-    pad("event", 24) + pad("events", 10) + pad("people", 9) + "last seen",
+    pad("event", 24) +
+      pad("prod", 8) +
+      pad("all", 8) +
+      pad("people", 8) +
+      "last seen (prod)",
   );
-  console.log("-".repeat(70));
+  console.log("-".repeat(78));
 
   const dead: string[] = [];
   for (const e of wanted) {
@@ -97,17 +114,26 @@ async function main(): Promise<void> {
       dead.push(e);
       console.log(
         pad(e, 24) +
-          pad("0", 10) +
-          pad("0", 9) +
+          pad("0", 8) +
+          pad("0", 8) +
+          pad("0", 8) +
           (required ? "NEVER  <-- REQUIRED" : "never"),
       );
       continue;
     }
+    // A row with zero PRODUCTION events counts as dead even when the total is
+    // non-zero: it means the only traffic was ours.
+    if (!row[1]) dead.push(e);
     console.log(
       pad(e, 24) +
-        pad(String(row[1]), 10) +
-        pad(String(row[2]), 9) +
-        String(row[3]).slice(0, 19),
+        pad(String(row[1]), 8) +
+        pad(String(row[2]), 8) +
+        pad(String(row[3]), 8) +
+        (row[1]
+          ? String(row[4]).slice(0, 19)
+          : required
+            ? "NO PROD DATA  <-- REQUIRED"
+            : "no prod data"),
     );
   }
 

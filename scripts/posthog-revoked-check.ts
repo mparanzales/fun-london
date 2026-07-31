@@ -21,8 +21,27 @@
 //
 // So this script distinguishes THREE outcomes instead of two:
 //   • key not supplied      -> exit 2, "you did not give me a key to test"
-//   • key still works (2xx) -> exit 1, "STILL LIVE, revoke it"
-//   • key rejected (401/403)-> exit 0, "confirmed dead" (a real HTTP round trip)
+//   • key still works       -> exit 1, "STILL LIVE, revoke it"
+//   • key rejected          -> exit 0, "confirmed dead" (a real HTTP round trip)
+//
+// 🧨 AND THEN IT MADE THE SAME MISTAKE ONE LAYER DOWN. The first version read
+// "rejected" as `status === 401 || status === 403`, which certifies a LIVE key
+// as dead. On this project 403 is the LIVE-key signature: a personal API key
+// with project-scoped grants authenticates fine and is then refused for missing
+// `user:read`. Demonstrated rather than argued — the permanent read-only key,
+// which had just listed 32 insights, produced:
+//
+//     GET /api/users/@me/ -> 403
+//     CONFIRMED REVOKED: rejected the key with HTTP 403.   (exit 0)
+//
+// The two outcomes are told apart by the error CODE, not the status:
+//
+//   401 + "authentication_failed"  the key is not a key any more. DEAD.
+//   401 + "not_authenticated"      no credential arrived. Proves nothing.
+//   403 + "permission_denied"      it AUTHENTICATED, then failed on scope. LIVE.
+//
+// Anything unrecognised exits 2. "I could not tell" must never be reported as
+// "confirmed dead" — that is the entire reason this file exists.
 //
 // Usage (export it in the SHELL, it deliberately does not read .env.local):
 //   export POSTHOG_REVOKED_KEY='the key you just deleted'
@@ -61,11 +80,36 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  if (res.status === 401 || res.status === 403) {
+  // PostHog puts the discriminator in the body, not the status line.
+  let code = "";
+  try {
+    code = String(
+      ((await res.clone().json()) as { code?: string })?.code ?? "",
+    );
+  } catch {
+    code = "";
+  }
+
+  if (res.status === 401 && code === "authentication_failed") {
     console.log(
-      `CONFIRMED REVOKED: ${API_HOST} rejected the key with HTTP ${res.status}.`,
+      `CONFIRMED REVOKED: ${API_HOST} rejected the key outright ` +
+        `(HTTP 401 authentication_failed). It is not a valid credential.`,
     );
     return;
+  }
+
+  // 🧨 403 IS THE LIVE-KEY ANSWER, not a rejection. The key authenticated and
+  // was then refused for missing scope. Reading it as "revoked" is how a
+  // write-capable key stays live on a public repo's project while a green tick
+  // says otherwise.
+  if (res.status === 403) {
+    console.error(
+      `🔴 THE KEY IS STILL LIVE. ${API_HOST} returned HTTP 403 (${code || "no code"}), ` +
+        "which means it AUTHENTICATED and was then refused for missing scope. " +
+        "A deleted key gives 401 authentication_failed instead.\n" +
+        "Delete it at /settings/user-api-keys and run this again.",
+    );
+    process.exit(1);
   }
 
   if (res.ok) {
@@ -75,6 +119,17 @@ async function main(): Promise<void> {
         "the provisioning step as finished until this exits 0.",
     );
     process.exit(1);
+  }
+
+  if (res.status === 401) {
+    // 401 without authentication_failed means the header never arrived
+    // ("not_authenticated"). Nothing about the key was established.
+    console.error(
+      `Nothing was proven: HTTP 401 with code "${code || "none"}", which is ` +
+        "what an absent or malformed Authorization header returns, not a " +
+        "rejected key. Check the value you exported and re-run.",
+    );
+    process.exit(2);
   }
 
   console.error(

@@ -14,6 +14,19 @@ the opt-out consent gate. Ratios stay usable; absolute volumes do not.
 ⚠️ **Exclude `fl_probe_manual`** (distinct_id `fl-cdp-probe`) from all reporting.
 It is one test event from the 2026-07-29 capture-endpoint investigation.
 
+🧨 **EVERY PANEL COUNTS PRODUCTION TRAFFIC ONLY.** All 26 insights are scoped to
+`$host IN ('funldn.com', 'www.funldn.com')` — see `PROD_HOSTS` in
+`scripts/posthog-events.ts`, shared with `pnpm posthog:verify` so the two can
+never disagree. There is one PostHog project and its key ships to the browser in
+dev, preview and production alike, so localhost reloads, preview click-throughs
+and deliberate probes were all being counted. Measured over 90 days on
+2026-07-31: **`venue_save` was 42 events, of which 35 were production — 17% of
+that funnel was us.**
+
+**Expect every 30-to-90-day panel to STEP DOWN when this is first provisioned.**
+That drop is the filter engaging, not a traffic collapse. It is a one-off, and
+it takes up to 90 days to age out of the longest windows.
+
 ---
 
 ## 1. Complete-night funnel

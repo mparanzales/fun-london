@@ -30,6 +30,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { ph, resolveProjectId, API_HOST, useWriteKey } from "./posthog-api";
+import { PROD_ONLY_SQL, prodOnlyFilter } from "./posthog-events";
 
 // This script WRITES, so it authenticates with the temporary provisioning key
 // rather than the permanent read-only one.
@@ -38,6 +39,34 @@ useWriteKey();
 const DRY_RUN = process.argv.includes("--dry-run");
 
 type Query = Record<string, unknown>;
+
+// ── real traffic only ────────────────────────────────────────────────────
+//
+// 🧨 EVERY INSIGHT IS SCOPED TO THE PRODUCTION HOSTS. There is exactly one
+// PostHog project and NEXT_PUBLIC_POSTHOG_KEY is shipped to the browser, so
+// until the app-side gate landed, three sources filed into the same funnels:
+//
+//   • the dev server on localhost, every reload, every hot refresh;
+//   • every Vercel PREVIEW deployment, clicked through during review;
+//   • deliberate probes — the 2026-07-29 capture-endpoint test and the room
+//     code leak audit both fired real events at this project on purpose.
+//
+// The app-side allowlist in lib/analytics.ts stops NEW traffic at source, but
+// it cannot retract what is already stored, and every insight here reads a
+// 30-day window. Without this filter the dashboards keep reporting the polluted
+// history for a month after the fix, which is precisely when they are being
+// used to decide navigation, landing and Events placement.
+//
+// An ALLOWLIST of hosts, matching the app gate: a synthetic source nobody
+// predicted is excluded by default, rather than included until someone notices.
+// Kept in step with PRODUCTION_HOSTS in lib/analytics.ts by
+// scripts/__tests__/posthog-dashboards.test.ts, which reads both.
+//
+// IMPORTED, not redeclared. It is shared with posthog-verify-events.ts, and the
+// two disagreeing is the failure this arrangement exists to prevent: the
+// verifier would report an event "firing" on localhost traffic that the panels
+// discard.
+const prodOnly = prodOnlyFilter as () => Query;
 
 // ── query builders ───────────────────────────────────────────────────────
 
@@ -53,6 +82,7 @@ function trend(
     kind: "TrendsQuery",
     series: series(events),
     dateRange: { date_from: `-${opts.days ?? 30}d` },
+    properties: prodOnly(),
     interval: "day",
     trendsFilter: { display: opts.display ?? "ActionsLineGraph" },
     ...(opts.breakdown
@@ -71,6 +101,7 @@ function funnel(steps: string[], opts: { days?: number } = {}): Query {
     kind: "FunnelsQuery",
     series: series(steps),
     dateRange: { date_from: `-${opts.days ?? 30}d` },
+    properties: prodOnly(),
     funnelsFilter: {
       funnelVizType: "steps",
       funnelWindowInterval: 1,
@@ -165,6 +196,7 @@ const DASHBOARDS: Dashboard[] = [
                     AS signins_per_preview_pct
              FROM events
             WHERE timestamp > now() - INTERVAL 60 DAY
+              AND ${PROD_ONLY_SQL}
               AND event IN ('plan_preview_built', 'sign_in_complete')
             GROUP BY day
             ORDER BY day DESC`,
@@ -201,6 +233,7 @@ const DASHBOARDS: Dashboard[] = [
                         / nullif(countIf(event = 'plan_generate'), 0), 2) AS reshuffles_per_plan
              FROM events
             WHERE timestamp > now() - INTERVAL 60 DAY
+              AND ${PROD_ONLY_SQL}
               AND event IN ('plan_generate', 'plan_reshuffle', 'plan_swap')
             GROUP BY day
             ORDER BY day DESC`,
@@ -263,6 +296,7 @@ const DASHBOARDS: Dashboard[] = [
                   round(avg(toFloat(properties.party)), 1) AS avg_party
              FROM events
             WHERE timestamp > now() - INTERVAL 90 DAY
+              AND ${PROD_ONLY_SQL}
               AND event = 'venue_reserve_click'
             GROUP BY venue
             ORDER BY reserve_clicks DESC
@@ -274,7 +308,7 @@ const DASHBOARDS: Dashboard[] = [
   {
     name: "5. Generation failures and latency (PARTIAL)",
     description:
-      "⚠️ PROXIES, not real failure data (as of 2026-07-30, dated so it cannot silently become false). PR #189 emits plan_generate_failed, plan_preview_failed and duration_ms, but none had arrived when these panels were built. A flat line means NOT YET MEASURED, not zero failures. Finish: verify non-zero counts, rebuild on reason + duration_ms, then delete this note. See FUNLDN_ANALYTICS_DASHBOARD_MANIFEST.md.",
+      "⚠️ PROXIES, not real failure data (as of 2026-07-30, dated so it cannot silently become false). #189 emits plan_generate_failed, plan_preview_failed and duration_ms, but none had arrived when these were built. A flat line means NOT YET MEASURED, not zero failures. Finish: verify non-zero counts, rebuild on reason + duration_ms, delete this note. See the manifest.",
     insights: [
       {
         name: "Soft failure: nights that did not fill",
@@ -310,6 +344,7 @@ const DASHBOARDS: Dashboard[] = [
                   count(DISTINCT distinct_id) AS people
              FROM events
             WHERE timestamp > now() - INTERVAL 30 DAY
+              AND ${PROD_ONLY_SQL}
               AND event = '$pageview'
             GROUP BY path
             ORDER BY views DESC
@@ -333,6 +368,7 @@ const DASHBOARDS: Dashboard[] = [
                   count(DISTINCT distinct_id) AS people
              FROM events
             WHERE timestamp > now() - INTERVAL 90 DAY
+              AND ${PROD_ONLY_SQL}
               AND event = '$pageview'
               AND properties.$pathname LIKE '/venue/%'
             GROUP BY path
@@ -355,6 +391,7 @@ const DASHBOARDS: Dashboard[] = [
                   countIf(event = 'venue_reserve_click') AS reserve_clicks
              FROM events
             WHERE timestamp > now() - INTERVAL 90 DAY
+              AND ${PROD_ONLY_SQL}
               AND (
                     (event = '$pageview' AND properties.$pathname LIKE '/venue/%')
                  OR event IN ('venue_save', 'venue_unsave', 'venue_reserve_click')
@@ -375,6 +412,7 @@ const DASHBOARDS: Dashboard[] = [
                   countIf(event = 'venue_save') - countIf(event = 'venue_unsave') AS net
              FROM events
             WHERE timestamp > now() - INTERVAL 90 DAY
+              AND ${PROD_ONLY_SQL}
               AND event IN ('venue_save', 'venue_unsave')
             GROUP BY venue
             ORDER BY net DESC
@@ -390,6 +428,7 @@ const DASHBOARDS: Dashboard[] = [
                   count()              AS views
              FROM events
             WHERE timestamp > now() - INTERVAL 90 DAY
+              AND ${PROD_ONLY_SQL}
               AND event = '$pageview'
               AND properties.$pathname LIKE '/event/%'
             GROUP BY path
