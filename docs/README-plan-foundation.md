@@ -56,18 +56,35 @@ night by construction rather than by remembering to clear.
   tapping it returned a night anywhere in London. An unmapped neighbourhood
   falls back to "anywhere", because the picker renders an unresolvable name as
   a highlighted chip labelled the literal word "Area", with no drill-down.
-- **Per-stop swaps stay hidden on EVERY restored night**, not only a reopened
-  saved one. `computed.alternatives[i]` is relative to a *generated* plan's
-  other stops, so offering them against any night the engine did not just
-  produce could build a route that is no longer walkable. Making that correct
-  is engine work, not adapter work. The gate is whether that stop has alternatives.
-- **A restored night is not a reopened one.** Only `source === "saved"` is
-  read-only; a restored generated or claimed night keeps Save and Try-another.
+- **Per-stop swaps are available on EVERY night**, restored and reopened
+  included. They used to be hidden on all of them, because
+  `computed.alternatives[i]` is relative to a *generated* plan's other stops,
+  so offering it against a night the engine did not just produce could build a
+  route nobody can walk. That was engine work, not adapter work, and it is
+  done: `alternativesFor(pool, stops, opts)` derives the options from the
+  stops they belong to, and `computePlan` calls it too so the two cannot
+  drift. The gate is now simply whether that stop has any options.
+- **No night is read-only.** A reopened saved row is savable like any other —
+  `plans` is insert-only, so a changed night saves as a NEW row, which is the
+  honest semantics for that table. `alreadySaved` decides whether the button
+  offers to save or reports that it already is, and it is disabled until the
+  saved list has loaded, because guessing wrong writes a permanent duplicate.
+- **`source` still matters.** It picks the freshness anchor, the
+  `plan_origin` analytics dimension, and whether the vibe/budget controls are
+  treated as this night's brief (a saved row has none, so its replacements
+  are not filtered by them).
 
 ## Failure behaviour
 
-- A stored night older than `NIGHT_PLAN_TTL_MS` (12h) is dropped rather than
-  restored — otherwise last Saturday renders under "Tonight, the plan:".
+- A stored night is dropped rather than restored once it is over. When the
+  night knows when it happens (`startsAt`, and it was a chosen time), that is
+  the authority — it is fresh until its own last stop is behind us, bounded
+  forward so a hand-edited far-future stamp cannot make it immortal. A "right
+  now" night has no chosen time — its stamp is just when Build was tapped, and
+  the UI re-anchors it to the live clock on restore — so it falls back to
+  `createdAt + NIGHT_PLAN_TTL_MS` (12h). Freshness and the display have to
+  agree about when the night is, or a night renders as running and is then
+  deleted minutes later for having ended.
 - A night that loses stops to catalogue churn is **relinked** before render, so
   the survivors do not keep walk times measured to a venue that is gone, and
   `plan_restored_partial` fires.

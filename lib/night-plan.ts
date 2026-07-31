@@ -452,7 +452,15 @@ export function isFresh(plan: NightPlan, now: number = Date.now()): boolean {
   // When the night knows when it happens, that is the authority: it is fresh
   // until its own last stop is behind us. `createdAt` remains the fallback for
   // a night with no start (the engine fails open on hours before mount).
-  const start = plan.startsAt ? Date.parse(plan.startsAt) : NaN;
+  // 🧨 A "RIGHT NOW" NIGHT IS MEASURED FROM `createdAt`, NOT FROM ITS STAMP.
+  // Its `startsAt` is a snapshot of when Build was tapped, and the UI
+  // re-anchors such a night to the live clock on restore (see `activate`) —
+  // so measuring staleness against the stamp used a different clock from the
+  // one on screen: a 4-hour night built at 13:00 rendered "arrive ~4:50 pm …
+  // 8:00 pm" at 16:50 and was then deleted at 17:01 for having "ended".
+  // Freshness and the display have to agree about when the night is.
+  const start =
+    plan.startsAt && !plan.tracksClock ? Date.parse(plan.startsAt) : NaN;
   if (Number.isFinite(start)) {
     // 🧨 BOUNDED FORWARD. Without a ceiling, `now < start + duration` makes a
     // night with a far-future start immortal — and localStorage is editable by

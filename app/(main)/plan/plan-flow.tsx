@@ -312,9 +312,12 @@ export function PlanFlow({
   // instance and left the next one to be discovered the same way. Held in one
   // object, the desync is unrepresentable.
   //
-  // Only a night reopened from a saved ROW is read-only, and even that now
-  // means "no Save" rather than "no changes" — see `alternatives` below, which
-  // gives EVERY night on screen real swap options computed from its own stops.
+  // No night is read-only any more. `alternatives` below gives EVERY night on
+  // screen real swap options computed from its own stops, and a reopened saved
+  // row is savable too — `alreadySaved` decides whether the button offers to
+  // save it or reports that it already is. `source` still matters: it picks
+  // the freshness anchor, the analytics dimension, and whether the vibe and
+  // budget controls are treated as this night's brief.
   //
   // `base` is the night as it was activated. Per-stop replacements are held in
   // `swaps` on top of it, exactly as they are for a live night on top of
@@ -576,9 +579,14 @@ export function PlanFlow({
       setSavedListLoaded(false);
       return;
     }
+    // 🧨 The rows FIRST, then the flag. React 18 batches this continuation so
+    // the order is invisible today, but any await inserted between them yields
+    // one render with the flag true and the list still empty — Save enabled on
+    // an already-saved night, which is the permanent duplicate this guard
+    // exists to prevent.
+    setSavedPlans((data as SavedPlanRow[]) ?? []);
     savedListLoadedRef.current = true;
     setSavedListLoaded(true);
-    setSavedPlans((data as SavedPlanRow[]) ?? []);
   }, [authUserId]);
 
   useEffect(() => {
@@ -750,7 +758,8 @@ export function PlanFlow({
       // three hours behind, in the boldest text on the screen. Safe only
       // because the persist below no longer writes startsAt back: the
       // re-timing stays on screen and never reaches disk, so it cannot drift
-      // the stored night forward and trip isFresh into deleting it.
+      // the stored stamp forward on every visit — which would make the night
+      // IMMORTAL, since isFresh reads that stamp.
       const start = np.tracksClock
         ? new Date()
         : np.startsAt
@@ -1832,8 +1841,8 @@ export function PlanFlow({
           me a different night", and it stands the re-opened night down first.
           Without it a re-opened night had no forward action on the whole
           screen — the one thing this product does was the one button missing.
-          Save stays hidden for a saved row: the plans write is insert-only,
-          so re-saving means a duplicate row rather than an update. */}
+          Save shows on every night; see the button for how a reopened saved
+          row is handled. */}
       {
         <div className="px-5 pb-2 flex flex-col gap-2.5">
           <button
