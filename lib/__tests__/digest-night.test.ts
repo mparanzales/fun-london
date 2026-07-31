@@ -10,6 +10,7 @@ import {
   NIGHT_AREAS,
   NIGHT_VIBES,
 } from "@/lib/digest-night";
+import { REGION_OF } from "@/lib/regions";
 
 // The night of the week is the digest's centrepiece and shipped untested,
 // because the script it lived in calls process.exit() at module scope. These
@@ -31,14 +32,37 @@ describe("the weekly brief is stable and rotates", () => {
     expect(briefForWeek(w1)).not.toEqual(briefForWeek(w2));
   });
 
-  it("only ever picks a real area and a real vibe", () => {
-    // Guards the modulo: an off-by-one would hand computePlan an undefined
-    // area, and the night section would vanish with no error.
-    for (let i = 0; i < 60; i++) {
-      const d = new Date(Date.UTC(2026, 0, 1 + i * 7));
-      const b = briefForWeek(d);
-      expect(NIGHT_AREAS).toContain(b.area);
-      expect(NIGHT_VIBES).toContain(b.vibe);
+  it("names areas the engine can actually match", () => {
+    // The invariant that matters. venueInArea does an EXACT string comparison
+    // against venues.neighbourhood, so a typo or a renamed neighbourhood
+    // yields an empty candidate pool, computePlan returns fewer than 2 steps,
+    // and the night section silently disappears from the email with no error
+    // anywhere. Asserting NIGHT_AREAS.toContain(brief.area) cannot catch that:
+    // it checks a list contains something indexed out of that same list.
+    for (const area of NIGHT_AREAS) {
+      expect(
+        Object.prototype.hasOwnProperty.call(REGION_OF, area),
+        `"${area}" is not a catalogue neighbourhood, so the night would vanish`,
+      ).toBe(true);
+    }
+  });
+
+  it("gives every area every vibe, not one welded pair", () => {
+    // 8 areas and 4 vibes indexed by the same week number welds them: w % 4 is
+    // determined by w % 8, so each area kept exactly one vibe forever and 24 of
+    // the 32 briefs could never ship. The "different brief next week" test
+    // above passes either way, because consecutive weeks move both indices.
+    const seen = new Map<string, Set<string>>();
+    for (let w = 0; w < 64; w++) {
+      const b = briefForWeek(new Date(Date.UTC(2026, 0, 1 + w * 7)));
+      if (!seen.has(b.area)) seen.set(b.area, new Set());
+      seen.get(b.area)!.add(b.vibe);
+    }
+    for (const area of NIGHT_AREAS) {
+      expect(
+        seen.get(area)?.size ?? 0,
+        `"${area}" only ever gets ${[...(seen.get(area) ?? [])].join(", ")}`,
+      ).toBe(NIGHT_VIBES.length);
     }
   });
 
@@ -64,11 +88,12 @@ describe("London time survives the BST/GMT switch", () => {
   });
 
   it("formats to pure ASCII, whatever the platform's ICU does", () => {
-    // en-GB joins with a plain space TODAY, so this cannot distinguish
-    // parts-assembly from Intl.format on this machine. It is a forward guard:
-    // en-US-style locales use U+202F before the meridiem and ICU has changed
-    // this before. An invisible non-ASCII character in an email is the exact
-    // failure class the digest was just repaired for.
+    // Measured 2026-07-31 (ICU 78.3): en-GB, en-US, en-CA, en-AU, en-IE and
+    // en-NZ all join with a plain space, so NO locale here emits U+202F and
+    // this cannot distinguish parts-assembly from Intl.format today. It is a
+    // forward guard only: U+202F before the meridiem is real ICU behaviour on
+    // other versions, and an invisible non-ASCII character in an email is the
+    // exact failure class the digest was just repaired for.
     const s = fmtLondonTime(londonAt(2026, 6, 31, 21));
     expect(s).toBe("9:00 PM");
     expect(s).not.toContain(" ");

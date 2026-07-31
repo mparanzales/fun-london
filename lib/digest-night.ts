@@ -36,12 +36,23 @@ export function isoWeek(d: Date): number {
   return Math.ceil(((t.getTime() - y0.getTime()) / 86400000 + 1) / 7);
 }
 
-/** The brief for a given week: same week in, same brief out. */
+/**
+ * The brief for a given week: same week in, same brief out.
+ *
+ * The two indices must not share a period. NIGHT_AREAS has 8 entries and
+ * NIGHT_VIBES has 4, so indexing BOTH by the raw week number welds them
+ * together: `w % 4` is fully determined by `w % 8`, which pinned every area to
+ * a single vibe forever (Soho was always Chill, Camden always Lively) and made
+ * 24 of the 32 possible briefs unreachable. Advancing the vibe by one whole
+ * lap of the area list decouples them, so each area cycles through all four
+ * vibes across 32 weeks.
+ */
 export function briefForWeek(d: Date): { area: string; vibe: PlanVibe } {
   const w = isoWeek(d);
+  const lap = Math.floor(w / NIGHT_AREAS.length);
   return {
     area: NIGHT_AREAS[w % NIGHT_AREAS.length]!,
-    vibe: NIGHT_VIBES[w % NIGHT_VIBES.length]!,
+    vibe: NIGHT_VIBES[(w + lap) % NIGHT_VIBES.length]!,
   };
 }
 
@@ -75,12 +86,17 @@ export function upcomingFriday19(now: Date = new Date()): Date {
 /**
  * "7:00 PM" in London time.
  *
- * Assembled from parts so the separator is OURS, not the locale's. Measured
- * 2026-07-31: en-GB currently joins with a plain space, but en-US and friends
- * use a narrow no-break space (U+202F) before the meridiem, and ICU has moved
- * this before. An invisible non-ASCII character is exactly the failure class
- * the digest was just repaired for, so the output is pinned to ASCII by test
- * rather than left to the platform's ICU version.
+ * Assembled from parts so the separator is OURS, not the platform's.
+ *
+ * Measured 2026-07-31 on ICU 78.3 / Unicode 17.0: en-GB, en-US, en-CA, en-AU,
+ * en-IE and en-NZ ALL join with a plain space (0x20). No locale here emits the
+ * narrow no-break space, so this is NOT fixing a live bug and no comment should
+ * claim otherwise. (Two earlier revisions of this file did, each asserting a
+ * different locale; both were wrong, which is the reason for the measurement
+ * above.) It is a forward guard: U+202F before the meridiem is a real ICU
+ * behaviour on other versions, and an invisible non-ASCII character is exactly
+ * the failure class this digest was repaired for. The output is pinned to
+ * ASCII by test so a runtime upgrade cannot silently reintroduce one.
  */
 export function fmtLondonTime(d: Date): string {
   const parts = new Intl.DateTimeFormat("en-GB", {

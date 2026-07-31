@@ -426,7 +426,7 @@ function nightBlock(plan: Plan): string {
   return `<tr><td style="padding:30px 0 0;">
     <table width="100%" cellpadding="0" cellspacing="0" bgcolor="${NIGHT_BG}" style="background:${NIGHT_BG};border-radius:20px;">
       <tr><td style="padding:24px 22px 22px;">
-        <img src="${SITE_URL}/email/night-line.gif" width="392" height="44" alt=""
+        <img src="${SITE_URL}/email/night-line.gif" width="396" height="44" alt=""
           style="width:100%;height:auto;display:block;margin-bottom:14px;">
         <div style="${FONT}font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:${VIOLET_PALE};">Friday &middot; ${esc(plan.area)} &middot; ${span} on the night</div>
         <div style="${FONT}font-size:26px;font-weight:800;color:#ffffff;margin-top:3px;">one night, drawn.</div>
@@ -455,11 +455,18 @@ type GridCell = {
   meta: string;
 };
 
+// Width ATTRIBUTES must match the real slot, not the CSS. Outlook's Word
+// engine ignores width:100% and object-fit and draws the ATTRIBUTE size, so
+// these numbers ARE the Windows layout. The card is 440px and the section
+// tds carry no horizontal padding, so with a 16px gutter each cell is
+// exactly (440 - 16) / 2 = 212. They were left at 188/392 from the earlier
+// padded layout, which squashed every photo about 11% and left a hole down
+// the right of every cell on Windows.
 function gridCellHtml(c: GridCell | null): string {
-  if (!c) return `<td width="188"></td>`;
-  return `<td width="188" valign="top" style="padding-bottom:26px;">
+  if (!c) return `<td width="212"></td>`;
+  return `<td width="212" valign="top" style="padding-bottom:26px;">
     <a href="${c.href}" style="text-decoration:none;">
-      <img src="${c.img}" width="188" height="132" alt="${c.title}"
+      <img src="${c.img}" width="212" height="132" alt="${c.title}"
         style="width:100%;height:132px;border-radius:16px;object-fit:cover;display:block;">
       <div style="${FONT}color:${INK};font-weight:800;font-size:14px;line-height:1.3;margin-top:9px;min-height:36px;">${c.title}</div>
       <div style="${FONT}color:${MUTED_FG};font-size:11px;margin-top:2px;"><span style="color:${INK_SOFT};font-weight:600;">${c.metaStrong}</span> &middot; ${c.meta}</div>
@@ -502,7 +509,7 @@ function heroEvent(e: EventLite): string {
   // as the app card. Outlook cannot object-fit; alt is the WebP fallback.
   return `<div style="padding-top:16px;">
     <a href="${SITE_URL}/event/${escAttr(e.id)}" style="text-decoration:none;">
-      <img src="${escAttr(sizedImageUrl(e.img_url, 800))}" width="392" height="240"
+      <img src="${escAttr(sizedImageUrl(e.img_url, 800))}" width="440" height="240"
         alt="${esc(e.name)}"
         style="width:100%;height:240px;border-radius:16px;object-fit:cover;display:block;">
       <div style="${FONT}color:${INK};font-weight:800;font-size:20px;line-height:1.25;margin-top:12px;">${esc(e.name)}</div>
