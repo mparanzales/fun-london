@@ -36,7 +36,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
   alternativesFor,
-  withinWalkOfAny,
+  withinWalkOfAll,
   withinBudget,
   relinkSteps,
   isDaytimeHour,
@@ -513,10 +513,19 @@ export function PlanFlow({
       // current venue is excluded from its own list, so cycling could never
       // bring back what you started with. Tested with the SAME predicate the
       // list was built with, so the two cannot disagree.
+      //
+      // 🧨 Tested with `withinWalkOfAll` against the ADJACENT stops — the same
+      // predicate, and the same neighbours, the list itself was built with.
+      // The first version used withinWalkOfAny over every other stop, which is
+      // strictly looser, so the one venue added here by hand could have been
+      // the single option that broke the walk. A second copy of a rule that
+      // disagrees with the first is how this whole defect started.
       const original = baseStops[i]?.venue;
       if (!original || original.id === forStops[i]?.venue.id) return list;
-      const others = forStops.filter((_, j) => j !== i).map((x) => x.venue);
-      if (!withinWalkOfAny(original, others)) return list;
+      const neighbours = [forStops[i - 1], forStops[i + 1]]
+        .filter(Boolean)
+        .map((x) => x.venue);
+      if (!withinWalkOfAll(original, neighbours)) return list;
       return [original, ...list.filter((v) => v.id !== original.id)];
     },
     [
