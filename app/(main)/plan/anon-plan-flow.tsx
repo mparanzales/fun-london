@@ -304,8 +304,14 @@ export function AnonPlanFlow({
       // resolves to 1pm, and max(…, now) then moves it forward. Pinning that
       // stamp would re-date a day out into the evening on restore, so the
       // clamp's verdict wins over the resolver's.
+      //
+      // RAISED only (`>`), never merely "changed". The clamp has an upper
+      // bound too — now + 7d — and hitting THAT means a deliberately
+      // scheduled night was pulled back, which is still a fixed time. `!==`
+      // would have flipped it to live and let a plan for next Saturday drift
+      // onto the current clock.
       tracksClockRef.current =
-        t.tracksClock || startsAt.getTime() !== Date.parse(t.whenISO);
+        t.tracksClock || startsAt.getTime() > Date.parse(t.whenISO);
       setStartISO(startsAt.toISOString());
       setStartLabel(
         startsAt
