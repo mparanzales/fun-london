@@ -12,6 +12,15 @@ import { readdirSync, statSync, readFileSync } from "fs";
 import { join } from "path";
 
 const ROOTS = ["app", "components", "lib"];
+
+// Individual files outside the roots that still emit USER-FACING text.
+//
+// scripts/ as a whole is deliberately NOT a root: it is full of console.log
+// diagnostics that only a developer reads, and scanning it flags 251 dashes
+// that are all correct. The weekly digest is the exception, because everything
+// it composes is posted to real subscribers. It had been claiming in its own
+// header comment that this guard covered it, which was never true.
+const EXTRA_FILES = ["scripts/send-weekly-digest.ts"];
 const EXT = /\.(ts|tsx)$/;
 const BAD: { re: RegExp; name: string }[] = [
   { re: /—/, name: "em dash (—)" },
@@ -62,6 +71,14 @@ for (const root of ROOTS) {
     walk(root, files);
   } catch {
     // root may not exist in some setups
+  }
+}
+for (const f of EXTRA_FILES) {
+  try {
+    statSync(f);
+    files.push(f);
+  } catch {
+    // file may not exist in some setups
   }
 }
 

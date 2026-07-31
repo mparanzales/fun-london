@@ -25,7 +25,7 @@ function page(title: string, body: string): Response {
   h1 { font-size:20px; margin:0 0 8px; color:#1a1409; }
   p { font-size:14px; line-height:1.5; color:#645c50; margin:0 0 20px; }
   button, a.btn { display:inline-block; border:0; cursor:pointer; text-decoration:none;
-    background:hsl(233 70% 55%); color:#fff; font-weight:800; font-size:14px;
+    background:hsl(250 70% 50%); color:#fff; font-weight:800; font-size:14px;
     padding:12px 22px; border-radius:14px; }
   a.muted { color:#645c50; font-size:13px; }
 </style></head><body><div class="card">${body}</div></body></html>`;

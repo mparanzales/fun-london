@@ -37,6 +37,53 @@ dotenv.config({ path: ".env.local" });
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { EVENT_SUBSCRIPTIONS, type EventSubscription } from "./events-seed";
 import { tmCategory } from "./event-category";
+import { repairMojibake, hasControlChars } from "@/lib/text";
+
+// Provider text is not trustworthy. Ticketmaster's Discovery API served an
+// event title containing the unprintable characters U+0080 and U+0093 where an
+// en dash belonged, verified against the live API on 2026-07-30, and it went
+// out in a weekly digest to real subscribers as a row of boxes. Re-ingesting
+// could never fix that: the corruption is in the feed itself.
+//
+// So every string from a provider goes through here on the way in. The log
+// line matters as much as the repair. A feed that starts serving garbage at
+// scale should be visible in the cron output, not silently laundered.
+//
+// This repairs ONLY. It deliberately does not apply the no-dashes brand rule,
+// which belongs on the read path: what we store stays faithful to what the
+// provider sent. That fidelity is what made this bug diagnosable in the first
+// place, since the stored bytes matched the live API exactly and proved the
+// corruption was upstream rather than ours.
+//
+// Recovered and dropped are counted separately on purpose. Counting only
+// "inputs that contained controls" would report a silent deletion as a
+// success, which is the same class of lie as a green tick over a dead cron.
+let repairedFields = 0;
+let lossyFields = 0;
+
+function clean<T extends string | null | undefined>(
+  value: T,
+  provider: string,
+  sourceId: string,
+  field: string,
+): T {
+  if (value == null || !hasControlChars(value)) return value;
+  const fixed = repairMojibake(value) as string;
+  // Anything printable that vanished means the repair was lossy, not clean.
+  const lossy = [...(value as string)].some(
+    (c) => c.codePointAt(0)! > 0x9f && !fixed.includes(c),
+  );
+  if (lossy) {
+    lossyFields++;
+    console.log(
+      `  ! ${provider}/${sourceId}: ${field} had UNRECOVERABLE corruption`,
+    );
+  } else {
+    repairedFields++;
+    console.log(`  ~ ${provider}/${sourceId}: repaired ${field}`);
+  }
+  return fixed as T;
+}
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -361,7 +408,7 @@ function ebToFetched(
   e: EventbriteEvent,
   category: string,
 ): FetchedEvent | null {
-  const name = e.name?.text?.trim();
+  const name = clean(e.name?.text?.trim(), "eventbrite", e.id ?? "?", "name");
   const startUtc = e.start?.utc;
   if (!name || !startUtc) return null;
 
@@ -405,7 +452,12 @@ function ebToFetched(
     // variant can't silently zero the adapter's output.
     img_url: safeImageUrl(e.logo?.original?.url) || safeImageUrl(e.logo?.url),
     // Organizer-written copy — real words from the person running it.
-    description: e.description?.text?.trim() || null,
+    description: clean(
+      e.description?.text?.trim() || null,
+      "eventbrite",
+      e.id ?? "?",
+      "description",
+    ),
     sold_out: ta?.is_sold_out ?? false,
   };
 }
@@ -628,14 +680,19 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
   return {
     source_id: e.id,
     source_url: e.url ?? "",
-    name: e.name,
+    name: clean(e.name, "ticketmaster", e.id, "name"),
     starts_at: startsAt,
     ends_at: endsAt,
     time_label: timeLabel,
     price,
     category,
     img_url: safeImageUrl(img?.url),
-    description: e.info ?? e.pleaseNote ?? null,
+    description: clean(
+      e.info ?? e.pleaseNote ?? null,
+      "ticketmaster",
+      e.id,
+      "description",
+    ),
     sold_out: soldOut,
   };
 }
@@ -1099,6 +1156,10 @@ async function main() {
   console.log(`Events fetched/kept:     ${tally.fetched}`);
   console.log(`Upserted:                ${tally.upserted}`);
   console.log(`Cancelled/removed:       ${tally.deactivated}`);
+  // Visible, never silent: a rising number here means a provider's own feed is
+  // degrading, which is worth knowing before subscribers read it as boxes.
+  console.log(`Provider text repaired:  ${repairedFields}`);
+  console.log(`Unrecoverable text:      ${lossyFields}`);
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Ingestion complete."}`);
 
   // Green-but-empty guard: at least one provider pass threw AND the whole run
