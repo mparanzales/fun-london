@@ -17,6 +17,13 @@ import * as dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { tidyText } from "@/lib/text";
 import { sizedImageUrl } from "@/lib/img";
+import {
+  computePlan,
+  planRationale,
+  type Plan,
+  type PlanVibe,
+} from "@/lib/plan-engine";
+import type { Venue, VenueType, PriceTier, TimeOfDay } from "@/lib/types";
 
 dotenv.config({ path: ".env.local" });
 
@@ -39,7 +46,10 @@ const SITE_URL = (
 ).replace(/\/$/, "");
 const EMAIL_FROM = process.env.EMAIL_FROM || "Fun London <hello@funldn.com>";
 
-const NEW_VENUE_DAYS = 7;
+// Number(undefined) is NaN and NaN || 7 falls through, so the override is
+// opt-in and typo-safe. Used to preview the venues section in weeks that
+// shipped no new venues; the cron never sets it.
+const NEW_VENUE_DAYS = Number(process.env.FL_DIGEST_VENUE_DAYS) || 7;
 const MAX_VENUES = 6;
 const MAX_EVENTS = 6;
 
@@ -142,12 +152,12 @@ async function newVenues(): Promise<VenueLite[]> {
 
 async function eventsThisWeek(): Promise<EventLite[]> {
   const now = new Date().toISOString();
-  const horizon = new Date(
-    Date.now() + 7 * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const horizon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("events")
-    .select("id, name, venue_name, area, date_label, time_label, img_url, starts_at")
+    .select(
+      "id, name, venue_name, area, date_label, time_label, img_url, starts_at",
+    )
     .is("cancelled_at", null)
     .neq("img_url", "")
     .gte("starts_at", now)
@@ -191,16 +201,185 @@ async function recipients(): Promise<Recipient[]> {
     .filter((r): r is Recipient => r !== null);
 }
 
+// ── The night of the week ─────────────────────────────────────────────────
+//
+// The one thing this email can carry that no places newsletter can: a REAL
+// night, built by the same computePlan the app runs, with real walking
+// minutes and real arrival times, every stop checked open at its own arrival.
+// Nothing is mocked; if the engine cannot fill a night the section is
+// omitted entirely rather than faked (honest-copy rule).
+
+// Mirrors lib/queries.ts mapVenuePlan. Duplicated deliberately: queries.ts
+// imports the Next server runtime (next/headers via supabase/server), which
+// does not exist under tsx, so this script cannot import the original. Keep
+// the two in step if VENUE_PLAN_COLUMNS grows.
+const VENUE_PLAN_COLUMNS =
+  "id, slug, name, type, vibe, vibe_tags, neighbourhood, price, time_of_day, rating, review_count, lat, lng, opening_hours, plan_note, img_url, curation_tier, created_at";
+
+type PlanRow = {
+  id: string;
+  slug: string;
+  name: string;
+  type: string;
+  vibe: string;
+  vibe_tags: string[] | null;
+  neighbourhood: string;
+  price: string;
+  time_of_day: string;
+  rating: number;
+  review_count: number;
+  lat: number;
+  lng: number;
+  opening_hours: Venue["openingHours"];
+  plan_note: string | null;
+  img_url: string;
+  curation_tier: string | null;
+  created_at: string;
+};
+
+function rowToVenue(r: PlanRow): Venue {
+  return {
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    type: r.type as VenueType,
+    vibe: tidyText(r.vibe),
+    longDescription: "",
+    neighbourhood: r.neighbourhood,
+    address: "",
+    lat: r.lat,
+    lng: r.lng,
+    price: r.price as PriceTier,
+    timeOfDay: r.time_of_day as TimeOfDay,
+    rating: Number(r.rating),
+    reviewCount: r.review_count,
+    walkingMins: 0,
+    tablesFree: 0,
+    nextSlotLabel: "",
+    imgUrl: r.img_url,
+    photoUrls: [],
+    moodTags: [],
+    vibeTags: r.vibe_tags ?? [],
+    googlePlaceId: null,
+    bookingLinks: null,
+    websiteUrl: null,
+    phone: null,
+    instagramHandle: null,
+    editorialSources: null,
+    creatorCoverage: null,
+    criticalFlags: null,
+    openingHours: r.opening_hours,
+    mapUrl: null,
+    reviews: null,
+    planNote: r.plan_note ?? null,
+    menuUrl: null,
+    curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
+    createdAt: r.created_at,
+  } as Venue;
+}
+
+// Rotate the brief by ISO week so each digest draws a different night, and
+// two sends in the same week draw the same one (idempotent re-runs).
+const NIGHT_AREAS = [
+  "Soho",
+  "Shoreditch",
+  "Fitzrovia",
+  "Covent Garden",
+  "Islington",
+  "Camden",
+  "Borough",
+  "Notting Hill",
+];
+const NIGHT_VIBES: PlanVibe[] = ["Chill", "Lively", "Unique", "Fancy"];
+
+function isoWeek(d: Date): number {
+  const t = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t.getTime() - y0.getTime()) / 86400000 + 1) / 7);
+}
+
+// A Date whose Europe/London wall clock reads `hour`:00 on the given day.
+// Works across GMT/BST without hardcoding an offset.
+function londonAt(y: number, m: number, d: number, hour: number): Date {
+  const guess = new Date(Date.UTC(y, m, d, hour));
+  const wall = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      hour: "numeric",
+      hour12: false,
+    }).format(guess),
+  );
+  return new Date(guess.getTime() + (hour - wall) * 3600000);
+}
+
+function upcomingFriday19(): Date {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const add = (5 - day + 7) % 7 || 7; // next Friday, never today
+  const f = new Date(now.getTime() + add * 86400000);
+  return londonAt(f.getUTCFullYear(), f.getUTCMonth(), f.getUTCDate(), 19);
+}
+
+function fmtLondonTime(d: Date): string {
+  // Assembled from parts: Intl's joined string carries a narrow no-break
+  // space before the meridiem, which has no place in an email.
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("hour")}:${get("minute")} ${get("dayPeriod").toUpperCase()}`;
+}
+
+async function weeklyNight(): Promise<Plan | null> {
+  try {
+    const PAGE = 1000;
+    const rows: PlanRow[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("venues")
+        .select(VENUE_PLAN_COLUMNS)
+        .not("google_place_id", "is", null)
+        .is("hidden_at", null)
+        .not("img_url", "ilike", "%unsplash%")
+        .neq("img_url", "")
+        .order("rating", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const page = (data ?? []) as PlanRow[];
+      rows.push(...page);
+      if (page.length < PAGE) break;
+    }
+    const week = isoWeek(new Date());
+    const plan = computePlan(rows.map(rowToVenue), {
+      area: {
+        kind: "neighbourhood",
+        name: NIGHT_AREAS[week % NIGHT_AREAS.length],
+      },
+      vibe: NIGHT_VIBES[week % NIGHT_VIBES.length],
+      budget: "Any",
+      daypart: "evening",
+      when: upcomingFriday19(),
+    });
+    if (plan.steps.length < 2) return null; // never send a one-stop "night"
+    return plan;
+  } catch (err) {
+    // The digest still goes out without the night; it never fails the send.
+    console.error("weeklyNight failed (section omitted):", err);
+    return null;
+  }
+}
+
 // ── Email HTML ────────────────────────────────────────────────────────────
 
 // Shares lib/text.ts with the website, so a title reads the same in the inbox
-// as it does on the page. That helper applies the no-dashes brand rule AND
-// repairs provider mojibake: this digest is where the Ticketmaster corruption
-// actually surfaced, going out to real subscribers as a row of boxes.
-//
-// Quotes are escaped too. Several of these values land inside HTML attributes
-// (img src, anchor href) and one stray quote in a provider image URL would
-// break out of the attribute.
+// as it does on the page: mojibake repair + the no-dashes brand rule. Quotes
+// are escaped because several values land inside HTML attributes.
 function esc(s: string): string {
   return tidyText(s ?? "")
     .replace(/&/g, "&amp;")
@@ -210,122 +389,213 @@ function esc(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function venueCard(v: VenueLite): string {
-  return `<tr><td style="padding:8px 0;">
-    <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td width="84" valign="top">
-        <img src="${esc(sizedImageUrl(v.img_url, 144))}" width="72" height="72"
-          alt="${esc(v.name)}"
-          style="border-radius:12px;object-fit:cover;display:block;">
-      </td>
-      <td valign="top" style="padding-left:12px;">
-        <a href="${SITE_URL}/venue/${esc(v.slug)}"
-          style="color:#1a1409;font-weight:800;font-size:15px;text-decoration:none;">
-          ${esc(v.name)}</a>
-        <div style="color:#645c50;font-size:12px;margin-top:2px;">
-          ${esc(v.type)} &middot; ${esc(v.neighbourhood)}</div>
-        <div style="color:#2a2419;font-size:13px;font-style:italic;margin-top:4px;">
-          ${esc(v.vibe)}</div>
-      </td>
-    </tr></table>
+const INK = "#1a1409";
+const INK_SOFT = "#2a2419";
+const CREAM = "#f0eee9";
+const LINE = "#e3ddd2";
+// Night theme, verbatim from globals.css [data-theme="night"]: the night of
+// the week renders in the app's own night mode. The clock is product.
+const NIGHT_BG = "#14121a";
+const NIGHT_FG = "#ece6d9";
+const NIGHT_MUTED = "#9c9385";
+// Canon accent (hsl(266 78% 58%)) as hex for the Word engine; the dashed
+// connector law is 2px dashed ACCENT violet, not an invented tint.
+const ACCENT = "#8940E7";
+const VIOLET_PALE = "#C9BFF2"; // eyebrows on violet/night surfaces only
+const VIOLET_WASH = "#EDE9FE";
+// The signature gradient, canon recipe hsl(240 84% 60%) -> hsl(266 78% 58%),
+// rationed to ONE hero moment: the masthead. bgcolor carries Outlook.
+const GRADIENT = "linear-gradient(135deg,#4343EF 0%,#8940E7 100%)";
+
+// Outlook's Word engine does not inherit font-family into tables, so the
+// stack rides inline on every text-bearing block, not just <body>.
+const FONT =
+  "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
+
+function sectionHead(eyebrow: string, headline: string): string {
+  return `<div style="${FONT}font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:${BRAND_VIOLET};">${eyebrow}</div>
+    <div style="${FONT}font-size:24px;font-weight:800;color:${INK};margin-top:3px;">${headline}</div>`;
+}
+
+// ── The night line ────────────────────────────────────────────────────────
+// Large editorial numerals, a CONTINUOUS dashed spine (background-image
+// repeat-y on the numeral column, so it spans chip to chip whatever the row
+// height — a fixed-height connector row is how it degraded to a timeline
+// component), real walk minutes, real arrival times. Outlook drops
+// background-image and degrades to numerals without the spine.
+
+const ROLE_LABEL: Record<string, string> = {
+  Start: "START",
+  Then: "THEN",
+  Finish: "FINISH",
+};
+
+function spine(offsetTop: number): string {
+  return `background-image:linear-gradient(${ACCENT} 50%,transparent 50%);background-size:2px 8px;background-repeat:repeat-y;background-position:21px ${offsetTop}px;`;
+}
+
+function nightStop(
+  step: Plan["steps"][number],
+  n: number,
+  last: boolean,
+): string {
+  const v = step.venue;
+  const arrive = step.arriveAt
+    ? ` &middot; arrive ${fmtLondonTime(step.arriveAt)}`
+    : "";
+  return `<tr><td width="44" valign="top" align="left" style="${last ? "" : spine(46)}">
+      <div style="${FONT}font-size:34px;font-weight:800;line-height:1;color:${ACCENT};width:44px;text-align:left;">${n}</div>
+    </td>
+    <td valign="top" style="padding:2px 0 22px 4px;">
+      <div style="${FONT}font-size:10px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:${VIOLET_PALE};">${ROLE_LABEL[step.role] ?? step.role}${arrive}</div>
+      <a href="${SITE_URL}/venue/${esc(v.slug)}" style="${FONT}color:#ffffff;font-weight:800;font-size:17px;line-height:1.3;text-decoration:none;">${esc(v.name)}</a>
+      <div style="${FONT}color:${NIGHT_MUTED};font-size:12px;margin-top:2px;">${esc(v.neighbourhood)} &middot; ${esc(v.type)} &middot; ${esc(v.price)}</div>
+      <div style="${FONT}color:${NIGHT_FG};font-size:13px;font-style:italic;margin-top:4px;">${esc(v.vibe)}</div>${
+        step.walkToNextMins != null && !last
+          ? `<div style="${FONT}color:${NIGHT_MUTED};font-size:12px;margin-top:10px;">&darr; ${step.walkToNextMins} min walk</div>`
+          : ""
+      }
+    </td>
+    <td width="72" valign="top" align="right" style="padding-bottom:22px;">
+      <img src="${esc(sizedImageUrl(v.imgUrl, 144))}" width="60" height="60" alt="${esc(v.name)}"
+        style="border-radius:12px;object-fit:cover;display:block;">
+    </td>
+  </tr>`;
+}
+
+function nightBlock(plan: Plan): string {
+  const stops = plan.steps
+    .map((step, i) => nightStop(step, i + 1, i === plan.steps.length - 1))
+    .join("");
+  const hours = Math.floor(plan.totalMins / 60);
+  const mins = plan.totalMins % 60;
+  const span = `${hours ? `${hours}h ` : ""}${mins ? `${mins}m` : ""}`.trim();
+  return `<tr><td style="padding:30px 0 0;">
+    <table width="100%" cellpadding="0" cellspacing="0" bgcolor="${NIGHT_BG}" style="background:${NIGHT_BG};border-radius:20px;">
+      <tr><td style="padding:24px 22px 22px;">
+        <img src="${SITE_URL}/email/night-line.gif" width="392" height="44" alt=""
+          style="width:100%;height:auto;display:block;margin-bottom:14px;">
+        <div style="${FONT}font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:${VIOLET_PALE};">Friday &middot; ${esc(plan.area)} &middot; ${span} on the night</div>
+        <div style="${FONT}font-size:26px;font-weight:800;color:#ffffff;margin-top:3px;">one night, drawn.</div>
+        <div style="${FONT}font-size:13px;font-style:italic;color:${NIGHT_FG};margin-top:5px;margin-bottom:20px;">${esc(planRationale(plan))}</div>
+        <table width="100%" cellpadding="0" cellspacing="0">${stops}</table>
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td bgcolor="#ffffff" style="background:#ffffff;border-radius:14px;">
+            <a href="${SITE_URL}/plan"
+              style="${FONT}display:block;text-align:center;color:${BRAND_VIOLET};
+              font-weight:800;font-size:15px;line-height:1;text-decoration:none;
+              padding:16px 20px;">Draw my own night</a>
+          </td>
+        </tr></table>
+      </td></tr>
+    </table>
   </td></tr>`;
+}
+
+// ── Photo grid: places and events as cards, two up, air between ──────────
+
+type GridCell = {
+  href: string;
+  img: string;
+  title: string;
+  metaStrong: string;
+  meta: string;
+};
+
+function gridCellHtml(c: GridCell | null): string {
+  if (!c) return `<td width="188"></td>`;
+  return `<td width="188" valign="top" style="padding-bottom:26px;">
+    <a href="${c.href}" style="text-decoration:none;">
+      <img src="${c.img}" width="188" height="132" alt="${c.title}"
+        style="width:100%;height:132px;border-radius:16px;object-fit:cover;display:block;">
+      <div style="${FONT}color:${INK};font-weight:800;font-size:14px;line-height:1.3;margin-top:9px;min-height:36px;">${c.title}</div>
+      <div style="${FONT}color:${MUTED_FG};font-size:11px;margin-top:2px;"><span style="color:${INK_SOFT};font-weight:600;">${c.metaStrong}</span> &middot; ${c.meta}</div>
+    </a>
+  </td>`;
+}
+
+function grid(cells: GridCell[]): string {
+  let out = "";
+  for (let i = 0; i < cells.length; i += 2) {
+    out += `<tr>${gridCellHtml(cells[i])}<td width="16"></td>${gridCellHtml(
+      cells[i + 1] ?? null,
+    )}</tr>`;
+  }
+  return `<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;">${out}</table>`;
+}
+
+function venueCell(v: VenueLite): GridCell {
+  return {
+    href: `${SITE_URL}/venue/${esc(v.slug)}`,
+    img: esc(sizedImageUrl(v.img_url, 512)),
+    title: esc(v.name),
+    metaStrong: esc(v.neighbourhood),
+    meta: esc(v.type),
+  };
+}
+
+function eventCell(e: EventLite): GridCell {
+  return {
+    href: `${SITE_URL}/event/${esc(e.id)}`,
+    img: esc(sizedImageUrl(e.img_url, 512)),
+    title: esc(e.name),
+    metaStrong: esc(e.venue_name),
+    meta: `${esc(e.date_label)} &middot; ${esc(e.time_label)}`,
+  };
 }
 
 function heroEvent(e: EventLite): string {
-  // Same information order as eventRow and the app card, at lead-story scale.
-  // Outlook cannot object-fit, so a non-16:9 poster squashes slightly there;
-  // every modern client crops. The alt text is the WebP fallback, as in
-  // eventRow.
-  return `<tr><td style="padding:12px 0 4px;">
+  // The lead story: full-width photography, then the same information order
+  // as the app card. Outlook cannot object-fit; alt is the WebP fallback.
+  return `<div style="padding-top:16px;">
     <a href="${SITE_URL}/event/${esc(e.id)}" style="text-decoration:none;">
-      <img src="${esc(sizedImageUrl(e.img_url, 800))}" width="392" height="210"
+      <img src="${esc(sizedImageUrl(e.img_url, 800))}" width="392" height="240"
         alt="${esc(e.name)}"
-        style="width:100%;height:210px;border-radius:14px;object-fit:cover;display:block;">
-      <div style="color:#1a1409;font-weight:800;font-size:18px;line-height:1.25;margin-top:12px;">${esc(
-        e.name,
-      )}</div>
-      <div style="color:${MUTED_FG};font-size:12px;margin-top:3px;">
-        <span style="color:#2a2419;font-weight:600;">${esc(e.venue_name)}</span>
+        style="width:100%;height:240px;border-radius:16px;object-fit:cover;display:block;">
+      <div style="${FONT}color:${INK};font-weight:800;font-size:20px;line-height:1.25;margin-top:12px;">${esc(e.name)}</div>
+      <div style="${FONT}color:${MUTED_FG};font-size:12px;margin-top:3px;">
+        <span style="color:${INK_SOFT};font-weight:600;">${esc(e.venue_name)}</span>
         &middot; ${esc(e.area)} &middot; ${esc(e.date_label)} &middot; ${esc(e.time_label)}</div>
     </a>
-  </td></tr>`;
-}
-
-function eventRow(e: EventLite): string {
-  // Field order matches components/event-card.tsx: name, then VENUE and area,
-  // then date and time. The digest had it inverted, which put a near-constant
-  // value in the loud slot (nine of this week's events start at 19:00, so most
-  // rows read "7:00 PM") while the field that actually differs between rows was
-  // demoted to the quietest line.
-  //
-  // alt carries the real name. R2 photography is WebP, which Outlook desktop
-  // cannot render at all, so alt="" turned the section into blank boxes there.
-  // sizedImageUrl picks the 512px variant rather than the 1280px one, which is
-  // a weight win for a 72px thumbnail but does NOT fix WebP in Outlook. Only
-  // the alt text does, by degrading to something a reader can act on.
-  return `<tr><td style="padding:8px 0;">
-    <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td width="84" valign="top">
-        <img src="${esc(sizedImageUrl(e.img_url, 144))}" width="72" height="72"
-          alt="${esc(e.name)}"
-          style="border-radius:12px;object-fit:cover;display:block;">
-      </td>
-      <td valign="top" style="padding-left:12px;">
-        <a href="${SITE_URL}/event/${esc(e.id)}"
-          style="color:#1a1409;font-weight:800;font-size:15px;text-decoration:none;">
-          ${esc(e.name)}</a>
-        <div style="color:${MUTED_FG};font-size:12px;margin-top:2px;">
-          <span style="color:#2a2419;font-weight:600;">${esc(e.venue_name)}</span>
-          &middot; ${esc(e.area)}</div>
-        <div style="color:${MUTED_FG};font-size:12px;margin-top:2px;">
-          ${esc(e.date_label)} &middot; ${esc(e.time_label)}</div>
-      </td>
-    </tr></table>
-  </td></tr>`;
-}
-
-function section(title: string, rows: string): string {
-  if (!rows) return "";
-  return `<tr><td style="padding:20px 24px 0;">
-    <div style="font-size:12px;font-weight:800;letter-spacing:0.08em;
-      text-transform:uppercase;color:${BRAND_VIOLET};">${title}</div>
-    <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
-  </td></tr>`;
+  </div>`;
 }
 
 function buildHtml(
+  plan: Plan | null,
   venues: VenueLite[],
   events: EventLite[],
   unsubUrl: string,
 ): string {
-  const venuesBlock = section(
-    "New this week &middot; first stops",
-    venues.map(venueCard).join(""),
-  );
-  // Lead story + briefs. One big photo-led card, then compact rows: the email
-  // reads as a page, not a list. Photography is the app's own language and the
-  // one thing a places email cannot feel alive without.
-  const [lead, ...briefs] = events;
-  const eventsBlock = section(
-    "On this week",
-    (lead ? heroEvent(lead) : "") + briefs.map(eventRow).join(""),
-  );
-  // <head> is load bearing, and its absence was a live bug waiting on the
-  // calendar. With no charset declared, mail clients fall back to Latin-1 and
-  // render every multi-byte character as mojibake. 97 venue names carry
-  // accents (Abraco, ALAIA, Cafe Kitsune, Berbere, Blabar, Arome), so the
-  // first week one of those was new, every subscriber would have seen
-  // gibberish. It had simply never fired: the run that exposed this shipped
-  // 0 new venues.
-  //
-  // format-detection + the x-apple-data-detectors rules stop iOS Mail
-  // auto-linking times and street addresses. Left alone it underlines
-  // "7:00 PM" and "64 Brick Lane" in its own blue, which is what made the
-  // layout read as broken and unstyled.
+  const nightSection = plan ? nightBlock(plan) : "";
+
+  const venuesSection = venues.length
+    ? `<tr><td style="padding:34px 0 0;">
+        ${sectionHead("New this week", "first stop material.")}
+        ${grid(venues.map(venueCell))}
+      </td></tr>`
+    : "";
+
+  const [lead, ...allBriefs] = events;
+  // An odd brief count leaves a dangling half-row; show an even number.
+  const briefs = allBriefs.slice(0, allBriefs.length - (allBriefs.length % 2));
+  const eventsSection = events.length
+    ? `<tr><td style="padding:26px 0 0;">
+        ${sectionHead("On this week", "worth leaving the house for.")}
+        ${lead ? heroEvent(lead) : ""}
+        ${briefs.length ? grid(briefs.map(eventCell)) : ""}
+      </td></tr>`
+    : "";
+
+  // <head> is load bearing: no charset means Latin-1 fallback and mojibake on
+  // the 97 accented venue names. format-detection + x-apple-data-detectors
+  // stop iOS Mail auto-linking times and addresses. supported-color-schemes
+  // opts out of Apple Mail's forced dark, which would collapse the cream page
+  // and flatten the night panel's contrast.
   return `<!doctype html><html lang="en"><head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light only">
+  <meta name="supported-color-schemes" content="light">
   <meta name="format-detection" content="telephone=no,date=no,address=no,email=no">
   <title>${SUBJECT}</title>
   <style>
@@ -339,40 +609,35 @@ function buildHtml(
     }
     img { border: 0; outline: none; text-decoration: none; }
   </style>
-  </head><body style="margin:0;background:#f0eee9;
-    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <!-- bgcolor attributes are load bearing for Outlook on Windows: it renders
-       through the Word engine, which drops the CSS background shorthand and
-       would leave the cream page white. The width attribute is there for the
-       same reason, since max-width alone is ignored and the card would become
-       a full-window slab. Modern clients take the inline width:100%. -->
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">plan the night, not the place. New places and what is on this week.</div>
-  <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f0eee9" style="background:#f0eee9;padding:24px 0;">
-    <tr><td align="center" style="padding:0 12px;">
-      <table width="440" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
-        style="width:100%;max-width:440px;background:#ffffff;border-radius:18px;
-        border:1px solid #e3ddd2;">
-        <tr><td bgcolor="${BRAND_VIOLET}" style="background:${BRAND_VIOLET};border-radius:17px 17px 0 0;padding:26px 24px 24px;">
-          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:#D8CFFA;">London &middot; this week</div>
-          <div style="font-size:26px;font-weight:800;color:#ffffff;margin-top:6px;">Fun London</div>
-          <div style="font-size:16px;font-style:italic;color:#EDE9FE;margin-top:8px;">plan the night, not the place.</div>
+  </head><body style="margin:0;background:${CREAM};${FONT}">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">plan the night, not the place. One drawn night, new places, and what is on.</div>
+  <!-- Frameless: the sections sit straight on the cream canvas, like the app.
+       bgcolor attributes carry Outlook, whose Word engine drops CSS
+       backgrounds and gradients (it gets solid violet). -->
+  <table width="100%" cellpadding="0" cellspacing="0" bgcolor="${CREAM}" style="background:${CREAM};padding:28px 0;">
+    <tr><td align="center" style="padding:0 14px;">
+      <table width="440" cellpadding="0" cellspacing="0" style="width:100%;max-width:440px;">
+        <tr><td bgcolor="${BRAND_VIOLET}" style="background:${BRAND_VIOLET};background-image:${GRADIENT};border-radius:20px;padding:30px 26px;">
+          <div style="${FONT}font-size:11px;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;color:${VIOLET_PALE};">London &middot; this week</div>
+          <div style="${FONT}font-size:30px;font-weight:800;color:#ffffff;margin-top:6px;">Fun London</div>
+          <div style="${FONT}font-size:17px;font-style:italic;color:${VIOLET_WASH};margin-top:8px;">plan the night, not the place.</div>
         </td></tr>
-        <tr><td style="padding:18px 24px 0;">
-          <div style="font-size:14px;color:#645c50;">
-            New places and what is on this week.
-            The night itself takes seconds to build.</div>
+        ${nightSection}
+        ${venuesSection}
+        ${eventsSection}
+        <tr><td style="padding:32px 0 0;">
+          <div style="${FONT}font-size:11px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:${BRAND_VIOLET};margin-bottom:10px;">Tonight, in three stops</div>
+          <table width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td bgcolor="${BRAND_VIOLET}" style="background:${BRAND_VIOLET};border-radius:16px;">
+              <a href="${SITE_URL}/plan"
+                style="${FONT}display:block;text-align:center;color:#ffffff;
+                font-weight:800;font-size:15px;line-height:1;text-decoration:none;
+                padding:17px 22px;">Build my night</a>
+            </td>
+          </tr></table>
         </td></tr>
-        ${venuesBlock}
-        ${eventsBlock}
-        <tr><td style="padding:28px 24px;">
-          <div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:${BRAND_VIOLET};margin-bottom:10px;">Tonight, in three stops</div>
-          <a href="${SITE_URL}/plan"
-            style="display:block;text-align:center;background:${BRAND_VIOLET};color:#fff;
-            font-weight:800;font-size:15px;line-height:1;text-decoration:none;
-            padding:16px 22px;border-radius:12px;">Build my night</a>
-        </td></tr>
-        <tr><td style="padding:0 24px 24px;">
-          <div style="border-top:1px solid #e3ddd2;padding-top:14px;font-size:11px;color:${MUTED_FG};line-height:1.5;">
+        <tr><td style="padding:26px 0 8px;">
+          <div style="border-top:1px solid ${LINE};padding-top:14px;${FONT}font-size:11px;color:${MUTED_FG};line-height:1.5;">
             You are getting this because you turned on weekly emails in your Fun
             London profile.<br>
             <a href="${unsubUrl}" style="color:${MUTED_FG};">Unsubscribe</a>
@@ -411,7 +676,9 @@ async function sendOne(
     }),
   });
   if (!res.ok) {
-    console.error(`  ! send to ${to} failed ${res.status}: ${await res.text()}`);
+    console.error(
+      `  ! send to ${to} failed ${res.status}: ${await res.text()}`,
+    );
     return false;
   }
   return true;
@@ -426,8 +693,19 @@ async function main() {
     `Fun London weekly digest${DRY_RUN ? " (dry run)" : PREVIEW ? " (preview)" : ""}`,
   );
 
-  const [venues, events] = await Promise.all([newVenues(), eventsThisWeek()]);
-  console.log(`Content: ${venues.length} new venues, ${events.length} events this week`);
+  const [venues, events, plan] = await Promise.all([
+    newVenues(),
+    eventsThisWeek(),
+    weeklyNight(),
+  ]);
+  console.log(
+    plan
+      ? `Night of the week: ${planRationale(plan)}`
+      : "Night of the week: none (engine returned no night)",
+  );
+  console.log(
+    `Content: ${venues.length} new venues, ${events.length} events this week`,
+  );
 
   if (venues.length === 0 && events.length === 0) {
     console.log("Nothing new this week. Not sending an empty digest.");
@@ -437,7 +715,12 @@ async function main() {
   const subject = SUBJECT;
 
   if (PREVIEW) {
-    const html = buildHtml(venues, events, `${SITE_URL}/api/email/unsubscribe?token=PREVIEW`);
+    const html = buildHtml(
+      plan,
+      venues,
+      events,
+      `${SITE_URL}/api/email/unsubscribe?token=PREVIEW`,
+    );
     const { writeFileSync } = await import("node:fs");
     writeFileSync("digest-preview.html", html);
     console.log("Wrote digest-preview.html (open it in a browser to review).");
@@ -460,7 +743,7 @@ async function main() {
   let sent = 0;
   for (const r of list) {
     const unsubUrl = `${SITE_URL}/api/email/unsubscribe?token=${encodeURIComponent(r.unsubToken)}`;
-    const html = buildHtml(venues, events, unsubUrl);
+    const html = buildHtml(plan, venues, events, unsubUrl);
     if (await sendOne(r.email, subject, html, unsubUrl)) sent++;
     await sleep(120); // stay well under Resend's rate limit
   }
