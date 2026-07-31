@@ -46,6 +46,30 @@ type RoomRow = {
   host_seen_at: string;
 };
 
+/**
+ * SQLSTATE raised by BOTH room throttles (`configuration_limit_exceeded`).
+ *
+ * The DB limits are the real ones: `create_plan_room` and `join_plan_room` are
+ * granted to `authenticated`, so they are reachable straight over PostgREST and
+ * the Upstash counters above them can simply be skipped. Anything hitting the
+ * RPC directly meets this instead.
+ */
+const THROTTLE_SQLSTATE = "53400";
+
+/**
+ * Did Postgres refuse this because of a rate limit, rather than breaking?
+ *
+ * Kept separate from the generic error branch because collapsing them is how a
+ * throttle becomes a lie: `reason: "error"` falls through failureFromJoin's
+ * default to "denied", which on the CREATE path renders "You're not in this
+ * room" — about a room the user was trying to start, on a screen with no
+ * action. It also matters for analytics: `together_join_denied` reports this
+ * reason, and "error" and "rate-limited" need very different responses.
+ */
+function isThrottled(error: { code?: string } | null): boolean {
+  return error?.code === THROTTLE_SQLSTATE;
+}
+
 function toRecord(row: RoomRow): RoomRecord {
   return {
     id: row.id,
@@ -85,6 +109,13 @@ export async function createRoom(): Promise<RoomResult> {
   const { data, error } = await supabase
     .rpc("create_plan_room")
     .single<RoomRow>();
+  // 🧨 The DB throttle has to be told apart from a generic failure, or it is
+  // WORSE than no throttle. Every error used to collapse to "error", which
+  // failureFromJoin maps through its default to "denied" — so a user who hit
+  // the create limit was told "You're not in this room" on a screen with no
+  // action, about a room they were trying to START. Recognising 53400 sends
+  // them to "That's a lot of rooms", which is both true and actionable.
+  if (isThrottled(error)) return { ok: false, reason: "rate-limited" };
   if (error || !data) return { ok: false, reason: "error" };
   return { ok: true, room: toRecord(data) };
 }
@@ -108,6 +139,11 @@ export async function joinRoom(rawCode: string): Promise<RoomResult> {
   const { data, error } = await supabase
     .rpc("join_plan_room", { p_code: code })
     .maybeSingle<RoomRow>();
+  // Same treatment as create. The user-visible screen is identical either way
+  // (join deliberately stays vague, so both land on "denied"), but the reason
+  // is what `together_join_denied` reports, and "we throttled you" and
+  // "something broke" are not the same finding when reading that funnel.
+  if (isThrottled(error)) return { ok: false, reason: "rate-limited" };
   if (error) return { ok: false, reason: "error" };
   if (!data) {
     // join_plan_room returns NULL for unknown / expired / closed alike (it

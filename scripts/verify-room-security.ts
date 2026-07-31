@@ -257,22 +257,33 @@ async function main() {
             has_table_privilege('authenticated', c.oid, 'select') as auth
        from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname='public'
-        and c.relname in ('plan_rooms','plan_room_members','plan_room_join_attempts')`,
+        and c.relname in ('plan_rooms','plan_room_members',
+                          'plan_room_join_attempts','plan_room_create_attempts')`,
   );
+  // 0005 adds a FOURTH table, and it needs this check more than any of the
+  // others: plan_room_create_attempts has no RLS policies at all, so anon
+  // reads nothing from it whether or not the grant was revoked. There is no
+  // behavioural symptom to notice. The catalog is the only witness.
+  const EXPECTED_ROOM_TABLES = 4;
   const anonReadable = tableGrants.filter((g) => g.anon).map((g) => g.tbl);
   check(
-    tableGrants.length === 3 && anonReadable.length === 0,
-    "anon holds NO select grant on any room table (0001's revoke actually applied)",
-    tableGrants.length !== 3
-      ? `only found ${tableGrants.length}/3 tables`
+    tableGrants.length === EXPECTED_ROOM_TABLES && anonReadable.length === 0,
+    "anon holds NO select grant on any room table (the revokes actually applied)",
+    tableGrants.length !== EXPECTED_ROOM_TABLES
+      ? `only found ${tableGrants.length}/${EXPECTED_ROOM_TABLES} tables: ${tableGrants.map((g) => g.tbl).join(", ") || "none"}`
       : anonReadable.join(", "),
   );
-  const attempts = tableGrants.find((g) => g.tbl === "plan_room_join_attempts");
-  check(
-    !!attempts && !attempts.auth,
-    "authenticated cannot read plan_room_join_attempts (the throttle ledger)",
-    attempts ? `auth=${attempts.auth}` : "absent",
-  );
+  for (const ledger of [
+    "plan_room_join_attempts",
+    "plan_room_create_attempts",
+  ]) {
+    const attempts = tableGrants.find((g) => g.tbl === ledger);
+    check(
+      !!attempts && !attempts.auth,
+      `authenticated cannot read ${ledger} (a throttle ledger)`,
+      attempts ? `auth=${attempts.auth}` : "absent",
+    );
+  }
 
   const predicate = grants.find((g) => g.fn === "is_plan_room_member");
   check(
@@ -290,17 +301,34 @@ async function main() {
   // Report, but only FAIL when 0004 is actually expected. Otherwise this gate
   // exits 1 on every pre-0004 database and "the exposure regressed" becomes
   // indistinguishable from "the hygiene migration has not landed yet".
-  const create0004 =
-    createFn.length === 1 && createFn[0].args.toLowerCase().includes("default");
-  if (create0004 || require0004) {
+  //
+  // 🧨 THE INVARIANT IS "ONE SIGNATURE THE CLIENT CANNOT FEED A CODE TO", NOT
+  // "a DEFAULTed parameter". This tested for the word "default", which was the
+  // 0004 shape; 0005 DROPS the parameter entirely, so on a fully-migrated
+  // database the old test either failed outright (with EXPECT_0004=1) or
+  // printed "0004 not applied yet" about a database that is a migration AHEAD.
+  // A gate that reports a newer schema as an older one is worse than no gate:
+  // it is the "green tick over a broken thing" this repo keeps paying for.
+  //
+  // Both shapes close the oracle. What must NEVER be true is a signature the
+  // caller can pass a code to and have it HONOURED, or two overloads at once
+  // (PostgREST resolves by payload keys, so ambiguity is a routing bug).
+  const args = createFn.map((f) => f.args || "(no args)").join(" | ");
+  const one = createFn.length === 1;
+  const noParam = one && createFn[0].args.trim() === "";
+  const defaulted = one && createFn[0].args.toLowerCase().includes("default");
+  const oracleClosed = noParam || defaulted;
+  if (oracleClosed || require0004) {
     check(
-      create0004,
-      "0004 applied: exactly one create_plan_room, with a DEFAULTed parameter",
-      createFn.map((f) => f.args || "(no args)").join(" | ") || "absent",
+      oracleClosed,
+      noParam
+        ? "0005 applied: exactly one create_plan_room, taking no arguments"
+        : "0004 applied: exactly one create_plan_room, with a DEFAULTed parameter",
+      args || "absent",
     );
   } else {
     console.log(
-      `${INFO}0004 not applied yet (create_plan_room: ${createFn.map((f) => f.args || "(no args)").join(" | ") || "absent"}). Set EXPECT_0004=1 to require it.`,
+      `${INFO}0004/0005 not applied yet (create_plan_room: ${args || "absent"}). Set EXPECT_0004=1 to require it.`,
     );
   }
   const codeGen = await q<{ anon: boolean; auth: boolean }>(

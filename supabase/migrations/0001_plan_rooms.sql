@@ -13,9 +13,15 @@
 --                     the old broad ones still OR in, so nothing breaks)
 --   0003              DROP the broad plan-% policies    ← only after verify
 --
--- Rollback for this file: drop the THREE tables (plan_rooms,
+-- Rollback for this file: drop the THREE tables it creates (plan_rooms,
 -- plan_room_members, plan_room_join_attempts — the last one holds user ids, so
 -- leaving it behind is a data-retention miss) and the NINE functions (see
+-- docs/FUNLDN_GROUP_SECURITY_IMPLEMENTATION.md § Rollback).
+--
+-- ⚠️ ROLLING BACK THE WHOLE TRACK IS FOUR TABLES, NOT THREE: 0005 adds
+-- plan_room_create_attempts, which holds bare user ids for exactly the same
+-- reason and needs dropping for exactly the same reason. This file can only
+-- speak for its own three; 0005's header carries the fourth. (See
 -- docs/FUNLDN_GROUP_SECURITY_IMPLEMENTATION.md § Rollback). Nothing else in
 -- the product reads them until the client change ships.
 -- ─────────────────────────────────────────────────────────────────────────

@@ -43,7 +43,11 @@ describe("migration sequence", () => {
     const inChain = readdirSync(DIR)
       .filter((f) => f.endsWith(".sql"))
       .sort();
-    expect(inChain).toEqual(["0001_plan_rooms.sql", "0004_server_side_room_codes.sql"]);
+    expect(inChain).toEqual([
+      "0001_plan_rooms.sql",
+      "0004_server_side_room_codes.sql",
+      "0005_create_room_throttle.sql",
+    ]);
     for (const f of inChain) {
       const sql = readFileSync(join(DIR, f), "utf8")
         .split("\n")
@@ -277,7 +281,10 @@ describe("post-review hardening (findings from supabase-guardian, 2026-07-29)", 
     );
     // and 0004, which replaces the body, must not reinstate the theatre
     const m4 = readFileSync(
-      join(process.cwd(), "supabase/migrations/0004_server_side_room_codes.sql"),
+      join(
+        process.cwd(),
+        "supabase/migrations/0004_server_side_room_codes.sql",
+      ),
       "utf8",
     )
       .split("\n")
@@ -443,7 +450,34 @@ describe("staging-harness guards (behaviour, not spelling)", () => {
 
   it("the verification gate asserts anon holds no table grant", () => {
     expect(verify).toContain("has_table_privilege('anon'");
-    expect(verify).toContain("plan_room_join_attempts");
+    // 🧨 EVERY user-keyed ledger, not just the first one. This named only
+    // plan_room_join_attempts, so when 0005 added plan_room_create_attempts
+    // the gate could have been left checking three tables out of four and
+    // this guard would still have passed. That omission is invisible by
+    // construction: the new table has no RLS policies, so anon reads nothing
+    // from it whether or not the revoke applied -- the catalog check is the
+    // only witness, which makes "is the catalog check complete?" the whole
+    // question.
+    for (const ledger of [
+      "plan_room_join_attempts",
+      "plan_room_create_attempts",
+    ]) {
+      expect(verify, `${ledger} is not asserted by the gate`).toContain(ledger);
+    }
+    // And the count it compares against must match the list it queries, or
+    // the "only found N/M tables" branch silently stops being reachable.
+    // Anchored to the GRANTS query. verify-room-security.ts has two
+    // `relname in (...)` lists -- the other is the RLS check over two tables --
+    // and an unanchored match picks the wrong one, which is how this assertion
+    // first "found" 2 tables and demanded EXPECTED_ROOM_TABLES = 2.
+    const grantsQuery = verify.slice(
+      verify.indexOf("has_table_privilege('anon'"),
+    );
+    const listed = (
+      grantsQuery.match(/relname in \(([\s\S]*?)\)`/)?.[1] ?? ""
+    ).match(/'([a-z_]+)'/g);
+    expect(listed, "could not parse the room-table list").toBeTruthy();
+    expect(verify).toContain(`const EXPECTED_ROOM_TABLES = ${listed!.length}`);
   });
 
   it("🧨 the suite still USES the shared guard module (not a re-inlined copy)", () => {
@@ -486,9 +520,6 @@ describe("staging-harness guards (behaviour, not spelling)", () => {
     // Asserting the EXACT set, not just "the gate is clean": a THIRD script
     // picking up this import must fail here rather than pass silently.
     // verify-plan and verify-feed-rank are tracked as follow-up work.
-    expect(offenders.sort()).toEqual([
-      "verify-feed-rank.ts",
-      "verify-plan.ts",
-    ]);
+    expect(offenders.sort()).toEqual(["verify-feed-rank.ts", "verify-plan.ts"]);
   });
 });
