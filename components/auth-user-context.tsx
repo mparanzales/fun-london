@@ -21,6 +21,7 @@ import { createClient } from "@/lib/supabase/client";
 import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
 import { clearSignInTrigger } from "@/lib/analytics-keys";
 import { clearAnonPlanKeys, clearActivePlan } from "@/lib/active-plan";
+import { clearRoomInvite } from "@/lib/room-invite";
 import { isSignOutTransition } from "@/lib/auth-transition";
 
 const AuthUserIdContext = createContext<string | null>(null);
@@ -69,6 +70,12 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
         // indefinitely: owner-scoped, so B never SEES it, but it is still A's
         // data left on someone else's machine, and nothing sweeps it.
         clearActivePlan(prevIdRef.current);
+        // 🧨 MANDATORY, not tidiness, and the strongest of the three: the room
+        // invite is a BEARER CREDENTIAL in this browser's storage. The others
+        // leak one person's data to the next; this one would enrol the next
+        // person on a shared browser as a REAL MEMBER of a room they were never
+        // invited to.
+        clearRoomInvite();
       }
 
       prevIdRef.current = nextId;

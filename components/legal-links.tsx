@@ -17,9 +17,12 @@ import Link from "next/link";
 //
 // `newTab` matters at the auth surfaces. The legal pages' shared layout
 // hardcodes its Back link to /explore, so an in-place navigation from a wall
-// or from /sign-in discards the computed ?return= — and on a Plan Together
-// invite (/plan/together?room=ABCD) that silently drops the room code and
-// loses the invitee. Opening in a new tab keeps the funnel intact.
+// or from /sign-in discards the computed ?return= and drops the visitor back
+// at the start of whatever they were doing. Opening in a new tab keeps the
+// funnel intact.
+//
+// (This used to say the dropped ?return= lost a Plan Together invitee's room
+// code. It no longer can: the code is never in a URL. See lib/room-invite.ts.)
 // `showAbout` is a named variant (per the rule above). It adds the company
 // page at exactly two sites — the profile settings row and the legal-page
 // footer — and stays OFF on the auth walls and /sign-in: those are

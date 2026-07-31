@@ -16,18 +16,22 @@ export default async function PlanTogetherPage({
   searchParams: Promise<{ room?: string }>;
 }) {
   const authUser = await getAuthUser();
-  const { room } = await searchParams;
+  // `searchParams` is intentionally NOT read for the room code any more. The
+  // pre-paint script in the root layout has already removed it from the URL by
+  // the time this matters client-side, and the server must never put it back.
+  await searchParams;
 
   // Sign-in only (Stage 5): a room needs real accounts so we can blend each
   // member's saved taste. Anonymous visitors — including anyone who followed an
   // invite link — get the wall instead of the flow, and no room is created.
-  // `returnTo` keeps the room code across sign-in so an invitee lands back on
-  // the SAME room and JOINS it (without it, usePathname drops ?room and they'd
-  // create a fresh, empty room).
+  // 🧨 `returnTo` is now the CONSTANT clean path. It used to interpolate the
+  // room code, which pushed the credential into four places no client-side
+  // sanitizer can reach: the /sign-in URL, the /auth/callback URL, Supabase's
+  // stored redirect_to, and the MAGIC-LINK EMAIL BODY. The code survives the
+  // round trip in browser storage instead (lib/room-invite.ts), armed by the
+  // pre-paint script before this page was ever rendered.
   if (!authUser) {
-    const returnTo = room
-      ? `/plan/together?room=${encodeURIComponent(room)}`
-      : "/plan/together";
+    const returnTo = "/plan/together";
     return (
       <div className="pt-4 pb-6">
         <TogetherTeaser />
