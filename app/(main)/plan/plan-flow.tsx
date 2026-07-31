@@ -77,6 +77,7 @@ import {
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
+import { nextInCycle } from "@/lib/plan-cycle";
 import { SwipeStop } from "./swipe-stop";
 import {
   WhenPicker,
@@ -182,8 +183,10 @@ type DisplayPlan = {
     role: PlanRole;
     dwellMins: number;
     walkToNextMins: number | null;
-    // Estimated arrival time (Stage 4.2). Present only on a freshly computed
-    // plan; re-opened saved plans omit it (the time is relative to "now").
+    // Estimated arrival time (Stage 4.2). Present whenever the night knows
+    // when it starts: a freshly computed plan, and a restored one that
+    // `activate` relinked from its own `startsAt`. Absent on a re-opened saved
+    // row, which stores no start time, and on a night that has already ended.
     arriveAt?: Date | null;
   }[];
 };
@@ -226,10 +229,11 @@ function titleFor(plan: Plan, area: string): string {
   return `${plan.vibe} ${kind} in ${where}`;
 }
 
-// A live plan, with any per-stop swaps applied. swaps[i] is the chosen
-// alternative index for stop i (absent / -1 = keep the original). Swapping a
-// venue changes its dwell, the walk to/from it and every downstream arrival, so
-// the whole sequence is relinked (lib/plan-engine.relinkSteps) to stay honest.
+// The night as it is rendered, with any per-stop replacements already applied.
+// Replacing a venue changes its dwell, the walk to and from it and every
+// downstream arrival, so the whole sequence is relinked
+// (lib/plan-engine.relinkSteps) to stay honest. What has been replaced lives in
+// `EditedNight` below, keyed to the night it belongs to.
 // The resolved pocket (and title) follow the possibly-swapped first stop.
 
 /**
@@ -311,8 +315,8 @@ export function PlanFlow({
   // the freshness anchor, the analytics dimension, and whether the vibe and
   // budget controls are treated as this night's brief.
   //
-  // `base` is the night as it was activated. Per-stop replacements are held in
-  // `swaps` on top of it, exactly as they are for a live night on top of
+  // `base` is the night as it was activated. Per-stop replacements live in
+  // `edited` on top of it, exactly as they do for a live night on top of
   // `computed`, so one mechanism serves both and one Undo unwinds both.
   const [active, setActive] = useState<{
     base: DisplayPlan;
@@ -338,13 +342,22 @@ export function PlanFlow({
   // Previous `swaps` states, newest last. One entry per replacement, so Undo
   // walks back through them rather than only reverting the last one — a user
   // who taps Change four times and dislikes the third needs more than a single
-  // step back, and the alternative (cycling forward until it wraps) makes them
-  // count positions in a list they cannot see.
+  // step back, and cycling forward until it wraps is not the same thing.
   const [undoStack, setUndoStack] = useState<EditedNight[]>([]);
   // Synchronous mirror of `edited`, so a deferred handler (SwipeStop's 180 ms
   // timeout) never computes from a stale render closure.
   const editedRef = useRef<EditedNight | null>(null);
-  // The night currently on screen, mirrored for the same reason.
+  // The night currently on screen, mirrored so a handler that fires late can
+  // tell whether the night it was created for is still the one in front of the
+  // user.
+  //
+  // 🧨 SEEDED FROM A LAYOUT EFFECT, not from inside the handler. It was
+  // written at the END of onSwap — below the guard that reads it — so it was
+  // never seeded at all: `null !== computed` on the very first tap, and the
+  // handler returned on its first line. Change, swipe and Undo did nothing, on
+  // every night, for eight commits, while 578 tests stayed green because none
+  // of them touched this wiring. A guard whose only writer sits after it is
+  // not a guard; it is an early return.
   const editKeyRef = useRef<unknown>(null);
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
@@ -479,6 +492,9 @@ export function PlanFlow({
   // The named type, not a second copy of its shape: the inline one had already
   // drifted from EditedNight and only a type error caught it.
   const [edited, setEdited] = useState<EditedNight | null>(null);
+  useIsomorphicLayoutEffect(() => {
+    editKeyRef.current = editKey;
+  }, [editKey]);
   const current = edited?.key === editKey ? edited : null;
   const stops = current?.stops ?? baseStops;
   const cycle = current?.cycle ?? {};
@@ -488,8 +504,8 @@ export function PlanFlow({
 
   // Built once here and used by both the render and the handlers, so the list
   // a user is offered is provably the list the tap picks from.
-  const optionsFor = useCallback(
-    (forStops: { venue: Venue; role: PlanRole }[], i: number): Venue[] => {
+  const buildOptions = useCallback(
+    (forStops: { venue: Venue; role: PlanRole }[]): Venue[][] => {
       const effectiveBudget = active?.source === "saved" ? "Any" : budget;
       const inBudget = venues.filter((v) =>
         withinBudget(v.price, effectiveBudget),
@@ -501,14 +517,17 @@ export function PlanFlow({
       // a Finish that shut at 22:00, under a card printing "arrive ~23:05".
       // The arrivals have to be recomputed after every replacement anyway.
       const timed = relinkSteps(forStops, nightWhen);
-      const list =
-        alternativesFor(inBudget.length >= 3 ? inBudget : venues, timed, {
+      const lists = alternativesFor(
+        inBudget.length >= 3 ? inBudget : venues,
+        timed,
+        {
           vibe,
           budget: effectiveBudget,
           daypart: active ? active.base.daypart : computed.daypart,
           when: nightWhen,
           tasteScores,
-        })[i] ?? [];
+        },
+      );
       // Re-offer the stop's ORIGINAL venue when it is still walkable with the
       // neighbours as they now stand. Without it a replacement is one-way: the
       // current venue is excluded from its own list, so cycling could never
@@ -521,13 +540,15 @@ export function PlanFlow({
       // strictly looser, so the one venue added here by hand could have been
       // the single option that broke the walk. A second copy of a rule that
       // disagrees with the first is how this whole defect started.
-      const original = baseStops[i]?.venue;
-      if (!original || original.id === forStops[i]?.venue.id) return list;
-      const neighbours = [forStops[i - 1], forStops[i + 1]]
-        .filter(Boolean)
-        .map((x) => x.venue);
-      if (!withinWalkOfAll(original, neighbours)) return list;
-      return [original, ...list.filter((v) => v.id !== original.id)];
+      return lists.map((list, i) => {
+        const original = baseStops[i]?.venue;
+        if (!original || original.id === forStops[i]?.venue.id) return list;
+        const neighbours = [forStops[i - 1], forStops[i + 1]]
+          .filter(Boolean)
+          .map((x) => x.venue);
+        if (!withinWalkOfAll(original, neighbours)) return list;
+        return [original, ...list.filter((v) => v.id !== original.id)];
+      });
     },
     [
       active,
@@ -541,9 +562,13 @@ export function PlanFlow({
     ],
   );
 
+  // 🧨 ONE pass over the catalogue, not one per stop. `alternativesFor` already
+  // computes every stop's list, so calling it once per stop and keeping index
+  // `i` re-filtered a ~2,100-venue catalogue three times and threw away two
+  // thirds of every pass — on the main thread, on a phone, on every recompute.
   const alternatives = useMemo(
-    () => stops.map((_, i) => optionsFor(stops, i)),
-    [optionsFor, stops],
+    () => buildOptions(stops),
+    [buildOptions, stops],
   );
 
   // Memoised because the persist effect below depends on it: an unmemoised
@@ -1326,19 +1351,13 @@ export function PlanFlow({
 
     // Options for the stop as the night stands NOW — recomputed here rather
     // than read from the render, for the same reason.
-    const list = optionsFor(currentStops, i);
+    const list = buildOptions(currentStops)[i] ?? [];
     if (list.length === 0) return;
 
-    // Offer whatever has not been shown yet, from the front going forwards and
-    // the back going backwards, so both directions reach every option before
-    // repeating any. Once they are exhausted the cycle starts over.
-    const visited = currentCycle[i] ?? [];
-    const unseen = list.filter((v) => !visited.includes(v.id));
-    const pool = unseen.length > 0 ? unseen : list;
-    const picked = dir === 1 ? pool[0] : pool[pool.length - 1];
-    if (!picked) return;
-    const nextVisited =
-      unseen.length > 0 ? [...visited, picked.id] : [picked.id];
+    // The rotation itself lives in lib/plan-cycle.ts, where it can be tested.
+    const step = nextInCycle(list, currentCycle[i] ?? [], dir);
+    if (!step) return;
+    const { picked, visited: nextVisited } = step;
 
     const nextStops = currentStops.map((s, j) =>
       j === i ? { venue: picked, role: s.role } : s,
@@ -1349,7 +1368,6 @@ export function PlanFlow({
       cycle: { ...currentCycle, [i]: nextVisited },
     };
     editedRef.current = nextState;
-    editKeyRef.current = editKey;
     setEdited(nextState);
     // Where we came FROM, so Undo restores this exact arrangement — which was
     // itself walkable, so undo can never land on a night that is not.

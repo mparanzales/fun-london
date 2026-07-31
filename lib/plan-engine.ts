@@ -563,32 +563,6 @@ export function computePlan(
 }
 
 /**
- * The "change this one" options for a given set of stops.
- *
- * 🧨 WHY THIS IS EXPORTED, AND WHY THE UI MUST NOT REUSE `Plan.alternatives`.
- * That array is indexed to the stops the engine returned. A restored, claimed
- * or reopened night has DIFFERENT stops, so `alternatives[i]` there describes
- * some other night's stop i — offering it would swap in a venue chosen for a
- * walk that no longer exists, and could build a route nobody can walk. The
- * previous release hid the control entirely rather than risk that; this makes
- * the mismatch impossible instead, because the options are always derived from
- * the stops actually on screen.
- *
- * `computePlan` calls this too, so the two paths cannot drift apart.
- *
- * The pool is the CALLER'S: `computePlan` passes its own area-scoped, possibly
- * widened pool so its behaviour is unchanged, and the UI passes what it has.
- * No budget filtering happens here — the engine's widest rung deliberately
- * drops the budget constraint, and re-applying it would silently narrow it.
- */
-/**
- * Is `v` within a short walk of at least one of `others`?
- *
- * THE walkability rule, exported so callers re-offering a venue they already
- * hold (the original of a replaced stop) test it the same way the option list
- * was built, instead of keeping a second copy that can drift.
- */
-/**
  * Is `v` within a short walk of EVERY venue in `neighbours`?
  *
  * 🧨 THIS, NOT "near at least one". The any-rule looks equivalent on a
@@ -616,6 +590,15 @@ export function withinWalkOfAll(
   });
 }
 
+/**
+ * Is `v` within a short walk of at least one of `others`?
+ *
+ * The LOOSER rule, and no longer the one the option lists use — see
+ * `withinWalkOfAll`, which replaced it after a generated test showed the
+ * any-rule lets a night come apart one legal hop at a time. Kept because it is
+ * still the right question to ask of a whole arrangement ("is every stop near
+ * something?"), which is what the walkability tests assert.
+ */
 export function withinWalkOfAny(
   v: Venue,
   others: Venue[],
@@ -624,6 +607,25 @@ export function withinWalkOfAny(
   return others.length === 0 || minKmToChosen(v, others) <= maxKm;
 }
 
+/**
+ * The "change this one" options for a given set of stops.
+ *
+ * 🧨 WHY THIS IS EXPORTED, AND WHY THE UI MUST NOT REUSE `Plan.alternatives`.
+ * That array is indexed to the stops the engine returned. A restored, claimed
+ * or reopened night has DIFFERENT stops, so `alternatives[i]` there describes
+ * some other night's stop i — offering it would swap in a venue chosen for a
+ * walk that no longer exists, and could build a route nobody can walk. The
+ * previous release hid the control entirely rather than risk that; this makes
+ * the mismatch impossible instead, because the options are always derived from
+ * the stops actually on screen.
+ *
+ * `computePlan` calls this too, so the two paths cannot drift apart.
+ *
+ * The pool is the CALLER'S: `computePlan` passes its own area-scoped, possibly
+ * widened pool so its behaviour is unchanged, and the UI passes what it has.
+ * No budget filtering happens here — the engine's widest rung deliberately
+ * drops the budget constraint, and re-applying it would silently narrow it.
+ */
 export function alternativesFor(
   pool: Venue[],
   stops: { venue: Venue; role: PlanRole; arriveAt?: Date | null }[],
@@ -648,9 +650,17 @@ export function alternativesFor(
     // The stop's ADJACENT stops — the hops the user actually walks. Measuring
     // against "any other stop" let a night drift apart one legal replacement
     // at a time; see withinWalkOfAll.
-    const neighbours = [stops[i - 1], stops[i + 1]]
-      .filter(Boolean)
-      .map((x) => x.venue);
+    // 🧨 A stop with NO neighbours anchors on ITSELF. The engine leaves a role
+    // unfilled rather than teleport, so a one-stop night is a real state — and
+    // an empty neighbour list makes `withinWalkOfAll` vacuously true, which
+    // meant the single stop of a Richmond night could be replaced by the
+    // top-scoring restaurant in Soho, 15 km away, with nothing in the path
+    // constraining it. Anchoring on the stop being replaced keeps a
+    // replacement in the same part of town, which is the whole promise.
+    const adjacent = [stops[i - 1], stops[i + 1]].filter(Boolean);
+    const neighbours = (adjacent.length > 0 ? adjacent : [stops[i]]).map(
+      (x) => x.venue,
+    );
     return pool
       .filter(
         (v) =>

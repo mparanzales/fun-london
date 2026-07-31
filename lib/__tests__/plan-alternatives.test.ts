@@ -159,15 +159,25 @@ describe("alternativesFor", () => {
     expect(forThen[0].id).toBe("bar-0"); // highest rated first
   });
 
-  it("offers everything role-matching when the night has a single stop", () => {
-    // No other stops means no walkability anchor — the constraint must not
-    // collapse to "nothing qualifies".
+  it("🧨 anchors a single-stop night on the stop itself, not on nothing", () => {
+    // This used to assert the opposite — that a lone stop has no anchor and so
+    // every role match qualifies. That is how a Richmond night's only stop
+    // could be replaced by a restaurant in Soho: an empty neighbour list makes
+    // the walk rule vacuously true. A one-stop night is a real state (the
+    // engine leaves a role unfilled rather than teleport), so the stop being
+    // replaced is its own anchor.
     const stops = [
       { venue: at("only", "Restaurant", HERE), role: "Start" as const },
     ];
-    const pool = [stops[0].venue, at("other-eat", "Restaurant", FAR)];
-    const [forOnly] = alternativesFor(pool, stops, EVENING);
-    expect(forOnly.map((v) => v.id)).toEqual(["other-eat"]);
+    const near = at("near-eat", "Restaurant", NEAR);
+    const far = at("far-eat", "Restaurant", FAR);
+    const [forOnly] = alternativesFor(
+      [stops[0].venue, near, far],
+      stops,
+      EVENING,
+    );
+    expect(forOnly.map((v) => v.id)).toContain("near-eat");
+    expect(forOnly.map((v) => v.id)).not.toContain("far-eat");
   });
 });
 
