@@ -77,7 +77,7 @@ async function main() {
   console.log(
     `rooms ${before.rooms} · members ${before.members} · ` +
       `join-throttle rows ${before.joinAttempts} · ` +
-      `create-throttle rows ${before.createAttempts}`,
+      `create-throttle rows ${before.createAttempts ?? "n/a"}`,
   );
 
   // Mirrors the function's window purely to COUNT and to preview. Nothing is
@@ -108,8 +108,14 @@ async function main() {
       .select("*", { head: true, count: "exact" })
       .lt("window_start", cutoff);
     if (error) {
-      // Swallowing this would make the FATAL below unreachable: a failed read
-      // returns a null count, which reads as "nothing was eligible".
+      // A ledger whose migration has not landed yet is not a failure; anything
+      // else is. Swallowing the rest would make the FATAL below unreachable,
+      // because a failed read returns a null count, which reads as "nothing
+      // was eligible".
+      if (error.code === UNDEFINED_TABLE) {
+        staleByLedger[ledger] = 0;
+        continue;
+      }
       console.error(`could not count ${ledger}: ${error.code ?? "?"}`);
       process.exit(1);
     }
@@ -161,7 +167,7 @@ async function main() {
     // that stopped working on ONE table hide inside the other's movement.
     console.log(`join-thr   ${before.joinAttempts} -> ${after.joinAttempts}`);
     console.log(
-      `create-thr ${before.createAttempts} -> ${after.createAttempts}`,
+      `create-thr ${before.createAttempts ?? "n/a"} -> ${after.createAttempts ?? "n/a"}`,
     );
   } else {
     console.log("(post-purge counts unavailable; the purge itself succeeded)");
@@ -207,6 +213,9 @@ async function main() {
   console.log(`\n${DRY_RUN ? "Dry run complete." : "Purge complete."}`);
 }
 
+/** PostgREST for "that relation does not exist in the schema cache". */
+const UNDEFINED_TABLE = "PGRST205";
+
 async function counts() {
   const one = async (table: string) => {
     const { count, error } = await sb
@@ -215,11 +224,34 @@ async function counts() {
     if (error) throw new Error(`${table}: ${error.code ?? "?"}`);
     return count ?? 0;
   };
+  // 🧨 A LEDGER THAT DOES NOT EXIST YET MUST NOT STOP THE PURGE. counts() runs
+  // BEFORE the purge RPC, and it threw on any missing table -- so merging this
+  // branch before 0005 is applied to a database would kill the 3am job on
+  // plan_room_create_attempts and rooms would simply never be purged. The
+  // retention obligation would lapse while the alert said something else.
+  //
+  // Deleting data is the job; counting it is the evidence. Absence is reported
+  // as null and called out loudly below, and the purge still runs.
+  const maybe = async (table: string) => {
+    try {
+      return await one(table);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes(UNDEFINED_TABLE)) {
+        console.warn(
+          `${table} does not exist on this database (migration not applied ` +
+            `yet). Counting skipped; the purge itself is unaffected.`,
+        );
+        return null;
+      }
+      throw e;
+    }
+  };
   return {
     rooms: await one("plan_rooms"),
     members: await one("plan_room_members"),
     joinAttempts: await one("plan_room_join_attempts"),
-    createAttempts: await one("plan_room_create_attempts"),
+    createAttempts: await maybe("plan_room_create_attempts"),
   };
 }
 

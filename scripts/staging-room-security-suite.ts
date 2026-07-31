@@ -663,7 +663,9 @@ async function main() {
         .select("user_id, joined_at")
         .eq("room_id", hoRoom.id)
         .order("joined_at", { ascending: true });
-      const order = (hoOrder ?? []).map((r) => (r as { user_id: string }).user_id);
+      const order = (hoOrder ?? []).map(
+        (r) => (r as { user_id: string }).user_id,
+      );
       const bBeforeC =
         order.indexOf(B.id) > -1 &&
         order.indexOf(C.id) > -1 &&
@@ -1012,11 +1014,20 @@ async function main() {
     // account per run, so the budget is always full when we start.
     let createTrippedAt = -1;
     for (let i = 1; i <= 14; i++) {
-      const { error } = await D.client.rpc("create_plan_room");
-      if (error && /too many room creations/i.test(error.message)) {
+      const { data: made, error } = await D.client
+        .rpc("create_plan_room")
+        .single<{ id: string }>();
+      // Keyed on the SQLSTATE, not the message. Everything else in this track
+      // keys on 53400, and a reworded `raise exception` would otherwise turn
+      // the one EXECUTED proof of this throttle into "never tripped".
+      if (error?.code === "53400") {
         createTrippedAt = i;
         break;
       }
+      // Captured so CLEAN-1 actually verifies these rooms. Without it the
+      // claim "every temporary room removed" was broader than the check --
+      // they survived only via the auth.users cascade.
+      if (made?.id) roomIds.push(made.id);
     }
     record(
       "T-2",

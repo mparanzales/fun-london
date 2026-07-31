@@ -264,18 +264,34 @@ async function main() {
   // others: plan_room_create_attempts has no RLS policies at all, so anon
   // reads nothing from it whether or not the grant was revoked. There is no
   // behavioural symptom to notice. The catalog is the only witness.
+  // 🧨 DETECTED, NOT ASSUMED. The 0005 ledger is gated on its own PRESENCE, the
+  // way the 0004 assertion below is gated on `require0004`. Asserting four
+  // tables unconditionally makes this gate exit 1 on a correctly-staged
+  // pre-0005 database -- and this is the gate the rollout doc tells you to run
+  // BEFORE merging, so "the exposure regressed" would become
+  // indistinguishable from "the next migration has not landed yet". That is the
+  // exact confusion the 0004 gating was added to remove.
   const EXPECTED_ROOM_TABLES = 4;
+  const has0005 = tableGrants.some(
+    (g) => g.tbl === "plan_room_create_attempts",
+  );
+  const expectedTables = has0005 ? EXPECTED_ROOM_TABLES : 3;
   const anonReadable = tableGrants.filter((g) => g.anon).map((g) => g.tbl);
   check(
-    tableGrants.length === EXPECTED_ROOM_TABLES && anonReadable.length === 0,
-    "anon holds NO select grant on any room table (the revokes actually applied)",
-    tableGrants.length !== EXPECTED_ROOM_TABLES
-      ? `only found ${tableGrants.length}/${EXPECTED_ROOM_TABLES} tables: ${tableGrants.map((g) => g.tbl).join(", ") || "none"}`
+    tableGrants.length === expectedTables && anonReadable.length === 0,
+    `anon holds NO select grant on any room table (the revokes actually applied)`,
+    tableGrants.length !== expectedTables
+      ? `only found ${tableGrants.length}/${expectedTables} tables: ${tableGrants.map((g) => g.tbl).join(", ") || "none"}`
       : anonReadable.join(", "),
   );
+  if (!has0005) {
+    console.log(
+      `${INFO}0005 not applied yet (plan_room_create_attempts absent). Its ledger checks are skipped.`,
+    );
+  }
   for (const ledger of [
     "plan_room_join_attempts",
-    "plan_room_create_attempts",
+    ...(has0005 ? ["plan_room_create_attempts"] : []),
   ]) {
     const attempts = tableGrants.find((g) => g.tbl === ledger);
     check(
@@ -314,6 +330,21 @@ async function main() {
   // caller can pass a code to and have it HONOURED, or two overloads at once
   // (PostgREST resolves by payload keys, so ambiguity is a routing bug).
   const args = createFn.map((f) => f.args || "(no args)").join(" | ");
+  // 🧨 TWO SIGNATURES IS NEVER A VALID STAGE, and it must never be reported as
+  // "not applied yet". With both `create_plan_room()` and
+  // `create_plan_room(p_code text default null)` present, a no-argument call is
+  // AMBIGUOUS -- Postgres 42725, PostgREST HTTP 300 -- so EVERY room creation
+  // fails and surfaces as "You're not in this room". That state is reachable in
+  // practice: 0004 was applied by hand over MCP, so a hand-applied 0005 body
+  // that skipped its `drop` line produces exactly it. Unconditional, because
+  // this is broken on every stage, not just the one we happen to expect.
+  if (createFn.length > 1) {
+    check(
+      false,
+      "create_plan_room has ONE signature (two are ambiguous: every create fails)",
+      args,
+    );
+  }
   const one = createFn.length === 1;
   const noParam = one && createFn[0].args.trim() === "";
   const defaulted = one && createFn[0].args.toLowerCase().includes("default");

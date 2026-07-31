@@ -84,6 +84,25 @@ describe("0005 — creation is throttled in the database", () => {
     expect(inserted).toBeGreaterThan(raised); // and the write follows the check
   });
 
+  it("🧨 reads the counter via RETURNING, not a second select", () => {
+    // Losing the `returning` line is a TOTAL CREATE OUTAGE with green CI, and
+    // nothing pinned it: v_attempts would stay NULL, the fail-closed
+    // `is null` branch would fire on the FIRST attempt, and every user would
+    // get "That's a lot of rooms" forever. The limit test only matches
+    // `/v_attempts is null or v_attempts > (\d+)/` and the ordering test only
+    // compares positions, so both stay green.
+    expect(CREATE_FN).toContain("returning attempts into v_attempts");
+    expect(CREATE_FN).toContain("v_attempts is null or v_attempts >");
+    // And the variable must actually be declared, or the function will not
+    // even compile at CREATE time.
+    expect(CREATE_FN).toMatch(/v_attempts\s+int;/);
+    // The old shape must not come back alongside it: a second select is the
+    // fail-OPEN version this replaced.
+    expect(CREATE_FN).not.toMatch(
+      /select attempts from public\.plan_room_create_attempts/,
+    );
+  });
+
   it("raises the same SQLSTATE the join throttle uses", () => {
     // One code for both, so the server action has one thing to recognise.
     expect(M5).toMatch(
