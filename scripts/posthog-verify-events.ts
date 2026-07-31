@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   // once this shows arrival. The pass/fail decision below is made on the
   // production column only; the total is printed so a gap is visible rather
   // than inferred.
-  const { results } = await hogql<Row>(
+  const { results, columns } = await hogql<Row>(
     projectId,
     `SELECT event,
             countIf(${PROD_ONLY_SQL}) AS events,
@@ -93,8 +93,31 @@ async function main(): Promise<void> {
       ORDER BY all_events DESC`,
   );
 
+  // 🧨 COLUMNS RESOLVED BY NAME, NOT BY POSITION. `row[1]` is what decides
+  // pass/fail, and the tuple type is an assertion rather than a check: insert
+  // one column before the countIf and the gate silently starts reading a
+  // different number while every source-text guard still matches verbatim.
+  const at = (name: string): number => {
+    const i = columns.indexOf(name);
+    if (i === -1) {
+      console.error(
+        `The query returned no "${name}" column (got: ${columns.join(", ")}). ` +
+          "Refusing to report on columns this script cannot identify.",
+      );
+      process.exit(2);
+    }
+    return i;
+  };
+  const C = {
+    event: at("event"),
+    prod: at("events"),
+    all: at("all_events"),
+    people: at("people"),
+    lastSeen: at("last_seen"),
+  };
+
   const seen = new Map<string, Row>();
-  for (const r of results) seen.set(r[0], r);
+  for (const r of results) seen.set(String(r[C.event]), r);
 
   const pad = (s: string, n: number) => s.padEnd(n);
   console.log(
@@ -123,14 +146,15 @@ async function main(): Promise<void> {
     }
     // A row with zero PRODUCTION events counts as dead even when the total is
     // non-zero: it means the only traffic was ours.
-    if (!row[1]) dead.push(e);
+    const prod = Number(row[C.prod]);
+    if (!prod) dead.push(e);
     console.log(
       pad(e, 24) +
-        pad(String(row[1]), 8) +
-        pad(String(row[2]), 8) +
-        pad(String(row[3]), 8) +
-        (row[1]
-          ? String(row[4]).slice(0, 19)
+        pad(String(prod), 8) +
+        pad(String(row[C.all]), 8) +
+        pad(String(row[C.people]), 8) +
+        (prod
+          ? String(row[C.lastSeen]).slice(0, 19)
           : required
             ? "NO PROD DATA  <-- REQUIRED"
             : "no prod data"),
@@ -143,7 +167,11 @@ async function main(): Promise<void> {
 
   console.log("\nscoreboard");
   console.log(`  events_checked:      ${wanted.length}`);
-  console.log(`  events_with_data:    ${seen.size}`);
+  // Counted on PRODUCTION rows, so every number on this scoreboard means the
+  // same thing. It used to be seen.size, which counts any traffic at all: a run
+  // where every event had only localhost data printed a full house next to FAIL.
+  const withProdData = [...seen.values()].filter((r) => Number(r[C.prod]) > 0);
+  console.log(`  events_with_data:    ${withProdData.length}`);
   console.log(`  required_checked:    ${REQUIRED.length}`);
   console.log(
     `  required_firing:     ${REQUIRED.length - deadRequired.length}`,

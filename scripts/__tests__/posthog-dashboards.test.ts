@@ -227,6 +227,31 @@ describe("every insight is scoped to real production traffic", () => {
     expect(filtered).toBe(builders);
   });
 
+  it("accounts for EVERY insight, so a new query shape cannot escape", () => {
+    // 🧨 THE GAP THE OTHER TWO ASSERTIONS LEAVE. They each compare a shape to
+    // itself: "every HogQL query has the predicate" and "every trend/funnel has
+    // the filter". Neither notices a query built in a FOURTH shape. Add a 27th
+    // insight as an inline `{ kind: "RetentionQuery", ... }`, bump the
+    // toHaveLength(26) that fires, and every production-scoping assertion still
+    // passes while the new panel quietly counts localhost.
+    //
+    // Tying the three known shapes to the insight COUNT closes it: any insight
+    // built another way makes these numbers disagree.
+    const trendCalls = [...provision.matchAll(/query: trend\(/g)].length;
+    const funnelCalls = [...provision.matchAll(/query: funnel\(/g)].length;
+    const tableCalls = [...provision.matchAll(/query: table\(/g)].length;
+    const insights = [...provision.matchAll(/^\s{8}name: "([^"]+)"/gm)].length;
+
+    expect(trendCalls).toBeGreaterThan(0); // positive controls
+    expect(funnelCalls).toBeGreaterThan(0);
+    expect(tableCalls).toBeGreaterThan(0);
+    expect(
+      trendCalls + funnelCalls + tableCalls,
+      "an insight is built by something other than trend()/funnel()/table(), " +
+        "so the production-host scoping assertions do not cover it",
+    ).toBe(insights);
+  });
+
   it("defines the hosts ONCE, shared with the verifier", () => {
     // 🧨 The provisioner and the verifier must not each carry their own copy.
     // While only the dashboards filtered, `pnpm posthog:verify` could report an
@@ -257,7 +282,19 @@ describe("every insight is scoped to real production traffic", () => {
   it("decides the verifier's pass/fail on PRODUCTION counts", () => {
     // Printing both columns is not enough: the gate has to be the prod one.
     expect(verify).toMatch(/countIf\(\$\{PROD_ONLY_SQL\}\)/);
-    expect(verify).toMatch(/if \(!row\[1\]\) dead\.push\(e\)/);
+
+    // 🧨 ASSERTED BY MEANING, NOT BY SOURCE TEXT. This used to pin the literal
+    // `if (!row[1]) dead.push(e)`, which is fragile in both directions: it
+    // survives inserting a column before the countIf (row[1] silently becomes
+    // a different number while the text still matches), and it BREAKS when the
+    // positional read is replaced by a safer one. It did exactly that.
+    expect(verify).toMatch(/columns\.indexOf/); // resolved by NAME
+    expect(verify).toMatch(/const prod = Number\(row\[C\.prod\]\)/);
+    expect(verify).toMatch(/if \(!prod\) dead\.push\(e\)/);
+
+    // And the pass/fail decision must not reach for a bare positional index.
+    const decision = verify.slice(verify.indexOf("const dead"));
+    expect(decision).not.toMatch(/dead\.push\([^)]*\).*row\[\d\]/);
   });
 
   // The tooling's allowlist, parsed once from the shared module and asserted

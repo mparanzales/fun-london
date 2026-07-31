@@ -48,13 +48,104 @@
 //   pnpm posthog:revoked-check
 // ─────────────────────────────────────────────────────────────────────────
 
-const API_HOST = (
-  process.env.POSTHOG_API_HOST ?? "https://eu.posthog.com"
-).replace(/\/$/, "");
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
+
+const DEFAULT_API_HOST = "https://eu.posthog.com";
+const API_HOST = (process.env.POSTHOG_API_HOST ?? DEFAULT_API_HOST).replace(
+  /\/$/,
+  "",
+);
+
+/**
+ * What PostHog's answer actually tells us about the key.
+ *
+ * Extracted from main() so it can be table-tested. It was inline, with
+ * process.exit calls threaded through it, which made the one piece of logic in
+ * this repo whose entire job is to prevent a false green tick the only piece
+ * with no test at all. It has already been wrong once.
+ *
+ *   "dead"     the string is not a credential
+ *   "live"     it authenticated (2xx, or 403 = authenticated then out-scoped)
+ *   "unproven" anything else. NEVER report this as a pass.
+ */
+export function classifyRevocation(
+  status: number,
+  code: string,
+): "dead" | "live" | "unproven" {
+  if (status === 401) {
+    // Only an explicit auth failure proves the key is gone. "not_authenticated"
+    // means the header never arrived, which says nothing about the key.
+    return code === "authentication_failed" ? "dead" : "unproven";
+  }
+  // 🧨 403 means it AUTHENTICATED and was then refused for missing scope.
+  if (status === 403) return "live";
+  if (status >= 200 && status < 300) return "live";
+  // 429, 5xx, an HTML error page, anything unrecognised: we learned nothing.
+  return "unproven";
+}
+
+/**
+ * Reasons the ANSWER cannot be trusted regardless of what it says.
+ *
+ * A personal API key is issued against one PostHog host and is simply unknown
+ * to any other, so a live key checked against the wrong host returns
+ * `401 authentication_failed` -- indistinguishable from a real revocation. The
+ * same document calls confusing the ingest host with the API host "the most
+ * common failure", and POSTHOG_API_HOST may well still be exported from an
+ * earlier debugging session.
+ */
+export function hostObjection(host: string): string | null {
+  if (host === DEFAULT_API_HOST) return null;
+  return (
+    `POSTHOG_API_HOST is set to ${host}, not ${DEFAULT_API_HOST}. A personal ` +
+    "API key is unknown to any host it was not issued on, so that host would " +
+    "answer 401 for a key that is very much alive. Unset it and re-run."
+  );
+}
+
+/**
+ * Reasons the VALUE cannot be trusted before it is even sent.
+ *
+ * A key mangled by a wrapped terminal paste makes Django's token auth raise
+ * AuthenticationFailed, which is the exact 401 a revoked key produces. "This
+ * string is not a credential" would be reported as "the key is dead".
+ */
+export function keyObjection(key: string): string | null {
+  if (/\s/.test(key)) {
+    return (
+      "The key contains whitespace, so it was probably mangled by a wrapped " +
+      "paste. PostHog would reject it with the same 401 a revoked key gives, " +
+      "and this check would call that proof. Re-copy it and re-run."
+    );
+  }
+  if (!key.startsWith("phx_")) {
+    return (
+      "That does not look like a personal API key (they start with phx_). A " +
+      "value PostHog cannot parse returns the same 401 a revoked key does."
+    );
+  }
+  return null;
+}
+
+/**
+ * Non-secret identifier, so the operator can confirm WHICH key was tested.
+ *
+ * A HASH, not a slice of the key. The obvious version prints the last four
+ * characters, and that is still key material on a terminal that gets scrolled,
+ * screenshotted or pasted into a chat -- and this repo's rule is that a key
+ * never reaches terminal output, full stop. A digest prefix identifies the
+ * value just as well for "is this the one I deleted?" and reveals nothing:
+ * compare two runs' fingerprints rather than reading either.
+ */
+export function keyFingerprint(key: string): string {
+  const digest = createHash("sha256").update(key).digest("hex").slice(0, 12);
+  return `${key.length} chars, sha256:${digest}`;
+}
 
 async function main(): Promise<void> {
-  const key = process.env.POSTHOG_REVOKED_KEY ?? "";
-  if (!key.trim()) {
+  const key = (process.env.POSTHOG_REVOKED_KEY ?? "").trim();
+  if (!key) {
     console.error(
       "POSTHOG_REVOKED_KEY is empty or unset, so nothing was tested.\n" +
         "This is NOT a pass. Export the key you just deleted and re-run:\n" +
@@ -65,6 +156,15 @@ async function main(): Promise<void> {
     );
     process.exit(2);
   }
+
+  // Refuse before spending a request when the answer could not be trusted.
+  for (const objection of [hostObjection(API_HOST), keyObjection(key)]) {
+    if (objection) {
+      console.error(`${objection}\nNothing was tested. This is NOT a pass.`);
+      process.exit(2);
+    }
+  }
+  console.log(`Testing a key: ${keyFingerprint(key)} against ${API_HOST}`);
 
   let res: Response;
   try {
@@ -90,56 +190,52 @@ async function main(): Promise<void> {
     code = "";
   }
 
-  if (res.status === 401 && code === "authentication_failed") {
-    console.log(
-      `CONFIRMED REVOKED: ${API_HOST} rejected the key outright ` +
-        `(HTTP 401 authentication_failed). It is not a valid credential.`,
-    );
-    return;
-  }
+  switch (classifyRevocation(res.status, code)) {
+    case "dead":
+      console.log(
+        `CONFIRMED REVOKED: ${API_HOST} rejected the key outright ` +
+          `(HTTP 401 authentication_failed). It is not a valid credential.`,
+      );
+      return;
 
-  // 🧨 403 IS THE LIVE-KEY ANSWER, not a rejection. The key authenticated and
-  // was then refused for missing scope. Reading it as "revoked" is how a
-  // write-capable key stays live on a public repo's project while a green tick
-  // says otherwise.
-  if (res.status === 403) {
-    console.error(
-      `🔴 THE KEY IS STILL LIVE. ${API_HOST} returned HTTP 403 (${code || "no code"}), ` +
-        "which means it AUTHENTICATED and was then refused for missing scope. " +
-        "A deleted key gives 401 authentication_failed instead.\n" +
-        "Delete it at /settings/user-api-keys and run this again.",
-    );
-    process.exit(1);
-  }
+    case "live":
+      console.error(
+        `🔴 THE KEY IS STILL LIVE. ${API_HOST} returned HTTP ${res.status}` +
+          (code ? ` (${code})` : "") +
+          ".\n" +
+          (res.status === 403
+            ? "403 means it AUTHENTICATED and was then refused for missing " +
+              "scope. A deleted key gives 401 authentication_failed instead.\n"
+            : "") +
+          "Delete it at /settings/user-api-keys and run this again. Do not " +
+          "treat the provisioning step as finished until this exits 0.",
+      );
+      process.exit(1);
+      break;
 
-  if (res.ok) {
-    console.error(
-      `🔴 THE KEY IS STILL LIVE. ${API_HOST} accepted it (HTTP ${res.status}).\n` +
-        "Delete it at /settings/user-api-keys and run this again. Do not treat " +
-        "the provisioning step as finished until this exits 0.",
-    );
-    process.exit(1);
+    default:
+      console.error(
+        `Nothing was proven: HTTP ${res.status}` +
+          (code ? ` with code "${code}"` : "") +
+          ". That is neither an accepted key nor a rejected one, so this is " +
+          "NOT a pass. Re-run, and check the key and host if it persists.",
+      );
+      process.exit(2);
   }
-
-  if (res.status === 401) {
-    // 401 without authentication_failed means the header never arrived
-    // ("not_authenticated"). Nothing about the key was established.
-    console.error(
-      `Nothing was proven: HTTP 401 with code "${code || "none"}", which is ` +
-        "what an absent or malformed Authorization header returns, not a " +
-        "rejected key. Check the value you exported and re-run.",
-    );
-    process.exit(2);
-  }
-
-  console.error(
-    `Unexpected HTTP ${res.status} from ${API_HOST}. Neither live nor revoked ` +
-      "was proven, so this is not a pass.",
-  );
-  process.exit(2);
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(2);
-});
+// Only run when invoked as a command, never on import.
+//
+// Without this the module IS its own side effect: importing it to unit-test
+// classifyRevocation ran main(), which found no POSTHOG_REVOKED_KEY and called
+// process.exit(2) out from under the test runner. That is also precisely why
+// this file had no tests while its logic was wrong -- it could not be imported.
+const invokedDirectly =
+  !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(2);
+  });
+}

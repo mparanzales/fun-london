@@ -91,13 +91,25 @@ export function readUnionEvents(): string[] {
   );
 
   // A parse that silently returns almost nothing is the failure mode this
-  // module exists to remove, so make it loud. The union has been well above 20
-  // members since PR #189; 10 is a floor no real refactor would cross.
-  if (names.length < 10) {
+  // module exists to remove, so make it loud.
+  //
+  // 🧨 THE FLOOR WAS 10, WHICH IS BELOW THE FAILURE IT GUARDS. Measured on
+  // 2026-07-31: the union has 35 members, and deleting the comment-stripping
+  // line above (the exact regression named in that comment) yields 11 — one
+  // MORE than the old floor. So the guard would not have fired for the one
+  // thing it was written to catch. "Greater than a small number" is not a
+  // control; it has to be tied to the real count.
+  //
+  // 30 leaves room for a genuine cull of a few events and still fires long
+  // before any truncation. Kept in step with the unit test, which asserts the
+  // same floor from the outside.
+  const MIN_PLAUSIBLE_EVENTS = 30;
+  if (names.length < MIN_PLAUSIBLE_EVENTS) {
     throw new Error(
-      `Parsed only ${names.length} events from the AnalyticsEvent union. ` +
-        "That is implausible, so the parse is broken. Fix it rather than " +
-        "letting the verifier check a truncated list.",
+      `Parsed only ${names.length} events from the AnalyticsEvent union, ` +
+        `which is below the plausible floor of ${MIN_PLAUSIBLE_EVENTS}. ` +
+        "The parse is broken (a comment ending in a semicolon truncates it). " +
+        "Fix it rather than letting the verifier check a truncated list.",
     );
   }
   return names;

@@ -14,18 +14,32 @@ the opt-out consent gate. Ratios stay usable; absolute volumes do not.
 ⚠️ **Exclude `fl_probe_manual`** (distinct_id `fl-cdp-probe`) from all reporting.
 It is one test event from the 2026-07-29 capture-endpoint investigation.
 
-🧨 **EVERY PANEL COUNTS PRODUCTION TRAFFIC ONLY.** All 26 insights are scoped to
-`$host IN ('funldn.com', 'www.funldn.com')` — see `PROD_HOSTS` in
-`scripts/posthog-events.ts`, shared with `pnpm posthog:verify` so the two can
-never disagree. There is one PostHog project and its key ships to the browser in
+🔴 **THE PANELS ON THE WALL RIGHT NOW COUNT DEV AND PREVIEW TRAFFIC. Do not read
+their absolute numbers as production.**
+
+The production-host scoping (`$host IN ('funldn.com', 'www.funldn.com')`, see
+`PROD_HOSTS` in `scripts/posthog-events.ts`) exists **in code only**. Applying it
+to the live project needs a re-provisioning run with a write-scoped key, and the
+temporary one was revoked. **Nothing changes on the dashboards until someone
+does that** — the procedure is under "Known limitations" in
+`FUNLDN_POSTHOG_CONNECTION_AND_DASHBOARDS.md`.
+
+Why it matters: there is one PostHog project and its key ships to the browser in
 dev, preview and production alike, so localhost reloads, preview click-throughs
-and deliberate probes were all being counted. Measured over 90 days on
+and deliberate probes have all been counted. Measured over 90 days on
 2026-07-31: **`venue_save` was 42 events, of which 35 were production — 17% of
 that funnel was us.**
 
-**Expect every 30-to-90-day panel to STEP DOWN when this is first provisioned.**
-That drop is the filter engaging, not a traffic collapse. It is a one-off, and
-it takes up to 90 days to age out of the longest windows.
+Two things follow, and they are easy to get backwards:
+
+- **Until re-provisioned:** ratios are roughly usable, absolute volumes are
+  inflated by an unknown amount that varies per panel.
+- **When re-provisioned:** expect every 30-to-90-day panel to **STEP DOWN at
+  once**. That drop is the filter engaging, not a traffic collapse. It is a
+  one-off and takes up to 90 days to age out of the longest windows.
+
+(`pnpm posthog:verify` already applies the filter, so it and the dashboards
+disagree until the re-provisioning run lands. The verifier is the one to trust.)
 
 ---
 

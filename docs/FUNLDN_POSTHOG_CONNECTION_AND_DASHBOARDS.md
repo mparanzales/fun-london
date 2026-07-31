@@ -1,8 +1,10 @@
 # PostHog connection and dashboard provisioning
 
 **Branch:** `feat/posthog-read-and-dashboards`, cut from `main` @ `0d35d47`.
-**Scope:** `scripts/` and four `package.json` entries. No app code, no database,
-no anon-reachable route.
+**Scope:** five scripts under `scripts/`, two guard tests under
+`scripts/__tests__/`, five `package.json` entries, and these two documents. No
+app code, no database, no anon-reachable route. (This said "three files and four
+entries" for a while, and drifted as the branch grew.)
 
 Companion documents (on `feat/analytics-foundation`):
 `FUNLDN_ANALYTICS_INSTRUMENTATION.md`, `FUNLDN_ANALYTICS_EVENT_DICTIONARY.md`.
@@ -106,9 +108,18 @@ Three outcomes, deliberately distinguished:
 
 | Exit | Meaning |
 | --- | --- |
-| **0** | PostHog rejected the key with 401/403. **Confirmed dead.** |
-| **1** | 🔴 PostHog **accepted** it. The key is still live. Delete it and re-run. |
-| **2** | Nothing was proven (no key supplied, or the request never got there). **Not a pass.** |
+| **0** | PostHog answered **401 `authentication_failed`**: the string is not a credential. **Confirmed dead.** |
+| **1** | 🔴 **Still live.** Either PostHog accepted it (2xx), or it answered **403** — which means the key AUTHENTICATED and was then refused for missing scope. Delete it and re-run. |
+| **2** | Nothing was proven: no key supplied, the request never got there, or an answer the script cannot classify. **Not a pass.** |
+
+🧨 **403 IS NOT A REJECTION, and this table used to say it was.** On this project
+a live, correctly-scoped personal key returns 403 from `/api/users/@me/` because
+it deliberately lacks `user:read`. Reading that as "revoked" meant the one script
+written to stop a write-capable key being certified dead would have certified it
+dead. Demonstrated against the live API: the permanent read-only key, which had
+just listed 32 insights, produced `403` and the old check printed
+`CONFIRMED REVOKED ... exit 0`. If you see exit 1 on a 403, the script is right
+and the key is alive.
 
 🧨 **The previous documented proof could not fail correctly, and it is worth
 knowing why.** It was:
@@ -275,9 +286,12 @@ Nothing here changes the application, so there is no user-visible rollback.
   dashboards and can be deleted with them. **Deleting a dashboard does not delete
   events**; historical data is untouched and re-running
   `pnpm posthog:dashboards` recreates everything from code.
-- **Undo the branch:** it is three files under `scripts/` plus four
-  `package.json` script entries. `git revert` of the single commit is complete and
-  safe.
+- **Undo the branch:** five scripts under `scripts/`, two guard tests under
+  `scripts/__tests__/`, five `package.json` entries and two documents. Revert the
+  MERGE COMMIT (`git revert -m 1 <sha>`), not "the single commit" as this used to
+  say: the branch has had review rounds, and this repo squash-merges, so which of
+  those is true depends on how it landed. Check `git log origin/main` first.
+  A partial revert can leave a guard test importing a deleted module.
 - **Undo read access:** delete the personal API key in the PostHog console. The
   app is unaffected: it uses only the `phc_` browser key.
 
