@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { alternativesFor, computePlan } from "@/lib/plan-engine";
+import {
+  alternativesFor,
+  computePlan,
+  withinWalkOfAny,
+  walkMins,
+} from "@/lib/plan-engine";
 import type { Venue, OpeningHours } from "@/lib/types";
 import { makeVenue } from "./_fixtures";
 
@@ -191,6 +196,108 @@ describe("computePlan delegates to alternativesFor", () => {
         expect(chosen.has(v.id)).toBe(false);
         expect(v.id).not.toBe("bar-far");
       }
+    }
+  });
+});
+
+describe("🧨 sequential replacements stay walkable", () => {
+  // The defect this closes: options anchored to the night's ORIGINAL stops
+  // measured stop 2's candidates against the original stop 1. Once stop 1 had
+  // itself moved up to the radius away, the two could end up roughly twice
+  // that apart — and relinkSteps reported it honestly, so a walkable-night
+  // product printed "~26 min walk" on its own result screen.
+  //
+  // These build a chain deliberately: every venue sits 1.2 km from the last,
+  // inside the 1.6 km rule pairwise, so anchoring to the base lets a night
+  // walk itself off down the line while each individual hop looks legal.
+  const KM = 1 / 111; // ~1 degree of latitude per 111 km
+  const chain = (n: number, type: Venue["type"], role: string) =>
+    Array.from({ length: n }, (_, i) =>
+      at(`${role}-${i}`, type, {
+        lat: HERE.lat + i * 1.2 * KM,
+        lng: HERE.lng,
+      }),
+    );
+
+  const pool = [
+    ...chain(6, "Restaurant", "eat"),
+    ...chain(6, "Bar", "bar"),
+    ...chain(6, "Live Music", "music"),
+  ];
+
+  /** Replace stop `i` with the first option that is not already in the night,
+   *  exactly as the UI does: options recomputed against the CURRENT stops. */
+  const replace = (
+    stops: { venue: Venue; role: Venue extends never ? never : any }[],
+    i: number,
+  ) => {
+    const opts = alternativesFor(pool, stops, EVENING)[i];
+    if (!opts?.length) return null;
+    return stops.map((s, j) => (j === i ? { ...s, venue: opts[0] } : s));
+  };
+
+  const walkable = (stops: { venue: Venue }[]) =>
+    stops.every((s, i) => {
+      const others = stops.filter((_, j) => j !== i).map((x) => x.venue);
+      return withinWalkOfAny(s.venue, others);
+    });
+
+  it("no replacement in a long sequence drifts outside the walking rule", () => {
+    let stops: { venue: Venue; role: "Start" | "Then" | "Finish" }[] = [
+      { venue: at("s0", "Restaurant", HERE), role: "Start" },
+      { venue: at("s1", "Bar", HERE), role: "Then" },
+      { venue: at("s2", "Live Music", HERE), role: "Finish" },
+    ];
+    expect(walkable(stops)).toBe(true);
+
+    // Twelve replacements, cycling across all three stops.
+    for (let n = 0; n < 12; n++) {
+      const i = n % 3;
+      const next = replace(stops, i);
+      if (!next) continue;
+      stops = next as typeof stops;
+      // The invariant, checked after EVERY step rather than only at the end:
+      // each stop is within a short walk of at least one other.
+      expect(walkable(stops), `broke after replacement ${n + 1}`).toBe(true);
+    }
+  });
+
+  it("🧨 the adjacent hop never blows out, which is what the user sees", () => {
+    // withinWalkOfAny only requires ONE near neighbour, so it alone cannot
+    // catch a middle stop stranded between two far ones. This asserts the
+    // thing the screen actually prints: the walk between consecutive stops.
+    let stops: { venue: Venue; role: "Start" | "Then" | "Finish" }[] = [
+      { venue: at("s0", "Restaurant", HERE), role: "Start" },
+      { venue: at("s1", "Bar", HERE), role: "Then" },
+      { venue: at("s2", "Live Music", HERE), role: "Finish" },
+    ];
+    for (let n = 0; n < 12; n++) {
+      const next = replace(stops, n % 3);
+      if (!next) continue;
+      stops = next as typeof stops;
+      for (let i = 0; i < stops.length - 1; i++) {
+        expect(
+          walkMins(stops[i].venue, stops[i + 1].venue),
+          `stop ${i}→${i + 1} after replacement ${n + 1}`,
+        ).toBeLessThanOrEqual(45);
+      }
+    }
+  });
+
+  it("options are measured against the CURRENT neighbours, not the originals", () => {
+    // Directly: move stop 0 far along the chain, then ask for stop 1's
+    // options. Every one must be walkable with stop 0 WHERE IT NOW IS.
+    const stops = [
+      { venue: pool.find((v) => v.id === "eat-4")!, role: "Start" as const },
+      { venue: at("s1", "Bar", HERE), role: "Then" as const },
+    ];
+    const opts = alternativesFor(pool, stops, EVENING)[1];
+    expect(opts.length).toBeGreaterThan(0);
+    for (const v of opts) {
+      expect(
+        withinWalkOfAny(v, [stops[0].venue]),
+        `${v.id} is not walkable with the CURRENT stop 0`,
+      ).toBe(true);
     }
   });
 });

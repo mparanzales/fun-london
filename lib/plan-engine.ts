@@ -578,6 +578,49 @@ export function computePlan(
  * No budget filtering happens here — the engine's widest rung deliberately
  * drops the budget constraint, and re-applying it would silently narrow it.
  */
+/**
+ * Is `v` within a short walk of at least one of `others`?
+ *
+ * THE walkability rule, exported so callers re-offering a venue they already
+ * hold (the original of a replaced stop) test it the same way the option list
+ * was built, instead of keeping a second copy that can drift.
+ */
+/**
+ * Is `v` within a short walk of EVERY venue in `neighbours`?
+ *
+ * 🧨 THIS, NOT "near at least one". The any-rule looks equivalent on a
+ * three-stop night and is not: it lets a night walk itself apart one legal
+ * hop at a time. Replace stop 0 to sit beside stop 1, then stop 1 to sit
+ * beside stop 2, and stop 0 is now stranded — every individual replacement
+ * passed, the route did not. A generated test found it at the seventh
+ * replacement in a chain.
+ *
+ * Callers pass a stop's ADJACENT stops, so the constraint is exactly the walk
+ * the user is shown: consecutive hops.
+ */
+export function withinWalkOfAll(
+  v: Venue,
+  neighbours: Venue[],
+  maxKm: number = RADIUS_LADDER_KM[RADIUS_LADDER_KM.length - 1],
+): boolean {
+  // A null distance means one of them has no coordinates. The engine fails
+  // OPEN on unknown geography everywhere else (walkMins uses an 8-min
+  // fallback), so refusing here would silently drop every option beside a
+  // venue we simply have no lat/lng for.
+  return neighbours.every((n) => {
+    const d = haversineKm(n, v);
+    return d == null || d <= maxKm;
+  });
+}
+
+export function withinWalkOfAny(
+  v: Venue,
+  others: Venue[],
+  maxKm: number = RADIUS_LADDER_KM[RADIUS_LADDER_KM.length - 1],
+): boolean {
+  return others.length === 0 || minKmToChosen(v, others) <= maxKm;
+}
+
 export function alternativesFor(
   pool: Venue[],
   stops: { venue: Venue; role: PlanRole; arriveAt?: Date | null }[],
@@ -599,16 +642,19 @@ export function alternativesFor(
     (tasteScores ? PLAN_TASTE_WEIGHT * (tasteScores[v.id] ?? 0) : 0);
   const chosenIds = new Set(stops.map((c) => c.venue.id));
   return stops.map((c, i) => {
-    // Every OTHER stop, so a replacement stays within a short walk of the
-    // night it is joining rather than of the one it came from.
-    const others = stops.filter((_, j) => j !== i).map((x) => x.venue);
+    // The stop's ADJACENT stops — the hops the user actually walks. Measuring
+    // against "any other stop" let a night drift apart one legal replacement
+    // at a time; see withinWalkOfAll.
+    const neighbours = [stops[i - 1], stops[i + 1]]
+      .filter(Boolean)
+      .map((x) => x.venue);
     return pool
       .filter(
         (v) =>
           !chosenIds.has(v.id) &&
           roleMatchesForDaypart(v, c.role, daypart) &&
           (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
-          (others.length === 0 || minKmToChosen(v, others) <= maxRadius),
+          withinWalkOfAll(v, neighbours, maxRadius),
       )
       .sort((a, b) => scoreOf(b) - scoreOf(a))
       .slice(0, 8);

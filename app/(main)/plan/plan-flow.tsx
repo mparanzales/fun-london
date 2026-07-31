@@ -36,6 +36,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   computePlan,
   alternativesFor,
+  withinWalkOfAny,
   withinBudget,
   relinkSteps,
   isDaytimeHour,
@@ -230,30 +231,6 @@ function titleFor(plan: Plan, area: string): string {
 // venue changes its dwell, the walk to/from it and every downstream arrival, so
 // the whole sequence is relinked (lib/plan-engine.relinkSteps) to stay honest.
 // The resolved pocket (and title) follow the possibly-swapped first stop.
-function toDisplay(
-  plan: Plan,
-  swaps: Record<number, number> = {},
-  when?: Date,
-): DisplayPlan {
-  const items = plan.steps.map((s, i) => {
-    const alt = swaps[i];
-    const v = alt != null && alt >= 0 ? plan.alternatives[i]?.[alt] : undefined;
-    return { venue: v ?? s.venue, role: s.role };
-  });
-  const steps = relinkSteps(items, when);
-  const totalMins = steps.reduce(
-    (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
-    0,
-  );
-  const area = steps[0]?.venue.neighbourhood || plan.area;
-  return {
-    title: titleFor(plan, area),
-    area,
-    daypart: plan.daypart,
-    totalMins,
-    steps,
-  };
-}
 
 /**
  * useLayoutEffect on the client, useEffect on the server.
@@ -265,6 +242,16 @@ function toDisplay(
  */
 const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+/** The night as the user has edited it: its stops, plus where each changed
+ *  stop sits in the option list it was last picked from. `key` identifies the
+ *  underlying night, so edits are dropped the moment a different one is on
+ *  screen rather than leaking onto it. */
+type EditedNight = {
+  key: unknown;
+  stops: { venue: Venue; role: PlanRole }[];
+  cycle: Record<number, number>;
+};
 
 export function PlanFlow({
   venues,
@@ -295,9 +282,6 @@ export function PlanFlow({
   const [vibe, setVibe] = useState<PlanVibe>("Chill");
   const [budget, setBudget] = useState<PlanBudget>("££");
   const [offset, setOffset] = useState(0);
-  // Per-stop swaps on the live plan: stop index → chosen alternative index
-  // (absent = keep the original). Reset whenever the base plan changes.
-  const [swaps, setSwaps] = useState<Record<number, number>>({});
 
   // The night on screen INSTEAD of the live-computed one: restored from the
   // store, claimed from an anonymous session, or re-opened from the Saved
@@ -348,10 +332,10 @@ export function PlanFlow({
   // who taps Change four times and dislikes the third needs more than a single
   // step back, and the alternative (cycling forward until it wraps) makes them
   // count positions in a list they cannot see.
-  const [undoStack, setUndoStack] = useState<Record<number, number>[]>([]);
-  // Synchronous mirror of `swaps`, so a deferred handler never computes from a
-  // stale render closure. Reset wherever `swaps` is.
-  const swapsRef = useRef<Record<number, number>>({});
+  const [undoStack, setUndoStack] = useState<EditedNight[]>([]);
+  // Synchronous mirror of `edited`, so a deferred handler (SwipeStop's 180 ms
+  // timeout) never computes from a stale render closure.
+  const editedRef = useRef<EditedNight | null>(null);
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
     "idle",
@@ -465,73 +449,129 @@ export function PlanFlow({
    * position 2 would mean a different venue every time and cycling could never
    * return you to where you started.
    */
-  const activeAlternatives = useMemo(() => {
-    if (!active) return null;
-    // Mirror the engine's own widening: keep the budget unless honouring it
-    // would leave too little to choose from.
-    // 🧨 A REOPENED SAVED ROW HAS NO BRIEF. `plans` stores no vibe or budget,
-    // so fromSavedRow fills them from whatever the controls happen to hold —
-    // and filtering the pool by that meant reopening "Fancy Night in Mayfair"
-    // with Budget on "£" offered only cheap replacements for a £££ stop, for a
-    // vibe the night was never built with. Those controls govern regeneration,
-    // never how a saved night renders.
-    const effectiveBudget = active.source === "saved" ? "Any" : budget;
-    const inBudget = venues.filter((v) =>
-      withinBudget(v.price, effectiveBudget),
-    );
-    return alternativesFor(
-      inBudget.length >= 3 ? inBudget : venues,
-      active.base.steps,
-      {
-        vibe,
-        budget: effectiveBudget,
-        daypart: active.base.daypart,
-        when: timing?.when,
-        tasteScores,
-      },
-    );
-  }, [active, venues, budget, vibe, timing, tasteScores]);
+  // ── The night on screen, as an editable list of stops ───────────────
+  //
+  // 🧨 OPTIONS ARE RECOMPUTED AGAINST THE CURRENT STOPS, NOT THE ORIGINAL ONES.
+  //
+  // The first version anchored them to the night's base, for index stability:
+  // if the list is rebuilt after each replacement, position 2 means a
+  // different venue every time. The cost was route coherence. `alternativesFor`
+  // keeps a candidate within a short walk of the OTHER stops, so anchoring to
+  // the base measured stop 2's candidates against the ORIGINAL stop 1 — and
+  // once stop 1 had itself moved up to the radius away, the pair could end up
+  // roughly twice that apart. `relinkSteps` reported it honestly, which meant
+  // the product's own promise failed out loud: "~26 min walk" on a walkable
+  // night.
+  //
+  // So the night is held as its current stops and every option list is derived
+  // from them. Coherence beats stable ordering: a replacement is always
+  // walkable with its neighbours as they are NOW, and each one is measured
+  // against the arrangement it is actually joining.
+  const baseStops = useMemo(
+    () =>
+      (active ? active.base.steps : computed.steps).map((s) => ({
+        venue: s.venue,
+        role: s.role,
+      })),
+    [active, computed],
+  );
 
-  const alternatives = activeAlternatives ?? computed.alternatives;
+  // Reset-on-key-change rather than an effect: `editKey` is the identity of
+  // the underlying night, so generating, reshuffling or activating a different
+  // one drops the edits in the same render instead of one frame later.
+  const editKey: unknown = active ?? computed;
+  const [edited, setEdited] = useState<{
+    key: unknown;
+    stops: { venue: Venue; role: PlanRole }[];
+    cycle: Record<number, number>;
+  } | null>(null);
+  const current = edited?.key === editKey ? edited : null;
+  const stops = current?.stops ?? baseStops;
+  const cycle = current?.cycle ?? {};
+
+  // A restored night keeps its own clock; a live one follows the controls.
+  const nightWhen = active ? active.startsAt : timing?.when;
+
+  // Built once here and used by both the render and the handlers, so the list
+  // a user is offered is provably the list the tap picks from.
+  const optionsFor = useCallback(
+    (forStops: { venue: Venue; role: PlanRole }[], i: number): Venue[] => {
+      const effectiveBudget = active?.source === "saved" ? "Any" : budget;
+      const inBudget = venues.filter((v) =>
+        withinBudget(v.price, effectiveBudget),
+      );
+      const list =
+        alternativesFor(inBudget.length >= 3 ? inBudget : venues, forStops, {
+          vibe,
+          budget: effectiveBudget,
+          daypart: active ? active.base.daypart : computed.daypart,
+          when: nightWhen,
+          tasteScores,
+        })[i] ?? [];
+      // Re-offer the stop's ORIGINAL venue when it is still walkable with the
+      // neighbours as they now stand. Without it a replacement is one-way: the
+      // current venue is excluded from its own list, so cycling could never
+      // bring back what you started with. Tested with the SAME predicate the
+      // list was built with, so the two cannot disagree.
+      const original = baseStops[i]?.venue;
+      if (!original || original.id === forStops[i]?.venue.id) return list;
+      const others = forStops.filter((_, j) => j !== i).map((x) => x.venue);
+      if (!withinWalkOfAny(original, others)) return list;
+      return [original, ...list.filter((v) => v.id !== original.id)];
+    },
+    [
+      active,
+      baseStops,
+      budget,
+      computed.daypart,
+      nightWhen,
+      tasteScores,
+      venues,
+      vibe,
+    ],
+  );
+
+  const alternatives = useMemo(
+    () => stops.map((_, i) => optionsFor(stops, i)),
+    [optionsFor, stops],
+  );
 
   // Memoised because the persist effect below depends on it: an unmemoised
   // `display` is a new object every render, so the effect's dep array never
   // matched and a synchronous localStorage write fired on every single render
   // of the result screen.
-  // Whether the night on screen actually differs from the one it started as.
-  // Undo used to key on `undoStack.length > 0`, but cycling a stop all the way
-  // round returns to the original venue while still pushing history — so the
-  // header offered "Undo change" on a night that looked untouched, and tapping
-  // it swapped in a venue the user had already rejected. Undo appeared to make
-  // a change.
   const display: DisplayPlan = useMemo(() => {
-    if (!active) return toDisplay(computed, swaps, timing?.when);
-    // Same shape as toDisplay, over the restored night's own base and options.
     // relinkSteps is what keeps a replacement honest: it recomputes dwell, the
     // walk to the NEXT stop and every arrival after it, in place, so the route
     // stays coherent and the map (which renders display.steps) follows.
-    const items = active.base.steps.map((s, i) => {
-      const alt = swaps[i];
-      const v =
-        alt != null && alt >= 0 ? activeAlternatives?.[i]?.[alt] : undefined;
-      return { venue: v ?? s.venue, role: s.role };
-    });
-    const steps = relinkSteps(items, active.startsAt);
+    const steps = relinkSteps(stops, nightWhen);
+    const totalMins = steps.reduce(
+      (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
+      0,
+    );
+    if (active) {
+      return {
+        // Title and area stay the night's own. A reopened "Fancy Night in
+        // Shoreditch" that swaps one stop is still that night; re-deriving
+        // them from the first stop the way a freshly generated plan does would
+        // rename the thing the user saved out from under them.
+        title: active.base.title,
+        area: active.base.area,
+        daypart: active.base.daypart,
+        totalMins,
+        steps,
+      };
+    }
+    // A live night names itself from where it landed, as it always has.
+    const area = steps[0]?.venue.neighbourhood || computed.area;
     return {
-      // Title and area stay the night's own. A reopened "Fancy Night in
-      // Shoreditch" that swaps one stop is still that night; re-deriving them
-      // from the first stop the way a freshly generated plan does would rename
-      // the thing the user saved out from under them.
-      title: active.base.title,
-      area: active.base.area,
-      daypart: active.base.daypart,
-      totalMins: steps.reduce(
-        (sum, s) => sum + s.dwellMins + (s.walkToNextMins ?? 0),
-        0,
-      ),
+      title: titleFor(computed, area),
+      area,
+      daypart: computed.daypart,
+      totalMins,
       steps,
     };
-  }, [active, activeAlternatives, computed, swaps, timing]);
+  }, [active, computed, nightWhen, stops]);
 
   // Compared against the un-swapped base of whichever night is on screen.
   const hasReplacements = display.steps.some(
@@ -601,7 +641,10 @@ export function PlanFlow({
     // Coarse shape shared by all three save events. Deliberately identical to
     // the prop bag the legacy plan_save already sent, so a dashboard can be
     // migrated without losing a dimension. No title, no venue names, no ids.
-    const swapCount = Object.values(swaps).filter((v) => v >= 0).length;
+    // Stops that differ from the night this started as.
+    const swapCount = stops.filter(
+      (st, i) => st.venue.id !== baseStops[i]?.venue.id,
+    ).length;
     const mode: SaveMode = alreadySaved
       ? "duplicate"
       : swapCount > 0
@@ -815,8 +858,8 @@ export function PlanFlow({
       // A wrong guess widens the pool and the engine still returns a night; no
       // guess changes the brief out from under the user.
       // A newly activated night starts with no replacements and no history.
-      setSwaps({});
-      swapsRef.current = {};
+      setEdited(null);
+      editedRef.current = null;
       setUndoStack([]);
       setVibe(np.vibe);
       setBudget(np.budget);
@@ -1107,7 +1150,7 @@ export function PlanFlow({
       fromEnginePlan(
         {
           ...computed,
-          // 🧨 `display.area`, not `computed.area`. toDisplay re-derives the
+          // 🧨 `display.area`, not `computed.area`. `display` re-derives the
           // area from the FIRST STOP, so once a swap changes stop 1 the header
           // reads "Soho" while the engine's resolved pocket still says
           // "Fitzrovia". Persisting the engine's value made a restored night
@@ -1239,52 +1282,60 @@ export function PlanFlow({
     }
     standDown();
     setSaveState("idle");
-    setSwaps({});
-    swapsRef.current = {};
+    setEdited(null);
+    editedRef.current = null;
     setUndoStack([]);
     fn();
   };
 
   // "Change this one" — cycle stop `i` through its alternatives (dir +1 = next,
-  // −1 = previous), wrapping through the original. relinkSteps (via toDisplay)
-  // keeps the walk + arrivals + map honest after the swap.
+  // −1 = previous). relinkSteps (via `display`) keeps the walk, the arrivals
+  // and the map honest after the swap.
   const onSwap = (
     i: number,
     dir: 1 | -1 = 1,
     method: SwapMethod = "button",
   ) => {
-    // `alternatives`, not `computed.alternatives`: on a restored night these
-    // are computed from that night's own stops, and on a live one they ARE
-    // computed.alternatives, so this single path serves both.
-    const alts = alternatives[i] ?? [];
-    if (alts.length === 0) return;
-    // 🧨 COMPUTED HERE, NOT INSIDE A setSwaps UPDATER. The first version
-    // pushed the undo entry from inside the updater, on the reasoning that it
-    // could not then capture a stale `swaps`. But a state updater must be
-    // pure: StrictMode double-invokes it (this repo enables it), so every
-    // replacement recorded TWO undo entries and the first tap of Undo appeared
-    // to do nothing. Each replacement is its own click and therefore its own
-    // render, so reading `swaps` from the closure is correct.
-    // 🧨 FROM A REF, NOT THE RENDER CLOSURE. SwipeStop fires onSwipe from a
-    // 180 ms timeout, so the callback captures whatever `swaps` was when the
-    // gesture STARTED. Swipe one stop and tap Change on another inside that
-    // window and the second handler rebuilt `next` from the pre-swap value,
-    // silently reverting the first replacement and pushing a duplicate undo
-    // entry — the same symptom the StrictMode fix above removed, by a
-    // different route. The ref is written synchronously here, so every
-    // handler sees the latest arrangement whenever it runs.
-    const prev = swapsRef.current;
-    // Positions 0..len-1: 0 = original venue, 1..len-1 = alternatives.
-    const len = alts.length + 1;
-    const pos = ((((prev[i] ?? -1) + 1 + dir) % len) + len) % len;
-    const idx = pos - 1; // −1 = back to the original
-    const next = { ...prev };
-    if (idx < 0) delete next[i];
-    else next[i] = idx;
-    swapsRef.current = next;
-    setSwaps(next);
-    // Where we came FROM, so Undo restores this exact arrangement.
-    setUndoStack((stack) => [...stack, prev]);
+    // 🧨 EVERYTHING IS READ FROM THE REF, NOT THE RENDER CLOSURE. SwipeStop
+    // fires onSwipe from a 180 ms timeout, so a handler can run against a
+    // render that predates another replacement. Reading the closure meant a
+    // swipe overlapping a tap rebuilt from a pre-swap arrangement and silently
+    // reverted the first change. The ref is written synchronously below, so
+    // every handler sees the night as it actually stands.
+    const from = editedRef.current;
+    const live = from?.key === editKey ? from : null;
+    const currentStops = live?.stops ?? baseStops;
+    const currentCycle = live?.cycle ?? {};
+
+    // Options for the stop as the night stands NOW — recomputed here rather
+    // than read from the render, for the same reason.
+    const list = optionsFor(currentStops, i);
+    if (list.length === 0) return;
+
+    // The list is rebuilt after every replacement, so a position in it is not
+    // stable across taps. That is the deliberate trade: a replacement measured
+    // against the neighbours it is joining beats a predictable ordering.
+    const len = list.length;
+    const pos = ((((currentCycle[i] ?? -1) + dir) % len) + len) % len;
+    const picked = list[pos];
+    if (!picked) return;
+
+    const nextStops = currentStops.map((s, j) =>
+      j === i ? { venue: picked, role: s.role } : s,
+    );
+    const nextState = {
+      key: editKey,
+      stops: nextStops,
+      cycle: { ...currentCycle, [i]: pos },
+    };
+    editedRef.current = nextState;
+    setEdited(nextState);
+    // Where we came FROM, so Undo restores this exact arrangement — which was
+    // itself walkable, so undo can never land on a night that is not.
+    setUndoStack((stack) => [
+      ...stack,
+      { key: editKey, stops: currentStops, cycle: currentCycle },
+    ]);
     setSaveState("idle");
     // `method` is passed in by the caller, never derived from `dir`: a LEFT
     // swipe and the Change button's default argument both produce dir === 1.
@@ -1294,9 +1345,8 @@ export function PlanFlow({
     track("plan_swap", {
       stop: i, // legacy spelling, kept so existing insights keep working
       stop_index: i,
-      // From the night ON SCREEN. Reading computed.steps here would report the
-      // live engine's role for a stop the user is changing on a restored one.
-      stop_role: display.steps[i]?.role ?? null,
+      // From the night ON SCREEN, not from the live engine's stop i.
+      stop_role: currentStops[i]?.role ?? null,
       dir,
       method,
     });
@@ -1306,11 +1356,17 @@ export function PlanFlow({
   // to the original is what tapping Change until it wraps already does, and
   // the thing a user actually wants is "that last one was worse".
   const undoReplace = () => {
-    if (undoStack.length === 0) return;
     const prev = undoStack[undoStack.length - 1];
+    // Only unwinds this night's own history. An entry from a night that has
+    // since been replaced would restore stops that belong to something else.
+    if (!prev || prev.key !== editKey) return;
     setUndoStack((stack) => stack.slice(0, -1));
-    swapsRef.current = prev;
-    setSwaps(prev);
+    // 🧨 Undo restores a WHOLE ARRANGEMENT, not a position in a list. Every
+    // arrangement it can restore was itself produced by a walkable
+    // replacement (or is the engine's own night), so undo cannot land on a
+    // route that breaks the walking rule — it does not need to re-check it.
+    editedRef.current = prev;
+    setEdited(prev);
     setSaveState("idle");
     track("plan_swap_undo", { remaining: undoStack.length - 1 });
   };
@@ -1483,8 +1539,8 @@ export function PlanFlow({
               const result = computePlan(venues, planOpts(0));
               const duration_ms = Math.round(performance.now() - t0);
               setOffset(0);
-              setSwaps({});
-              swapsRef.current = {};
+              setEdited(null);
+              editedRef.current = null;
               setUndoStack([]);
               standDown();
               // Build produces a DIFFERENT night, so the save flag from the
@@ -1853,8 +1909,8 @@ export function PlanFlow({
               const result = computePlan(venues, planOpts(nextOffset));
               const duration_ms = Math.round(performance.now() - t0);
               setSaveState("idle");
-              setSwaps({});
-              swapsRef.current = {};
+              setEdited(null);
+              editedRef.current = null;
               setUndoStack([]);
               // 🧨 Stand down the restored night. Without this the button was
               // visible but inert on any restored or claimed night: `display`
