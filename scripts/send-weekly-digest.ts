@@ -231,6 +231,26 @@ function venueCard(v: VenueLite): string {
   </td></tr>`;
 }
 
+function heroEvent(e: EventLite): string {
+  // Same information order as eventRow and the app card, at lead-story scale.
+  // Outlook cannot object-fit, so a non-16:9 poster squashes slightly there;
+  // every modern client crops. The alt text is the WebP fallback, as in
+  // eventRow.
+  return `<tr><td style="padding:12px 0 4px;">
+    <a href="${SITE_URL}/event/${esc(e.id)}" style="text-decoration:none;">
+      <img src="${esc(sizedImageUrl(e.img_url, 800))}" width="392" height="210"
+        alt="${esc(e.name)}"
+        style="width:100%;height:210px;border-radius:14px;object-fit:cover;display:block;">
+      <div style="color:#1a1409;font-weight:800;font-size:18px;line-height:1.25;margin-top:12px;">${esc(
+        e.name,
+      )}</div>
+      <div style="color:${MUTED_FG};font-size:12px;margin-top:3px;">
+        <span style="color:#2a2419;font-weight:600;">${esc(e.venue_name)}</span>
+        &middot; ${esc(e.area)} &middot; ${esc(e.date_label)} &middot; ${esc(e.time_label)}</div>
+    </a>
+  </td></tr>`;
+}
+
 function eventRow(e: EventLite): string {
   // Field order matches components/event-card.tsx: name, then VENUE and area,
   // then date and time. The digest had it inverted, which put a near-constant
@@ -266,7 +286,7 @@ function eventRow(e: EventLite): string {
 
 function section(title: string, rows: string): string {
   if (!rows) return "";
-  return `<tr><td style="padding-top:20px;">
+  return `<tr><td style="padding:20px 24px 0;">
     <div style="font-size:12px;font-weight:800;letter-spacing:0.08em;
       text-transform:uppercase;color:${BRAND_VIOLET};">${title}</div>
     <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
@@ -282,9 +302,13 @@ function buildHtml(
     "New this week &middot; first stops",
     venues.map(venueCard).join(""),
   );
+  // Lead story + briefs. One big photo-led card, then compact rows: the email
+  // reads as a page, not a list. Photography is the app's own language and the
+  // one thing a places email cannot feel alive without.
+  const [lead, ...briefs] = events;
   const eventsBlock = section(
     "On this week",
-    events.map(eventRow).join(""),
+    (lead ? heroEvent(lead) : "") + briefs.map(eventRow).join(""),
   );
   // <head> is load bearing, and its absence was a live bug waiting on the
   // calendar. With no charset declared, mail clients fall back to Latin-1 and
@@ -322,28 +346,33 @@ function buildHtml(
        would leave the cream page white. The width attribute is there for the
        same reason, since max-width alone is ignored and the card would become
        a full-window slab. Modern clients take the inline width:100%. -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">plan the night, not the place. New places and what is on this week.</div>
   <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f0eee9" style="background:#f0eee9;padding:24px 0;">
     <tr><td align="center" style="padding:0 12px;">
       <table width="440" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
         style="width:100%;max-width:440px;background:#ffffff;border-radius:18px;
-        padding:24px;border:1px solid #e3ddd2;">
-        <tr><td>
-          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:${BRAND_VIOLET};">London &middot; this week</div>
-          <div style="font-size:22px;font-weight:800;color:#1a1409;margin-top:4px;">Fun London</div>
-          <div style="font-size:14px;color:#645c50;margin-top:4px;">
+        border:1px solid #e3ddd2;">
+        <tr><td bgcolor="${BRAND_VIOLET}" style="background:${BRAND_VIOLET};border-radius:17px 17px 0 0;padding:26px 24px 24px;">
+          <div style="font-size:11px;font-weight:800;letter-spacing:0.10em;text-transform:uppercase;color:#D8CFFA;">London &middot; this week</div>
+          <div style="font-size:26px;font-weight:800;color:#ffffff;margin-top:6px;">Fun London</div>
+          <div style="font-size:16px;font-style:italic;color:#EDE9FE;margin-top:8px;">plan the night, not the place.</div>
+        </td></tr>
+        <tr><td style="padding:18px 24px 0;">
+          <div style="font-size:14px;color:#645c50;">
             New places and what is on this week.
             The night itself takes seconds to build.</div>
         </td></tr>
         ${venuesBlock}
         ${eventsBlock}
-        <tr><td style="padding:24px 0 28px;">
+        <tr><td style="padding:28px 24px;">
+          <div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:${BRAND_VIOLET};margin-bottom:10px;">Tonight, in three stops</div>
           <a href="${SITE_URL}/plan"
-            style="display:inline-block;background:${BRAND_VIOLET};color:#fff;
-            font-weight:800;font-size:14px;line-height:1;text-decoration:none;
-            padding:14px 22px;border-radius:12px;">Build my night</a>
+            style="display:block;text-align:center;background:${BRAND_VIOLET};color:#fff;
+            font-weight:800;font-size:15px;line-height:1;text-decoration:none;
+            padding:16px 22px;border-radius:12px;">Build my night</a>
         </td></tr>
-        <tr><td style="padding-top:20px;border-top:1px solid #e3ddd2;">
-          <div style="font-size:11px;color:${MUTED_FG};padding-top:12px;line-height:1.5;">
+        <tr><td style="padding:0 24px 24px;">
+          <div style="border-top:1px solid #e3ddd2;padding-top:14px;font-size:11px;color:${MUTED_FG};line-height:1.5;">
             You are getting this because you turned on weekly emails in your Fun
             London profile.<br>
             <a href="${unsubUrl}" style="color:${MUTED_FG};">Unsubscribe</a>
