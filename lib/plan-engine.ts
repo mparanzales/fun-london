@@ -49,7 +49,10 @@ export type Plan = {
   // arrival time (Stage 4.2), independent of how the pool was widened.
   poolStage: "area" | "budget" | "all";
   poolSize: number; // candidates considered after widening
-  // Per-stop swap options: alternatives[i] is the ranked list of other venues
+  // Per-stop swap options for a freshly generated plan. The solo UI no longer
+  // reads this — it derives its own from the stops on screen via
+  // alternativesFor — but the group surface still does. alternatives[i] is the
+  // ranked list of other venues
   // that fit stop i's role, stay within a short walk of the OTHER stops (so a
   // swap keeps the night walkable) and are open at that stop's arrival. Powers
   // "don't like this one — change it" without rebuilding the whole plan.
@@ -533,23 +536,17 @@ export function computePlan(
   // region / Anywhere pick reads as a real place ("a night around Shoreditch").
   const resolvedArea = chosen[0]?.venue.neighbourhood || scopeLabel(area);
 
-  // Per-stop swap options (Stage 4.x — "change this one"): for each stop, the
-  // best other venues that fit its role, stay within a short walk of the OTHER
-  // stops (so a swap keeps the night walkable) and are open at its arrival.
-  const chosenIds = new Set(chosen.map((c) => c.venue.id));
-  const maxRadius = Math.max(...radiusLadder);
-  const alternatives: Venue[][] = chosen.map((c, i) => {
-    const others = chosen.filter((_, j) => j !== i).map((x) => x.venue);
-    return pool
-      .filter(
-        (v) =>
-          !chosenIds.has(v.id) &&
-          matchRole(v, c.role) &&
-          (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
-          (others.length === 0 || minKmToChosen(v, others) <= maxRadius),
-      )
-      .sort((a, b) => scoreOf(b) - scoreOf(a))
-      .slice(0, 8);
+  // Per-stop swap options (Stage 4.x — "change this one"). Delegated so that
+  // the UI can compute the SAME options for a night the engine did not just
+  // produce — a restored or reopened one — instead of reusing this array,
+  // whose indices belong to these stops and no others.
+  const alternatives = alternativesFor(pool, chosen, {
+    vibe,
+    budget,
+    daypart,
+    when,
+    tasteScores,
+    maxRadiusKm: Math.max(...radiusLadder),
   });
 
   return {
@@ -563,6 +560,118 @@ export function computePlan(
     poolSize: pool.length,
     alternatives,
   };
+}
+
+/**
+ * Is `v` within a short walk of EVERY venue in `neighbours`?
+ *
+ * 🧨 THIS, NOT "near at least one". The any-rule looks equivalent on a
+ * three-stop night and is not: it lets a night walk itself apart one legal
+ * hop at a time. Replace stop 0 to sit beside stop 1, then stop 1 to sit
+ * beside stop 2, and stop 0 is now stranded — every individual replacement
+ * passed, the route did not. A generated test found it at the seventh
+ * replacement in a chain.
+ *
+ * Callers pass a stop's ADJACENT stops, so the constraint is exactly the walk
+ * the user is shown: consecutive hops.
+ */
+export function withinWalkOfAll(
+  v: Venue,
+  neighbours: Venue[],
+  maxKm: number = RADIUS_LADDER_KM[RADIUS_LADDER_KM.length - 1],
+): boolean {
+  // A null distance means one of them has no coordinates. The engine fails
+  // OPEN on unknown geography everywhere else (walkMins uses an 8-min
+  // fallback), so refusing here would silently drop every option beside a
+  // venue we simply have no lat/lng for.
+  return neighbours.every((n) => {
+    const d = haversineKm(n, v);
+    return d == null || d <= maxKm;
+  });
+}
+
+/**
+ * Is `v` within a short walk of at least one of `others`?
+ *
+ * The LOOSER rule, and no longer the one the option lists use — see
+ * `withinWalkOfAll`, which replaced it after a generated test showed the
+ * any-rule lets a night come apart one legal hop at a time. Kept because it is
+ * still the right question to ask of a whole arrangement ("is every stop near
+ * something?"), which is what the walkability tests assert.
+ */
+export function withinWalkOfAny(
+  v: Venue,
+  others: Venue[],
+  maxKm: number = RADIUS_LADDER_KM[RADIUS_LADDER_KM.length - 1],
+): boolean {
+  return others.length === 0 || minKmToChosen(v, others) <= maxKm;
+}
+
+/**
+ * The "change this one" options for a given set of stops.
+ *
+ * 🧨 WHY THIS IS EXPORTED, AND WHY THE UI MUST NOT REUSE `Plan.alternatives`.
+ * That array is indexed to the stops the engine returned. A restored, claimed
+ * or reopened night has DIFFERENT stops, so `alternatives[i]` there describes
+ * some other night's stop i — offering it would swap in a venue chosen for a
+ * walk that no longer exists, and could build a route nobody can walk. The
+ * previous release hid the control entirely rather than risk that; this makes
+ * the mismatch impossible instead, because the options are always derived from
+ * the stops actually on screen.
+ *
+ * `computePlan` calls this too, so the two paths cannot drift apart.
+ *
+ * The pool is the CALLER'S: `computePlan` passes its own area-scoped, possibly
+ * widened pool so its behaviour is unchanged, and the UI passes what it has.
+ * No budget filtering happens here — the engine's widest rung deliberately
+ * drops the budget constraint, and re-applying it would silently narrow it.
+ */
+export function alternativesFor(
+  pool: Venue[],
+  stops: { venue: Venue; role: PlanRole; arriveAt?: Date | null }[],
+  opts: {
+    vibe: PlanVibe;
+    budget: PlanBudget;
+    daypart: PlanDaypart;
+    when?: Date;
+    tasteScores?: Record<string, number> | null;
+    /** Defaults to the engine's widest walk radius. */
+    maxRadiusKm?: number;
+  },
+): Venue[][] {
+  const { vibe, daypart, when, tasteScores } = opts;
+  const maxRadius =
+    opts.maxRadiusKm ?? RADIUS_LADDER_KM[RADIUS_LADDER_KM.length - 1];
+  const scoreOf = (v: Venue) =>
+    vibeScore(v, vibe) +
+    (tasteScores ? PLAN_TASTE_WEIGHT * (tasteScores[v.id] ?? 0) : 0);
+  const chosenIds = new Set(stops.map((c) => c.venue.id));
+  return stops.map((c, i) => {
+    // The stop's ADJACENT stops — the hops the user actually walks. Measuring
+    // against "any other stop" let a night drift apart one legal replacement
+    // at a time; see withinWalkOfAll.
+    // 🧨 A stop with NO neighbours anchors on ITSELF. The engine leaves a role
+    // unfilled rather than teleport, so a one-stop night is a real state — and
+    // an empty neighbour list makes `withinWalkOfAll` vacuously true, which
+    // meant the single stop of a Richmond night could be replaced by the
+    // top-scoring restaurant in Soho, 15 km away, with nothing in the path
+    // constraining it. Anchoring on the stop being replaced keeps a
+    // replacement in the same part of town, which is the whole promise.
+    const adjacent = [stops[i - 1], stops[i + 1]].filter(Boolean);
+    const neighbours = (adjacent.length > 0 ? adjacent : [stops[i]]).map(
+      (x) => x.venue,
+    );
+    return pool
+      .filter(
+        (v) =>
+          !chosenIds.has(v.id) &&
+          roleMatchesForDaypart(v, c.role, daypart) &&
+          (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
+          withinWalkOfAll(v, neighbours, maxRadius),
+      )
+      .sort((a, b) => scoreOf(b) - scoreOf(a))
+      .slice(0, 8);
+  });
 }
 
 // Recompute a plan's steps (dwell, walk-to-next, and the arrival clock) for a

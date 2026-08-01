@@ -479,6 +479,38 @@ describe("isFresh · a night is stale when it is OVER, not 12h after it was thou
   // The fixture's two stops are 60 + 8 + 90 mins = 158 mins of night.
   const NIGHT_MS = 158 * 60 * 1000;
 
+  it("🧨 a RIGHT-NOW night is measured from createdAt, not from its stamp", () => {
+    // Its `startsAt` is just when Build was tapped, and the UI re-anchors such
+    // a night to the live clock on restore. Measuring staleness against the
+    // stamp used a different clock from the one on screen: a night built at
+    // 13:00 rendered "arrive ~4:50 pm" at 16:50 and was then deleted at 17:01
+    // for having "ended". Freshness and the display must agree.
+    const built = new Date("2026-07-30T13:00:00.000Z");
+    const rightNow = plan({
+      createdAt: built.toISOString(),
+      startsAt: built.toISOString(),
+      tracksClock: true,
+    });
+    // 3h58m later: past the stored start + the night's length, well inside 12h.
+    const after = built.getTime() + NIGHT_MS + 60 * 60 * 1000;
+    expect(isFresh(rightNow, after)).toBe(true);
+    // ...and the 12h fallback still bounds it.
+    expect(isFresh(rightNow, built.getTime() + 13 * H)).toBe(false);
+  });
+
+  it("a CHOSEN time is still measured from the stamp", () => {
+    // The other half of the same rule: a night the user picked a time for goes
+    // stale when that night is over, whatever the TTL says.
+    const start = new Date("2026-07-30T19:00:00.000Z");
+    const chosen = plan({
+      createdAt: new Date(start.getTime() - H).toISOString(),
+      startsAt: start.toISOString(),
+      tracksClock: false,
+    });
+    expect(isFresh(chosen, start.getTime() + NIGHT_MS - 60_000)).toBe(true);
+    expect(isFresh(chosen, start.getTime() + NIGHT_MS + 60_000)).toBe(false);
+  });
+
   it("🧨 a night planned for LATER stays fresh, however long ago it was built", () => {
     // "Pick a day" invites planning ahead. Anchored only to createdAt, a night
     // made on Thursday for next Saturday was deleted on Friday morning —
