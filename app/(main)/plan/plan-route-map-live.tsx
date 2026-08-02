@@ -8,7 +8,7 @@
 // OSRM returns real street geometry, DASHED when it timed out and we fell back
 // to straight-line hops.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import type { Venue } from "@/lib/types";
 
@@ -29,29 +29,39 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
   );
   const coordsKey = pts.map((p) => `${p.venue.lat},${p.venue.lng}`).join("|");
 
+  // Held across renders so the instance survives every replacement.
+  const mapRef = useRef<import("leaflet").Map | null>(null);
+  const stopLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
+  const routeLayerRef = useRef<import("leaflet").Polyline | null>(null);
+  const runRef = useRef(0);
+  // Bumped once the instance exists, so the layer effect below re-runs against
+  // it rather than bailing on the first pass.
+  const [ready, setReady] = useState(0);
+
+  // 🧨 THE MAP IS BUILT ONCE AND UPDATED IN PLACE. Keying the whole effect on
+  // the coordinates destroyed the Leaflet instance on every Change and every
+  // Undo: tiles reloaded, the frame jumped, and the route dropped to the
+  // dashed straight-line fallback for up to three seconds while OSRM was
+  // re-asked — so the same night's map looked different between two identical
+  // states, and a run of taps left it flickering. The instance and its tiles
+  // now outlive every replacement; only the markers and the line change.
   useEffect(() => {
-    if (!ref.current || pts.length < 2) return;
+    if (!mapRef.current || pts.length < 2) return;
     let cancelled = false;
-    let map: import("leaflet").Map | undefined;
+    const run = ++runRef.current;
     (async () => {
       const L = (await import("leaflet")).default;
-      if (cancelled || !ref.current) return;
-      const m = L.map(ref.current, {
-        zoomControl: false,
-        scrollWheelZoom: false,
-        attributionControl: false, // our own subtle credit lives below the map
-      });
-      map = m;
-      // Light "Positron" tiles + a greyscale filter (see globals.css) to match
-      // the venue page's clean grey static map.
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        { subdomains: "abcd", maxZoom: 20 },
-      ).addTo(m);
+      const m = mapRef.current;
+      if (cancelled || !m) return;
 
       const latlngs = pts.map(
         (p) => [p.venue.lat, p.venue.lng] as [number, number],
       );
+
+      // Markers are cheap and exact, so they swap immediately.
+      stopLayerRef.current?.remove();
+      const group = L.layerGroup().addTo(m);
+      stopLayerRef.current = group;
       pts.forEach((p, i) => {
         const icon = L.divIcon({
           className: "",
@@ -62,20 +72,20 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
           iconSize: [26, 26],
           iconAnchor: [13, 13],
         });
-        L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(m);
+        L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(group);
       });
-      m.fitBounds(L.latLngBounds(latlngs).pad(0.3)); // frame immediately
+      m.fitBounds(L.latLngBounds(latlngs).pad(0.3));
 
-      // Real walking geometry that follows the streets (keyless OSRM foot
-      // service on OSM data). Falls back to straight hops if it's unavailable.
+      // 🧨 The OLD line stays drawn while the new one is fetched. Clearing it
+      // first is what produced the flash: a blank map, then a dashed
+      // straight-line guess, then the real route — three states for one tap.
+      // Real walking geometry from the keyless OSRM foot service on OSM data.
       let line = latlngs;
       let dashed = true;
       try {
         const coords = pts
           .map((p) => `${p.venue.lng},${p.venue.lat}`)
           .join(";");
-        // Don't let a slow/unreachable router hang the map — bail to the
-        // straight-line fallback after 3s.
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 3000);
         const res = await fetch(
@@ -90,10 +100,12 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
           dashed = false;
         }
       } catch {
-        // unreachable / slow / aborted → keep the straight-line fallback
+        // unreachable / slow / aborted → straight-line fallback
       }
-      if (cancelled) return; // unmounted mid-fetch — cleanup removes the map
-      L.polyline(line, {
+      // A later tap has already started its own fetch; that one owns the line.
+      if (cancelled || runRef.current !== run || !mapRef.current) return;
+      routeLayerRef.current?.remove();
+      routeLayerRef.current = L.polyline(line, {
         color: ACCENT,
         weight: dashed ? 3 : 4,
         opacity: 0.95,
@@ -101,14 +113,43 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
         lineCap: "round",
         lineJoin: "round",
       }).addTo(m);
-      m.fitBounds(L.latLngBounds(line).pad(0.25));
     })();
     return () => {
       cancelled = true;
-      if (map) map.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coordsKey]);
+  }, [coordsKey, ready]);
+
+  // Create the map and its tiles exactly once.
+  useEffect(() => {
+    if (!ref.current || mapRef.current) return;
+    let cancelled = false;
+    (async () => {
+      const L = (await import("leaflet")).default;
+      if (cancelled || !ref.current || mapRef.current) return;
+      const m = L.map(ref.current, {
+        zoomControl: false,
+        scrollWheelZoom: false,
+        attributionControl: false, // our own subtle credit lives below the map
+      });
+      // Light "Positron" tiles + a greyscale filter (see globals.css) to match
+      // the venue page's clean grey static map.
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        { subdomains: "abcd", maxZoom: 20 },
+      ).addTo(m);
+      mapRef.current = m;
+      // Nudge the layer effect now that there is something to draw on.
+      setReady((n) => n + 1);
+    })();
+    return () => {
+      cancelled = true;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      stopLayerRef.current = null;
+      routeLayerRef.current = null;
+    };
+  }, []);
 
   if (pts.length < 2) return null;
 

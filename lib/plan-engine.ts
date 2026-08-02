@@ -661,17 +661,76 @@ export function alternativesFor(
     const neighbours = (adjacent.length > 0 ? adjacent : [stops[i]]).map(
       (x) => x.venue,
     );
-    return pool
-      .filter(
-        (v) =>
-          !chosenIds.has(v.id) &&
-          roleMatchesForDaypart(v, c.role, daypart) &&
-          (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
-          withinWalkOfAll(v, neighbours, maxRadius),
-      )
-      .sort((a, b) => scoreOf(b) - scoreOf(a))
-      .slice(0, 8);
+    return (
+      pool
+        .filter(
+          (v) =>
+            !chosenIds.has(v.id) &&
+            roleMatchesForDaypart(v, c.role, daypart) &&
+            (!when || !c.arriveAt || isOpenAt(v, c.arriveAt)) &&
+            withinWalkOfAll(v, neighbours, maxRadius),
+        )
+        .sort((a, b) => scoreOf(b) - scoreOf(a))
+        .slice(0, 8)
+        // 🧨 AND IT MUST NOT CLOSE A LATER STOP. The check above asks whether the
+        // CANDIDATE is open when you would reach it, which is necessary and not
+        // sufficient: a candidate's dwell is its own, so swapping a 40-minute
+        // cafe for a 90-minute restaurant pushes every later arrival back by
+        // fifty minutes. Two of those and the finale is an hour and a half
+        // later — at a venue that shut. Nothing warned, because the stop was
+        // open when it was chosen and nothing re-asked. Applied AFTER the slice,
+        // so the simulation runs over at most eight candidates rather than the
+        // whole pool.
+        .filter((v) => !closesALaterStop(stops, i, v, when))
+    );
   });
+}
+
+/**
+ * Would putting `candidate` at index `i` leave a LATER stop shut when the user
+ * gets there?
+ *
+ * Replacing a stop changes its dwell, which moves every arrival after it. This
+ * re-walks the night with the candidate in place and asks the question the
+ * original selection asked, of the stops that selection cannot have known
+ * about. With no clock (`when` absent) there are no arrivals to check and
+ * nothing can be decided, so it answers no.
+ */
+function closesALaterStop(
+  stops: { venue: Venue; role: PlanRole; arriveAt?: Date | null }[],
+  i: number,
+  candidate: Venue,
+  when?: Date,
+): boolean {
+  if (!when || i >= stops.length - 1) return false;
+  const swapped = stops.map((s, j) => ({
+    venue: j === i ? candidate : s.venue,
+    role: s.role,
+  }));
+  return relinkSteps(swapped, when).some(
+    (s, j) => j > i && s.arriveAt != null && !isOpenAt(s.venue, s.arriveAt),
+  );
+}
+
+/**
+ * The indices of stops that will be SHUT when the user arrives.
+ *
+ * A night is not static: a replacement moves later arrivals, undo restores an
+ * arrangement that was valid when it was made, and simply sitting on the page
+ * moves a live-clock night forward. Any of those can leave a stop the user
+ * kept — rather than one we offered — closed on arrival. Offering only open
+ * candidates is half the job; the other half is saying so when a stop already
+ * in the night stops working, instead of printing an arrival time under a
+ * venue that will be dark.
+ */
+export function closedOnArrival(
+  steps: { venue: Venue; arriveAt?: Date | null }[],
+): number[] {
+  const out: number[] = [];
+  steps.forEach((s, i) => {
+    if (s.arriveAt != null && !isOpenAt(s.venue, s.arriveAt)) out.push(i);
+  });
+  return out;
 }
 
 // Recompute a plan's steps (dwell, walk-to-next, and the arrival clock) for a

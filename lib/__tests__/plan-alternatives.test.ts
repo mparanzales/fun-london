@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   alternativesFor,
+  closedOnArrival,
   computePlan,
+  relinkSteps,
   withinWalkOfAny,
   walkMins,
 } from "@/lib/plan-engine";
@@ -355,5 +357,122 @@ describe("🧨 sequential replacements stay walkable", () => {
         `${v.id} is not walkable with the CURRENT stop 0`,
       ).toBe(true);
     }
+  });
+});
+
+describe("🧨 a replacement must not close a LATER stop", () => {
+  // The check that a CANDIDATE is open when you reach it is necessary and not
+  // sufficient. A candidate brings its own dwell, so swapping a short stop for
+  // a long one pushes every later arrival back — and the stop the user KEPT,
+  // which was open when it was chosen, can end up shut. Nothing warned,
+  // because nothing re-asked.
+  const day = (h: number, m = 0) => new Date(2026, 5, 10, h, m);
+  const START = day(19); // the night begins at 19:00
+  const weekday = START.getDay();
+  const shutsAt = (h: number, m = 0): OpeningHours => ({
+    periods: [
+      {
+        open: { day: weekday, hour: 6, minute: 0 },
+        close: { day: weekday, hour: h, minute: m },
+      },
+    ],
+  });
+
+  it("refuses a long candidate that would push the finale past closing", () => {
+    // Bar dwell is shorter than Restaurant dwell in the engine's table, so a
+    // Restaurant at "Then" delays the Finish. The finale shuts at 21:30.
+    const start = at("start", "Restaurant", HERE);
+    const then = at("then", "Bar", HERE);
+    const finish = at("finish", "Live Music", HERE, {
+      openingHours: shutsAt(21, 30),
+    });
+    const stops = relinkSteps(
+      [
+        { venue: start, role: "Start" as const },
+        { venue: then, role: "Then" as const },
+        { venue: finish, role: "Finish" as const },
+      ],
+      START,
+    );
+    // Two candidates for "Then", both open on arrival themselves, both
+    // walkable — one short, one long.
+    const shortAlt = at("short-alt", "Bar", HERE, { rating: 4 });
+    const longAlt = at("long-alt", "Listening Bar", HERE, { rating: 5 });
+    const [, forThen] = alternativesFor(
+      [start, then, finish, shortAlt, longAlt],
+      stops,
+      { ...EVENING, when: START },
+    );
+    // Whatever is offered, applying it must leave the finale open.
+    for (const cand of forThen) {
+      const relinked = relinkSteps(
+        stops.map((s, j) => ({
+          venue: j === 1 ? cand : s.venue,
+          role: s.role,
+        })),
+        START,
+      );
+      expect(
+        closedOnArrival(relinked),
+        `offering ${cand.id} closes a later stop`,
+      ).toEqual([]);
+    }
+  });
+
+  it("does not apply the rule to the LAST stop, which has nothing after it", () => {
+    const start = at("start", "Restaurant", HERE);
+    const finish = at("finish", "Bar", HERE);
+    const stops = relinkSteps(
+      [
+        { venue: start, role: "Start" as const },
+        { venue: finish, role: "Then" as const },
+      ],
+      START,
+    );
+    const alt = at("alt", "Listening Bar", HERE);
+    const [, forLast] = alternativesFor([start, finish, alt], stops, {
+      ...EVENING,
+      when: START,
+    });
+    expect(forLast.map((v) => v.id)).toContain("alt");
+  });
+
+  it("decides nothing without a clock, rather than refusing everything", () => {
+    const stops = stopsAt(HERE);
+    const spare = at("spare", "Bar", HERE);
+    const [, forThen] = alternativesFor(
+      [...stops.map((s) => s.venue), spare],
+      stops,
+      EVENING, // no `when`
+    );
+    expect(forThen.map((v) => v.id)).toContain("spare");
+  });
+});
+
+describe("closedOnArrival", () => {
+  it("names the stops that will be shut when the user gets there", () => {
+    const noon = new Date(2026, 5, 10, 12, 0);
+    const d = noon.getDay();
+    const morningOnly: OpeningHours = {
+      periods: [
+        {
+          open: { day: d, hour: 9, minute: 0 },
+          close: { day: d, hour: 11, minute: 0 },
+        },
+      ],
+    };
+    const steps = [
+      { venue: at("open", "Bar", HERE), arriveAt: noon },
+      {
+        venue: at("shut", "Bar", HERE, { openingHours: morningOnly }),
+        arriveAt: noon,
+      },
+    ];
+    expect(closedOnArrival(steps)).toEqual([1]);
+  });
+
+  it("says nothing about a night with no clock", () => {
+    const steps = [{ venue: at("x", "Bar", HERE), arriveAt: null }];
+    expect(closedOnArrival(steps)).toEqual([]);
   });
 });

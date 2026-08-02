@@ -54,6 +54,97 @@ const PREFIX = ACTIVE_PLAN_PREFIX;
 export const ANON_PLAN_STASH_KEY = "fl.anonplan.v1";
 export const ANON_RESULT_KEY = "fl.anonresult.v1";
 
+/**
+ * The per-stop replacement history for the night in the active slot.
+ *
+ * Owner-scoped like the night itself, and — 🧨 — listed in the anon sweep
+ * below. It holds venue references for a night one person built; leaving it
+ * behind on a shared browser is the same bleed as leaving the night behind,
+ * and this repo has now shipped that bug twice through keys the store did not
+ * know about.
+ *
+ * Kept SEPARATE from the NightPlan rather than folded into it: a NightPlan is
+ * the interchange shape written to a jsonb column and handed between surfaces,
+ * and an undo stack is neither durable product data nor anything the database
+ * should carry.
+ */
+const UNDO_PREFIX = "fl:plan-undo:v1";
+
+export function undoStackKey(owner: PlanOwner): string {
+  return `${UNDO_PREFIX}:${owner ?? "anon"}`;
+}
+
+/** One arrangement in the history: the night's stops as references. */
+export type StoredUndoEntry = {
+  stops: { venueId: string; slug: string; role: string }[];
+  cycle: Record<number, string[]>;
+};
+
+type StoredUndo = {
+  v: 1;
+  /** Venue ids of the night this history belongs to, in order. */
+  sig: string;
+  entries: StoredUndoEntry[];
+};
+
+export function readUndoStack(
+  owner: PlanOwner,
+  sig: string,
+  store?: StorageLike | null,
+): StoredUndoEntry[] {
+  const s = store ?? defaultStorage();
+  if (!s) return [];
+  let raw: string | null = null;
+  try {
+    raw = s.getItem(undoStackKey(owner));
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as StoredUndo;
+    // 🧨 The signature must match. A history is only meaningful against the
+    // night it was made on — replaying one night's stack onto another would
+    // restore stops that belong somewhere else.
+    if (parsed?.v !== 1 || parsed.sig !== sig) return [];
+    if (!Array.isArray(parsed.entries)) return [];
+    return parsed.entries.filter(
+      (e) =>
+        e &&
+        Array.isArray(e.stops) &&
+        e.stops.every(
+          (st) =>
+            st &&
+            typeof st.venueId === "string" &&
+            st.venueId.length > 0 &&
+            typeof st.role === "string",
+        ),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function writeUndoStack(
+  owner: PlanOwner,
+  sig: string,
+  entries: StoredUndoEntry[],
+  store?: StorageLike | null,
+): void {
+  const s = store ?? defaultStorage();
+  if (!s) return;
+  try {
+    if (entries.length === 0) {
+      s.removeItem(undoStackKey(owner));
+      return;
+    }
+    const payload: StoredUndo = { v: 1, sig, entries };
+    s.setItem(undoStackKey(owner), JSON.stringify(payload));
+  } catch {
+    // Quota or private mode. The history stays in memory for this session.
+  }
+}
+
 /** `null` owner = the anonymous browser. */
 export type PlanOwner = string | null;
 
@@ -155,12 +246,30 @@ export function clearActivePlan(
   }
 }
 
+/**
+ * EVERY key that can hold the anonymous browser's night, from one place.
+ *
+ * 🧨 Exported so the tests assert over THIS, not over a list they keep
+ * themselves. The hand-written version stayed green when a new anon key was
+ * added and not swept — which is precisely the bug those tests exist to catch,
+ * and precisely the comment they carry. A guard that maintains its own copy of
+ * the thing it guards cannot see what the code added.
+ */
+export function anonPlanKeys(): string[] {
+  return [
+    activePlanKey(null),
+    ANON_PLAN_STASH_KEY,
+    ANON_RESULT_KEY,
+    undoStackKey(null),
+  ];
+}
+
 /** Wipe the anonymous browser's night in every form it can take. Safe to call
  *  when there is nothing there. */
 export function clearAnonPlanKeys(store?: StorageLike | null): void {
   const s = store ?? defaultStorage();
   if (!s) return;
-  for (const k of [activePlanKey(null), ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+  for (const k of anonPlanKeys()) {
     try {
       s.removeItem(k);
     } catch {

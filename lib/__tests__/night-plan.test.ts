@@ -21,6 +21,7 @@ import {
   memoryStorage,
   type StorageLike,
   clearAnonPlanKeys,
+  anonPlanKeys,
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
@@ -652,29 +653,55 @@ describe("claimAnonPlan · sign in and keep the night you just built", () => {
     expect(readActivePlan("user-a", store)?.title).toBe("Built signed out");
   });
 
+  it("🧨 anonPlanKeys() lists EVERY anon key the module defines", () => {
+    // 🧨 The behavioural tests below derive from anonPlanKeys(), so they cannot
+    // notice a key that was never added to it — delete an entry and they stay
+    // green, because the check shrinks with the code. Measured: dropping the
+    // undo key from the list left all 39 passing. This reads the module's
+    // source instead, so the two cannot shrink together.
+    const src = readFileSync(
+      fileURLToPath(new URL("../active-plan.ts", import.meta.url)),
+      "utf8",
+    )
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    // Every anon-scoped storage key this module defines, by its literal.
+    const defined = [...src.matchAll(/=\s*"(fl[.:][^"]+)"/g)].map((m) => m[1]);
+    expect(defined.length).toBeGreaterThan(2);
+    const listed = anonPlanKeys().join("|");
+    for (const key of defined) {
+      expect(
+        listed,
+        `"${key}" is defined in active-plan.ts but is not in anonPlanKeys(). The next person on this browser inherits it`,
+      ).toContain(key);
+    }
+  });
+
   it("🧨 leaves NO copy behind for the next person on this browser", () => {
     // Asserted over EVERY anon-scoped key, not just the store's own slot.
     // The narrow version of this test passed while a second anon key — added
     // elsewhere, for the signed-out result screen — survived the claim, the
     // sign-out, and was rehydrated onto the next visitor. A guard that only
     // checks the key it owns cannot see the key it does not.
+    // 🧨 Over anonPlanKeys(), not over a list this test maintains. The
+    // hand-written version stayed green when a fourth anon key was added and
+    // not swept — the same class of miss it was written to prevent.
     writeActivePlan(null, plan(), store);
-    store.setItem(ANON_PLAN_STASH_KEY, '{"stops":[]}');
-    store.setItem(ANON_RESULT_KEY, '{"v":1,"payload":{}}');
+    for (const k of anonPlanKeys()) store.setItem(k, '{"seeded":true}');
+    writeActivePlan(null, plan(), store); // real entry in the canonical slot
     claimAnonPlan("user-a", store);
     expect(readActivePlan(null, store)).toBeNull();
-    for (const k of [ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+    for (const k of anonPlanKeys()) {
       expect(store.getItem(k), `${k} survived the claim`).toBeNull();
     }
   });
 
   it("🧨 clearAnonPlanKeys wipes every anon key, for sign-out", () => {
+    for (const k of anonPlanKeys()) store.setItem(k, '{"seeded":true}');
     writeActivePlan(null, plan(), store);
-    store.setItem(ANON_PLAN_STASH_KEY, '{"stops":[]}');
-    store.setItem(ANON_RESULT_KEY, '{"v":1,"payload":{}}');
     clearAnonPlanKeys(store);
     expect(readActivePlan(null, store)).toBeNull();
-    for (const k of [ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+    for (const k of anonPlanKeys()) {
       expect(store.getItem(k), `${k} survived sign-out`).toBeNull();
     }
   });

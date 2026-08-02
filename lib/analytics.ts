@@ -174,6 +174,7 @@ export type AnalyticsEvent =
   | "plan_swap_undo" // stepped back through a stop replacement
   | "plan_reopen_conflict" // tapped a saved night with an unsaved one live
   | "plan_reopen_conflict_resolved" // and chose which to keep
+  | "plan_reshuffle_confirm_shown" // reshuffle would discard manual changes
   | "together_room_create"
   | "together_room_join"
   | "together_swipe"
