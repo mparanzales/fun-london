@@ -13,6 +13,14 @@ dist/
 .env
 .env.local
 .env.*.local
+# 🧨 Any BACKUP of an env file is still a file full of live credentials, and the
+# patterns above do not cover `.env.local.bak-2026-08-01` or `.env.local.save`.
+# One was created by hand during the PostHog key rotation and showed up as an
+# untracked, COMMITTABLE file holding the service-role key.
+.env*.bak*
+.env*.backup*
+.env*.save
+.env*.orig
 
 # R2 photo-migration checkpoint (resumable upload progress)
 .r2-migration-progress.json
