@@ -22,6 +22,10 @@ import {
   type StorageLike,
   clearAnonPlanKeys,
   anonPlanKeys,
+  readUndoStack,
+  writeUndoStack,
+  clearUndoStack,
+  undoStackKey,
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
@@ -736,5 +740,77 @@ describe("claimAnonPlan · sign in and keep the night you just built", () => {
   it("marks the claimed night's source so the transfer is measurable", () => {
     writeActivePlan(null, plan({ source: "generated" }), store);
     expect(claimAnonPlan("user-a", store)?.source).toBe("anon");
+  });
+});
+
+describe("the undo store", () => {
+  let store: ReturnType<typeof memoryStorage>;
+  beforeEach(() => {
+    store = memoryStorage();
+  });
+  const entry = (ids: string[]) => ({
+    stops: ids.map((id) => ({ venueId: id, slug: id, role: "Start" })),
+    cycle: {},
+  });
+
+  it("🧨 round-trips: written under a signature, read back under the same one", () => {
+    // This is the test whose absence let the whole feature ship as a no-op.
+    // The signature was derived from the night's CURRENT stops, which move
+    // when a stop is replaced, so nothing written was ever readable again —
+    // and the failed read then deleted it. Green the entire time, because
+    // nothing exercised the round trip.
+    writeUndoStack("user-a", "night-1", [entry(["v1", "v2"])], store);
+    const back = readUndoStack("user-a", "night-1", store);
+    expect(back).toHaveLength(1);
+    expect(back[0].stops.map((s) => s.venueId)).toEqual(["v1", "v2"]);
+  });
+
+  it("🧨 refuses a history belonging to a different night", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    expect(readUndoStack("user-a", "night-2", store)).toEqual([]);
+  });
+
+  it("🧨 does not hand one owner's history to another", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    expect(readUndoStack("user-b", "night-1", store)).toEqual([]);
+    expect(readUndoStack(null, "night-1", store)).toEqual([]);
+  });
+
+  it("an empty stack clears the key rather than storing nothing", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    writeUndoStack("user-a", "night-1", [], store);
+    expect(store.getItem(undoStackKey("user-a"))).toBeNull();
+  });
+
+  it("drops entries with an unusable stop rather than restoring a hole", () => {
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [
+          entry(["v1"]),
+          { stops: [{ venueId: "", slug: "", role: "Start" }], cycle: {} },
+        ],
+      }),
+    );
+    const back = readUndoStack("user-a", "night-1", store);
+    expect(back).toHaveLength(1);
+  });
+
+  it("survives corrupt or foreign-version JSON without throwing", () => {
+    store.setItem(undoStackKey("user-a"), "{not json");
+    expect(readUndoStack("user-a", "night-1", store)).toEqual([]);
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({ v: 99, sig: "night-1", entries: [] }),
+    );
+    expect(readUndoStack("user-a", "night-1", store)).toEqual([]);
+  });
+
+  it("🧨 clearUndoStack takes the departing owner's history with them", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    clearUndoStack("user-a", store);
+    expect(readUndoStack("user-a", "night-1", store)).toEqual([]);
   });
 });

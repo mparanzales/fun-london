@@ -20,7 +20,11 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
 import { clearSignInTrigger } from "@/lib/analytics-keys";
-import { clearAnonPlanKeys, clearActivePlan } from "@/lib/active-plan";
+import {
+  clearAnonPlanKeys,
+  clearActivePlan,
+  clearUndoStack,
+} from "@/lib/active-plan";
 import { clearRoomInvite } from "@/lib/room-invite";
 import { isSignOutTransition } from "@/lib/auth-transition";
 
@@ -64,6 +68,11 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
         // on /plan — and, because the signed-out flow re-persists what it
         // rehydrates, what gets claimed into the next account that signs in.
         clearAnonPlanKeys();
+        // 🧨 And the DEPARTING owner's replacement history. It is owner-scoped
+        // like their night, so leaving it is the same bleed: A's venue ids sit
+        // on a shared laptop until something else overwrites them. Same rule
+        // as PR #129 — clear on the transition, not on a button.
+        clearUndoStack(prevIdRef.current);
         // ...and the DEPARTING account's own slot. clearAnonPlanKeys is
         // anon-scoped by construction, so without this A's night — title,
         // area and venue slugs — sat in localStorage on a shared laptop

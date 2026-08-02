@@ -87,6 +87,18 @@ type StoredUndo = {
   entries: StoredUndoEntry[];
 };
 
+/** Drop one owner's replacement history. Used on the sign-out transition, so
+ *  the departing account's venue ids do not sit on a shared browser. */
+export function clearUndoStack(owner: PlanOwner, store?: StorageLike | null) {
+  const s = store ?? defaultStorage();
+  if (!s) return;
+  try {
+    s.removeItem(undoStackKey(owner));
+  } catch {
+    /* nothing to do */
+  }
+}
+
 export function readUndoStack(
   owner: PlanOwner,
   sig: string,

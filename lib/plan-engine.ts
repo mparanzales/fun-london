@@ -703,22 +703,32 @@ function closesALaterStop(
   when?: Date,
 ): boolean {
   if (!when || i >= stops.length - 1) return false;
+  // 🧨 AGAINST THE NIGHT AS IT STANDS, not against perfection. Asking "is any
+  // later stop shut?" outright meant that once a later stop was ALREADY shut —
+  // which the new warning now advertises — every candidate for every earlier
+  // stop was refused, so Change went dead on the two stops that could have
+  // fixed it while the copy blamed walkability. A candidate is only at fault
+  // for a stop it CLOSES; one that was already dark is not its doing.
+  const alreadyShut = new Set(closedOnArrival(relinkSteps(stops, when)));
   const swapped = stops.map((s, j) => ({
     venue: j === i ? candidate : s.venue,
     role: s.role,
   }));
   return relinkSteps(swapped, when).some(
-    (s, j) => j > i && s.arriveAt != null && !isOpenAt(s.venue, s.arriveAt),
+    (s, j) =>
+      j > i &&
+      s.arriveAt != null &&
+      !isOpenAt(s.venue, s.arriveAt) &&
+      !alreadyShut.has(j),
   );
 }
 
 /**
  * The indices of stops that will be SHUT when the user arrives.
  *
- * A night is not static: a replacement moves later arrivals, undo restores an
- * arrangement that was valid when it was made, and simply sitting on the page
- * moves a live-clock night forward. Any of those can leave a stop the user
- * kept — rather than one we offered — closed on arrival. Offering only open
+ * A night is not static: a replacement moves later arrivals, and undo restores
+ * an arrangement that was valid when it was made. Either can leave a stop the
+ * user kept — rather than one we offered — closed on arrival. Offering only open
  * candidates is half the job; the other half is saying so when a stop already
  * in the night stops working, instead of printing an arrival time under a
  * venue that will be dark.

@@ -378,13 +378,18 @@ describe("🧨 a replacement must not close a LATER stop", () => {
     ],
   });
 
-  it("refuses a long candidate that would push the finale past closing", () => {
-    // Bar dwell is shorter than Restaurant dwell in the engine's table, so a
-    // Restaurant at "Then" delays the Finish. The finale shuts at 21:30.
+  // Base night: Restaurant(90) 19:00 -> Bar(60) 20:32 -> Live Music 21:34.
+  // Swapping the Bar for a Listening Bar(75) moves the finale to 21:49. A
+  // finale shutting at 21:40 therefore separates the two candidates exactly:
+  // one is fine, the other closes it. Without that 15-minute gap the guard
+  // never fires and mutating it changes nothing, which is how the first
+  // version of this test passed with the predicate rejecting everything AND
+  // with it accepting everything.
+  it("refuses a candidate that would close a still-open later stop", () => {
     const start = at("start", "Restaurant", HERE);
     const then = at("then", "Bar", HERE);
     const finish = at("finish", "Live Music", HERE, {
-      openingHours: shutsAt(21, 30),
+      openingHours: shutsAt(21, 40),
     });
     const stops = relinkSteps(
       [
@@ -394,8 +399,9 @@ describe("🧨 a replacement must not close a LATER stop", () => {
       ],
       START,
     );
-    // Two candidates for "Then", both open on arrival themselves, both
-    // walkable — one short, one long.
+    // The base night must be valid, or the rule has nothing to protect.
+    expect(closedOnArrival(stops)).toEqual([]);
+
     const shortAlt = at("short-alt", "Bar", HERE, { rating: 4 });
     const longAlt = at("long-alt", "Listening Bar", HERE, { rating: 5 });
     const [, forThen] = alternativesFor(
@@ -403,12 +409,16 @@ describe("🧨 a replacement must not close a LATER stop", () => {
       stops,
       { ...EVENING, when: START },
     );
-    // Whatever is offered, applying it must leave the finale open.
+    // The short one is fine and must still be offered...
+    expect(forThen.map((v) => v.id)).toContain("short-alt");
+    // ...and the long one, which is the BETTER ranked, must not be.
+    expect(forThen.map((v) => v.id)).not.toContain("long-alt");
+    // Stated as the invariant too, not just as two ids.
     for (const cand of forThen) {
       const relinked = relinkSteps(
-        stops.map((s, j) => ({
-          venue: j === 1 ? cand : s.venue,
-          role: s.role,
+        stops.map((st, j) => ({
+          venue: j === 1 ? cand : st.venue,
+          role: st.role,
         })),
         START,
       );
@@ -417,6 +427,37 @@ describe("🧨 a replacement must not close a LATER stop", () => {
         `offering ${cand.id} closes a later stop`,
       ).toEqual([]);
     }
+  });
+
+  it("🧨 does not blame a candidate for a stop that was ALREADY shut", () => {
+    // The cascade this caused: ask "is any later stop shut?" outright and, once
+    // the finale is dark, EVERY candidate for EVERY earlier stop is refused.
+    // Change went dead on the two stops that could have fixed it, under copy
+    // blaming walkability. A candidate is only at fault for a stop it closes.
+    const start = at("start", "Restaurant", HERE);
+    const then = at("then", "Bar", HERE);
+    const finish = at("finish", "Live Music", HERE, {
+      openingHours: shutsAt(20, 0), // already shut before the base night lands
+    });
+    const stops = relinkSteps(
+      [
+        { venue: start, role: "Start" as const },
+        { venue: then, role: "Then" as const },
+        { venue: finish, role: "Finish" as const },
+      ],
+      START,
+    );
+    expect(closedOnArrival(stops)).toEqual([2]); // the premise
+
+    const alt = at("alt", "Bar", HERE, { rating: 5 });
+    const [, forThen] = alternativesFor([start, then, finish, alt], stops, {
+      ...EVENING,
+      when: START,
+    });
+    expect(
+      forThen.map((v) => v.id),
+      "an already-shut finale must not disable the stops before it",
+    ).toContain("alt");
   });
 
   it("does not apply the rule to the LAST stop, which has nothing after it", () => {
