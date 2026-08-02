@@ -554,7 +554,8 @@ export function PlanFlow({
           tasteScores,
         },
       );
-      // Re-offer the stop's ORIGINAL venue when it is still walkable with the
+      // Re-offer the stop's venue from the night's BASE when it is still
+      // walkable with the
       // neighbours as they now stand. Without it a replacement is one-way: the
       // current venue is excluded from its own list, so cycling could never
       // bring back what you started with. Tested with the SAME predicate the
@@ -639,8 +640,6 @@ export function PlanFlow({
     };
   }, [active, computed, nightWhen, stops]);
 
-  // Compared against the un-swapped base of whichever night is on screen.
-
   // Stops that will be SHUT when the user gets there. A replacement moves
   // every later arrival, and undo restores an arrangement that was valid when
   // it was made — either can leave a stop the user KEPT closed. Offering only
@@ -671,6 +670,21 @@ export function PlanFlow({
   // button never rendered, with the whole stack sitting in state. It also
   // stranded older entries the moment a cycle returned to the original.
   const myUndo = entriesFor(undoStack, editKey);
+  // 🧨 THE ORIGINAL IS HELD, NOT DERIVED. Reading it off the deepest history
+  // entry was right until the two things that move that entry: `undoReplace`
+  // pops, so unwinding the last change fell back to the base and reported a
+  // change on a night identical to its original; and the 20-deep cap trims
+  // from the front, so past twenty replacements the deepest entry is simply
+  // not the original any more — and if the trimmed-to arrangement happened to
+  // match the screen, the reshuffle confirm was skipped again, which is the
+  // blocker this was all fixing. Pinned once per night, it cannot drift.
+  const originalRef = useRef<{
+    key: unknown;
+    stops: { venue: Venue; role: PlanRole }[];
+  } | null>(null);
+  if (originalRef.current?.key !== editKey) {
+    originalRef.current = { key: editKey, stops: baseStops };
+  }
   // 🧨 THE NIGHT AS IT STARTED, which after a refresh is NOT `base`. The
   // persist effect writes `display`, so a restored night's base IS the
   // replaced arrangement — measuring against it reported zero replacements on
@@ -679,7 +693,13 @@ export function PlanFlow({
   // such a night inverted it the other way, claiming a change had been made
   // when one had just been taken back. The deepest history entry is the
   // arrangement before the first replacement, which is exactly the original.
-  const original = originalStopsOf(myUndo, baseStops);
+  // On a restored night the base IS the replaced arrangement, so the deepest
+  // stored entry is the better answer when there is one; the pin covers every
+  // case after that.
+  const original =
+    originalRef.current && myUndo.length === 0
+      ? originalRef.current.stops
+      : originalStopsOf(myUndo, originalRef.current?.stops ?? baseStops);
   const canUndo = canUndoFrom(myUndo, stops);
 
   // How many stops the user has changed by hand — the thing a reshuffle would
@@ -776,9 +796,11 @@ export function PlanFlow({
     // the prop bag the legacy plan_save already sent, so a dashboard can be
     // migrated without losing a dimension. No title, no venue names, no ids.
     // Stops that differ from the night this started as.
-    const swapCount = stops.filter(
-      (st, i) => st.venue.id !== baseStops[i]?.venue.id,
-    ).length;
+    // The same measure the rest of the screen uses. Against `baseStops` this
+    // shipped `swapped: 0` for a restored night with two replacements, and
+    // `swapped: 1` after undoing on one — a wrong dimension, on the conversion
+    // event, which this file argues elsewhere is worse than a missing one.
+    const swapCount = replacedCount;
     const mode: SaveMode = alreadySaved
       ? "duplicate"
       : swapCount > 0
@@ -925,6 +947,15 @@ export function PlanFlow({
   const baseSig = active?.plan?.createdAt ?? genStampRef.current.at;
 
   const undoRestoredForRef = useRef<string | null>(null);
+  // 🧨 Has THIS session ever written a history for this night? The token below
+  // orders the write after the READ, not after the restore has landed: in the
+  // commit where the layout effect reads and calls setUndoStack, this passive
+  // effect still sees the old empty array, and empty means removeItem. It
+  // survived on React flushing passive effects before the re-render — an
+  // ordering accident — and did NOT survive when the rehydrate came back empty
+  // because a venue had left the catalogue, which deleted a history that a
+  // later mount with a complete catalogue could have used.
+  const undoWrittenRef = useRef(false);
   useIsomorphicLayoutEffect(() => {
     if (venues.length === 0 || baseSig === "") return;
     const token = `${owner ?? "anon"}:${baseSig}`;
@@ -948,7 +979,12 @@ export function PlanFlow({
         cycle: entry.cycle ?? {},
       });
     }
-    if (rebuilt.length > 0) setUndoStack(rebuilt);
+    if (rebuilt.length > 0) {
+      setUndoStack(rebuilt);
+      // Seeded here, so undoing a RESTORED history back to empty still clears
+      // the key rather than leaving a stale one behind.
+      undoWrittenRef.current = true;
+    }
   }, [owner, baseSig, venues.length, editKey, venueById, venueBySlug]);
 
   useEffect(() => {
@@ -959,6 +995,11 @@ export function PlanFlow({
     // about to read, before it read it. The key is per-owner, so that delete
     // took any night's history with it.
     if (undoRestoredForRef.current !== `${owner ?? "anon"}:${baseSig}`) return;
+    const mineNow = entriesFor(undoStack, editKey);
+    // Never CLEAR a key this session has not written. A genuine undo-to-empty
+    // still clears, because restoring a history seeds the latch too.
+    if (mineNow.length === 0 && !undoWrittenRef.current) return;
+    if (mineNow.length > 0) undoWrittenRef.current = true;
     writeUndoStack(
       owner,
       baseSig,
@@ -1579,7 +1620,7 @@ export function PlanFlow({
     // rather than refusing to act on them. Returning early left a stale head
     // sitting on top of real history for good: the Undo button rendered and
     // did nothing, permanently, with no way for the user to clear it.
-    const mine = undoStack.filter((e) => e.key === editKey);
+    const mine = entriesFor(undoStack, editKey);
     const prev = mine[mine.length - 1];
     if (!prev) return;
     setUndoStack(mine.slice(0, -1));

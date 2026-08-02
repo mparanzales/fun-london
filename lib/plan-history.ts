@@ -26,21 +26,25 @@ export type HistoryEntry<K> = { key: K; stops: HistoryStop[] };
 
 /** Only this night's entries. A stack can hold a previous night's while the
  *  screen changes underneath it. */
-export function entriesFor<K>(
-  stack: HistoryEntry<K>[],
-  key: K,
-): HistoryEntry<K>[] {
+export function entriesFor<K, T extends { key: K }>(stack: T[], key: K): T[] {
+  // Generic over the ENTRY, not just its key: callers hold richer entries
+  // (stops plus the per-stop cycle) and narrowing them here would strip the
+  // rest back off at every call site.
   return stack.filter((e) => e.key === key);
 }
 
 /**
- * The night as it STARTED.
+ * The night as it STARTED, as far as the history can tell.
  *
  * Not the base: the active-plan store holds what is on screen, so after a
  * refresh a night's base is its replaced arrangement. The deepest history
- * entry is the arrangement before the first replacement, which is the original
- * by construction. With no history the base has not been edited, so it IS the
- * original.
+ * entry is the arrangement before the first replacement.
+ *
+ * 🧨 "By construction" only holds while nothing moves that entry, and two
+ * things do: undo POPS, and the caller caps the stack from the front. So the
+ * caller pins the original separately and passes it as the fallback here —
+ * this answers from the history when it has one and defers otherwise. Do not
+ * re-derive the original from this alone.
  */
 export function originalStops<K>(
   mine: HistoryEntry<K>[],

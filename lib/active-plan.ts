@@ -148,6 +148,7 @@ export function readUndoStack(
             typeof st.venueId === "string" &&
             st.venueId.length > 0 &&
             typeof st.slug === "string" &&
+            st.slug.length > 0 &&
             UNDO_ROLES.has(st.role),
         ) &&
         isCycle(e.cycle),

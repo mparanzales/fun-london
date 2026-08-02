@@ -798,6 +798,39 @@ describe("the undo store", () => {
     expect(back).toHaveLength(1);
   });
 
+  it("refuses an empty slug on its own, not only an empty id", () => {
+    // The pair of guards was untestable while the fixture zeroed both fields:
+    // either one could have been deleted and the suite stayed green.
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [
+          { stops: [{ venueId: "v1", slug: "", role: "Start" }], cycle: {} },
+          { stops: [{ venueId: "", slug: "s2", role: "Start" }], cycle: {} },
+          { stops: [{ venueId: "v3", slug: "s3", role: "Start" }], cycle: {} },
+        ],
+      }),
+    );
+    expect(readUndoStack("user-a", "night-1", store)).toHaveLength(1);
+  });
+
+  it("accepts an entry whose cycle is absent, as the rotation defaults it", () => {
+    // `isCycle` returns true for null/undefined. Nothing covered that branch:
+    // delete the line and every absent-cycle entry is dropped, silently, while
+    // the suite stays green.
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [{ stops: [{ venueId: "v1", slug: "s1", role: "Start" }] }],
+      }),
+    );
+    expect(readUndoStack("user-a", "night-1", store)).toHaveLength(1);
+  });
+
   it("🧨 refuses an unknown role and a malformed cycle", () => {
     // localStorage is a trust boundary. An unknown role was cast straight to
     // PlanRole; a non-array cycle throws inside the rotation and kills Change.
