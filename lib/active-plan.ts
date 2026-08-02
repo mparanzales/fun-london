@@ -99,6 +99,18 @@ export function clearUndoStack(owner: PlanOwner, store?: StorageLike | null) {
   }
 }
 
+/** The roles a stored stop may claim. Mirrors PlanRole; a stored value outside
+ *  it is data from another version or a hand edit, not a stop we can render. */
+const UNDO_ROLES = new Set(["Start", "Then", "Finish"]);
+
+function isCycle(v: unknown): v is Record<number, string[]> {
+  if (v == null) return true; // absent is fine; the rotation defaults it
+  if (typeof v !== "object" || Array.isArray(v)) return false;
+  return Object.values(v as Record<string, unknown>).every(
+    (list) => Array.isArray(list) && list.every((x) => typeof x === "string"),
+  );
+}
+
 export function readUndoStack(
   owner: PlanOwner,
   sig: string,
@@ -120,17 +132,25 @@ export function readUndoStack(
     // restore stops that belong somewhere else.
     if (parsed?.v !== 1 || parsed.sig !== sig) return [];
     if (!Array.isArray(parsed.entries)) return [];
+    // 🧨 VALIDATED, not merely shaped. localStorage is a trust boundary, and a
+    // looser hand-rolled echo of a parser is exactly what lib/night-plan.ts
+    // warns about: an unknown role was cast straight to PlanRole, and `cycle`
+    // was not checked at all — a non-array there throws inside the rotation's
+    // `.includes` and kills the Change handler outright.
     return parsed.entries.filter(
       (e) =>
         e &&
         Array.isArray(e.stops) &&
+        e.stops.length > 0 &&
         e.stops.every(
           (st) =>
             st &&
             typeof st.venueId === "string" &&
             st.venueId.length > 0 &&
-            typeof st.role === "string",
-        ),
+            typeof st.slug === "string" &&
+            UNDO_ROLES.has(st.role),
+        ) &&
+        isCycle(e.cycle),
     );
   } catch {
     return [];

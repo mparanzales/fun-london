@@ -82,6 +82,12 @@ import {
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
 import { nextInCycle } from "@/lib/plan-cycle";
+import {
+  entriesFor,
+  originalStops as originalStopsOf,
+  replacedCount as countReplaced,
+  canUndo as canUndoFrom,
+} from "@/lib/plan-history";
 import { SwipeStop } from "./swipe-stop";
 import {
   WhenPicker,
@@ -268,6 +274,9 @@ type EditedNight = {
   // reaches every option before repeating any, under any rebuild.
   cycle: Record<number, string[]>;
 };
+
+/** How many replacements Undo can walk back through. */
+const UNDO_DEPTH = 20;
 
 export function PlanFlow({
   venues,
@@ -631,10 +640,6 @@ export function PlanFlow({
   }, [active, computed, nightWhen, stops]);
 
   // Compared against the un-swapped base of whichever night is on screen.
-  const hasReplacements = display.steps.some(
-    (s, i) =>
-      s.venue.id !== (active ? active.base.steps : computed.steps)[i]?.venue.id,
-  );
 
   // Stops that will be SHUT when the user gets there. A replacement moves
   // every later arrival, and undo restores an arrangement that was valid when
@@ -647,25 +652,40 @@ export function PlanFlow({
   // for a bug in the wrong place.
   const closedStops = closedOnArrival(display.steps);
 
+  // 🧨 Memoised, and computed ONCE for all stops. The diagnosis below called
+  // buildOptions per empty stop and was itself called twice per stop (the
+  // title attribute and the paragraph), so a full catalogue pass ran four
+  // times for one stop, on every render — the exact pattern the note on
+  // `alternatives` says was removed. Only needed when something is empty.
+  const optionsIgnoringHours = useMemo(
+    () =>
+      alternatives.some((l) => l.length === 0)
+        ? buildOptions(stops, { ignoreHours: true })
+        : [],
+    [alternatives, buildOptions, stops],
+  );
+
   // 🧨 Whether there is an arrangement to go BACK to — not whether the night
   // differs from its base. Gating on divergence hid a fully restored history:
   // after a refresh the stored night IS the base, so they matched and the
   // button never rendered, with the whole stack sitting in state. It also
   // stranded older entries the moment a cycle returned to the original.
-  const myUndo = undoStack.filter((e) => e.key === editKey);
-  const canUndo =
-    myUndo.length > 0 &&
-    myUndo[myUndo.length - 1].stops.some(
-      (st, i) => st.venue.id !== stops[i]?.venue.id,
-    );
+  const myUndo = entriesFor(undoStack, editKey);
+  // 🧨 THE NIGHT AS IT STARTED, which after a refresh is NOT `base`. The
+  // persist effect writes `display`, so a restored night's base IS the
+  // replaced arrangement — measuring against it reported zero replacements on
+  // a night with two, which meant "Try another combination" skipped its own
+  // confirm card and destroyed a restored history with no warning. Undoing on
+  // such a night inverted it the other way, claiming a change had been made
+  // when one had just been taken back. The deepest history entry is the
+  // arrangement before the first replacement, which is exactly the original.
+  const original = originalStopsOf(myUndo, baseStops);
+  const canUndo = canUndoFrom(myUndo, stops);
 
   // How many stops the user has changed by hand — the thing a reshuffle would
   // throw away, and the only honest number to put in front of them.
-  const replacedCount = display.steps.filter(
-    (st, i) =>
-      st.venue.id !==
-      (active ? active.base.steps : computed.steps)[i]?.venue.id,
-  ).length;
+  const replacedCount = countReplaced(stops, original);
+  const hasReplacements = replacedCount > 0;
 
   // Why a stop has nothing to offer. Absence is not an explanation, and the
   // two causes want different answers from the user.
@@ -676,9 +696,13 @@ export function PlanFlow({
   // helped. Re-running the same query without the clock separates the two: if
   // dropping opening hours produces options, hours are the reason.
   const noOptionsReason = (i: number): string => {
-    const withoutHours = buildOptions(stops, { ignoreHours: true })[i] ?? [];
+    const withoutHours = optionsIgnoringHours[i] ?? [];
     if (withoutHours.length > 0) {
-      return "Everything else that fits here is closed by the time you'd arrive. Try an earlier start.";
+      // Both hours rules are disabled together by `ignoreHours`, so this
+      // covers two causes: the candidate is shut when you reach it, or it
+      // would push a LATER stop past closing. The wording has to be true of
+      // both, so it names the clock rather than a specific venue.
+      return "Nothing else here works with your timings. Try an earlier start.";
     }
     const total = stops.length;
     if (total > 2 && i > 0 && i < total - 1) {
@@ -893,6 +917,11 @@ export function PlanFlow({
   // erased when it was looked for. `createdAt` is stamped once per generated
   // night and carried through every re-persist, so it survives replacements —
   // which is exactly what a history has to be keyed on.
+  //
+  // A legacy-stash night has no `plan`, and on that mount the generated stamp
+  // is empty, so `baseSig` is "" and both effects below no-op: undo works in
+  // memory and does not persist. An acceptable degradation for a path that
+  // exists only to carry someone across one deploy, but not a mystery.
   const baseSig = active?.plan?.createdAt ?? genStampRef.current.at;
 
   const undoRestoredForRef = useRef<string | null>(null);
@@ -1518,10 +1547,14 @@ export function PlanFlow({
     setEdited(nextState);
     // Where we came FROM, so Undo restores this exact arrangement — which was
     // itself walkable, so undo can never land on a night that is not.
-    setUndoStack((stack) => [
-      ...stack,
-      { key: editKey, stops: currentStops, cycle: currentCycle },
-    ]);
+    setUndoStack((stack) =>
+      // Capped: nobody needs a 200-deep undo, and the whole array is
+      // re-stringified on every tap and kept for the night's 12h TTL.
+      [
+        ...stack,
+        { key: editKey, stops: currentStops, cycle: currentCycle },
+      ].slice(-UNDO_DEPTH),
+    );
     setSaveState("idle");
     // `method` is passed in by the caller, never derived from `dir`: a LEFT
     // swipe and the Change button's default argument both produce dir === 1.
@@ -1564,7 +1597,8 @@ export function PlanFlow({
     editedRef.current = prev;
     setEdited(prev);
     setSaveState("idle");
-    track("plan_swap_undo", { remaining: undoStack.length - 1 });
+    // The number the user can actually reach, not the raw stack.
+    track("plan_swap_undo", { remaining: myUndo.length - 1 });
   };
 
   const doReshuffle = () => {

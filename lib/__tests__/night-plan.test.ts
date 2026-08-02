@@ -798,6 +798,29 @@ describe("the undo store", () => {
     expect(back).toHaveLength(1);
   });
 
+  it("🧨 refuses an unknown role and a malformed cycle", () => {
+    // localStorage is a trust boundary. An unknown role was cast straight to
+    // PlanRole; a non-array cycle throws inside the rotation and kills Change.
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [
+          {
+            stops: [{ venueId: "v1", slug: "v1", role: "Nonsense" }],
+            cycle: {},
+          },
+          { stops: [{ venueId: "v2", slug: "v2", role: "Start" }], cycle: 7 },
+          { stops: [{ venueId: "v3", slug: "v3", role: "Start" }], cycle: {} },
+        ],
+      }),
+    );
+    const back = readUndoStack("user-a", "night-1", store);
+    expect(back).toHaveLength(1);
+    expect(back[0].stops[0].venueId).toBe("v3");
+  });
+
   it("survives corrupt or foreign-version JSON without throwing", () => {
     store.setItem(undoStackKey("user-a"), "{not json");
     expect(readUndoStack("user-a", "night-1", store)).toEqual([]);
