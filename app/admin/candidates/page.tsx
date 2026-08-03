@@ -57,8 +57,24 @@ type ReviewItem = {
   } | null;
 };
 
+// Quick filters over the triage line written 2026-08-03 (a second `sources`
+// entry, so it lives at sources->1 on bulk-import rows). Matching is a prefix
+// ilike on that entry's import_note — deterministic because the triage writer
+// used exactly these four prefixes. Rows without a triage entry (old
+// discovery candidates) simply never match a pile filter.
+const PILES = [
+  {
+    key: "possibly",
+    label: "Possibly visitable",
+    prefix: "possibly visitable%",
+  },
+  { key: "artifact", label: "Artifacts", prefix: "artifact inside%" },
+  { key: "statue", label: "Statues & plaques", prefix: "statue/plaque%" },
+  { key: "exterior", label: "Exterior only", prefix: "exterior or site only%" },
+] as const;
+
 export default async function AdminCandidatesPage(props: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; q?: string; pile?: string }>;
 }) {
   const searchParams = await props.searchParams;
   const user = await getAuthUser();
@@ -66,6 +82,20 @@ export default async function AdminCandidatesPage(props: {
   if (!isAdminEmail(user.email)) {
     return <NotAuthorised email={user.email ?? ""} />;
   }
+
+  // Search is a plain GET param so results are linkable/refreshable. Next 15
+  // hands back string[] for a repeated key (?q=a&q=b), so type-guard before
+  // trim (same defensive pattern as explore/page.tsx). Trimmed and
+  // length-capped; used only inside PostgREST ilike filters (parameterised by
+  // supabase-js, not string-built SQL).
+  const q =
+    typeof searchParams.q === "string"
+      ? searchParams.q.trim().slice(0, 80)
+      : "";
+  // LIKE pattern for q: escape %, _ and * so "100%" searches the literal name
+  // (PostgREST maps * to % too). The raw q stays for display.
+  const qLike = `%${q.replace(/[\\%_*]/g, (m) => `\\${m}`)}%`;
+  const pile = PILES.find((p) => p.key === searchParams.pile) ?? null;
 
   const supabase = createServiceClient();
   if (!supabase) {
@@ -96,12 +126,14 @@ export default async function AdminCandidatesPage(props: {
   let body: React.ReactNode;
 
   if (tab === "needs_review") {
-    const { data, error } = await supabase
+    let query = supabase
       .from("pending_candidates")
       .select(
         "id, name, neighbourhood, type_guess, reviewed_notes, filter_results",
       )
-      .eq("status", "needs_review")
+      .eq("status", "needs_review");
+    if (q) query = query.ilike("name", qLike);
+    const { data, error } = await query
       .order("reviewed_at", { ascending: false })
       .limit(100);
     if (error) {
@@ -110,7 +142,11 @@ export default async function AdminCandidatesPage(props: {
       const items = (data ?? []) as ReviewItem[];
       body =
         items.length === 0 ? (
-          <EmptyReview />
+          q ? (
+            <NoMatches q={q} pileLabel={null} />
+          ) : (
+            <EmptyReview />
+          )
         ) : (
           <div className="flex flex-col gap-4">
             {items.map((it) => (
@@ -120,12 +156,23 @@ export default async function AdminCandidatesPage(props: {
         );
     }
   } else {
-    const { data, error } = await supabase
+    let query = supabase
       .from("pending_candidates")
       .select(
         "id, name, neighbourhood, type_guess, vibe_draft, long_description_draft, sources_count, chain_risk_score, sources",
       )
-      .eq("status", "pending")
+      .eq("status", "pending");
+    if (q) query = query.ilike("name", qLike);
+    // Pile filter reads the triage entry appended at sources->1 (see PILES).
+    // Index 2 is checked too as drift insurance: a future triage pass would
+    // append another entry, and a silently-empty chip would be worse than a
+    // slightly wider filter. Prefixes are literals from PILES (no commas), so
+    // they are safe inside the .or() filter string.
+    if (pile)
+      query = query.or(
+        `sources->1->>import_note.ilike.${pile.prefix},sources->2->>import_note.ilike.${pile.prefix}`,
+      );
+    const { data, error } = await query
       .order("sources_count", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(50);
@@ -135,7 +182,11 @@ export default async function AdminCandidatesPage(props: {
       const candidates = (data ?? []) as Candidate[];
       body =
         candidates.length === 0 ? (
-          <EmptyState />
+          q || pile ? (
+            <NoMatches q={q} pileLabel={pile?.label ?? null} />
+          ) : (
+            <EmptyState />
+          )
         ) : (
           <div className="flex flex-col gap-4">
             {candidates.map((c) => (
@@ -156,6 +207,7 @@ export default async function AdminCandidatesPage(props: {
           Candidate queue
         </h1>
         <Tabs tab={tab} pending={pendingCount ?? 0} review={reviewCount ?? 0} />
+        <SearchBar tab={tab} q={q} pileKey={pile?.key ?? null} />
       </header>
       {body}
     </Shell>
@@ -195,6 +247,115 @@ function Tabs({
 
 function Shell({ children }: { children: React.ReactNode }) {
   return <div className="max-w-2xl mx-auto px-5 pt-10 pb-16">{children}</div>;
+}
+
+// Filter-aware empty state, shared by both tabs — a search with no hits must
+// never render the celebratory "queue clear" card.
+function NoMatches({ q, pileLabel }: { q: string; pileLabel: string | null }) {
+  return (
+    <p className="text-sm text-muted-fg">
+      No candidates match{" "}
+      {q ? (
+        <>
+          &ldquo;<span className="text-fg font-semibold">{q}</span>&rdquo;
+        </>
+      ) : null}
+      {q && pileLabel ? " in " : ""}
+      {pileLabel ? (
+        <span className="text-fg font-semibold">{pileLabel}</span>
+      ) : null}
+      .{" "}
+      <a
+        href="/admin/candidates"
+        className="text-primary underline-offset-2 hover:underline"
+      >
+        Clear filters
+      </a>
+    </p>
+  );
+}
+
+// Search + triage-pile filters. A plain GET form: the URL carries the whole
+// state (tab, q, pile), so filters are shareable and survive refresh. Pile
+// chips only render on the Pending tab — the triage line only exists there.
+function SearchBar({
+  tab,
+  q,
+  pileKey,
+}: {
+  tab: string;
+  q: string;
+  pileKey: string | null;
+}) {
+  // Build hrefs via URLSearchParams so "?", "&" and encoding are always right.
+  const hrefWith = (nextPile: string | null) => {
+    const p = new URLSearchParams();
+    if (tab === "needs_review") p.set("status", "needs_review");
+    if (q) p.set("q", q);
+    if (nextPile) p.set("pile", nextPile);
+    const s = p.toString();
+    return s ? `?${s}` : "/admin/candidates";
+  };
+  const chip =
+    "px-3 py-1 rounded-full text-[11px] font-bold border transition-colors";
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <form method="GET" className="flex gap-2">
+        {tab === "needs_review" ? (
+          <input type="hidden" name="status" value="needs_review" />
+        ) : null}
+        {/* pile only applies to the Pending tab's query — don't carry a dead
+            param through needs_review submits. */}
+        {tab !== "needs_review" && pileKey ? (
+          <input type="hidden" name="pile" value={pileKey} />
+        ) : null}
+        <input
+          type="search"
+          name="q"
+          defaultValue={q}
+          maxLength={80}
+          placeholder="Search by name…"
+          aria-label="Search candidates by name"
+          className="flex-1 h-9 px-3.5 rounded-full bg-card border border-border text-sm text-fg placeholder:text-muted-fg/60 focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+        <button
+          type="submit"
+          className="h-9 px-4 rounded-full bg-primary text-primary-fg text-xs font-extrabold uppercase tracking-wider"
+        >
+          Search
+        </button>
+      </form>
+      {tab !== "needs_review" ? (
+        <div className="flex flex-wrap gap-1.5">
+          {PILES.map((p) => {
+            const on = p.key === pileKey;
+            return (
+              <a
+                key={p.key}
+                href={hrefWith(on ? null : p.key)}
+                className={
+                  chip +
+                  (on
+                    ? " bg-primary text-primary-fg border-primary"
+                    : " bg-card text-muted-fg border-border hover:text-fg")
+                }
+              >
+                {p.label}
+              </a>
+            );
+          })}
+          {pileKey || q ? (
+            <a
+              href="/admin/candidates"
+              className={chip + " bg-muted text-muted-fg border-border"}
+            >
+              Clear
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function NotAuthorised({ email }: { email: string }) {
