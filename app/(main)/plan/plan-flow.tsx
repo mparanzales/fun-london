@@ -81,6 +81,7 @@ import {
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
+import { isSignOutTransition } from "@/lib/auth-transition";
 import { nextInCycle } from "@/lib/plan-cycle";
 import {
   entriesFor,
@@ -561,8 +562,14 @@ export function PlanFlow({
       // bring back what you started with. Tested with the SAME predicate the
       // list was built with, so the two cannot disagree.
       //
-      // 🧨 Tested with `withinWalkOfAll` against the ADJACENT stops — the same
-      // predicate the list itself was built with. An earlier version used the
+      // 🧨 Tested with `withinWalkOfAll` against the ADJACENT stops — the walk
+      // rule only, which is NO LONGER full parity with the list. The list is
+      // now built with walk PLUS open-at-arrival PLUS the later-stop rule, so
+      // cycling can put back a venue that is shut when you get there. That is
+      // deliberate: the original must stay reachable or a replacement is
+      // one-way, and the closed-stop notice covers the case out loud. Do not
+      // read this as "the two agree" — they do not, and the exemption is the
+      // point. An earlier version used the
       // looser withinWalkOfAny over every other stop, so the one venue added
       // here by hand could have been the single option that broke the walk.
       //
@@ -696,10 +703,10 @@ export function PlanFlow({
   // On a restored night the base IS the replaced arrangement, so the deepest
   // stored entry is the better answer when there is one; the pin covers every
   // case after that.
-  const original =
-    originalRef.current && myUndo.length === 0
-      ? originalRef.current.stops
-      : originalStopsOf(myUndo, originalRef.current?.stops ?? baseStops);
+  const original = originalStopsOf(
+    myUndo,
+    originalRef.current?.stops ?? baseStops,
+  );
   const canUndo = canUndoFrom(myUndo, stops);
 
   // How many stops the user has changed by hand — the thing a reshuffle would
@@ -715,6 +722,18 @@ export function PlanFlow({
   // apart — a false cause, and it pointed at an action that would not have
   // helped. Re-running the same query without the clock separates the two: if
   // dropping opening hours produces options, hours are the reason.
+  // The single line under a stop, or null when there is nothing to say. A shut
+  // stop wins over a thin option list, because it is the more urgent fact.
+  const stopNotice = (i: number): string | null => {
+    const canChange = (alternatives[i]?.length ?? 0) > 0;
+    if (closedStops.includes(i)) {
+      return canChange
+        ? "Closed by the time you'd get here. Change it."
+        : "Closed by the time you'd get here, and nothing open fits this slot. Try another combination below rebuilds from the time it is now.";
+    }
+    return canChange ? null : noOptionsReason(i);
+  };
+
   const noOptionsReason = (i: number): string => {
     const withoutHours = optionsIgnoringHours[i] ?? [];
     if (withoutHours.length > 0) {
@@ -946,6 +965,37 @@ export function PlanFlow({
   // exists only to carry someone across one deploy, but not a mystery.
   const baseSig = active?.plan?.createdAt ?? genStampRef.current.at;
 
+  // 🧨 STAND THE NIGHT DOWN ON THE SIGN-OUT TRANSITION, IN THIS COMPONENT.
+  //
+  // Clearing in the auth context can never hold on its own while a mounted
+  // PlanFlow still holds the night in memory: the sweep runs, `owner` flips to
+  // null, this component re-renders, and its own persist effects write the
+  // departing account's night AND its replacement history straight into the
+  // ANON slots, milliseconds after they were emptied. The next visitor on a
+  // shared browser then rehydrates it, and signing in claims it into their
+  // account — a false conversion and someone else's night saved as their own.
+  //
+  // That is the failure lib/auth-transition.ts describes in so many words
+  // ("the retained data gets persisted back to localStorage and then migrated
+  // into the NEXT account") and the fourth appearance of the PR #129 class in
+  // this codebase. The in-memory state has to go before any write can fire, so
+  // it goes here, on the transition, not in the sweep.
+  const prevOwnerRef = useRef<string | null | undefined>(undefined);
+  useIsomorphicLayoutEffect(() => {
+    const prev = prevOwnerRef.current;
+    prevOwnerRef.current = owner;
+    if (prev === undefined || prev === owner) return;
+    if (!isSignOutTransition(prev, owner)) return;
+    standDown();
+    setEdited(null);
+    editedRef.current = null;
+    setUndoStack([]);
+    undoWrittenRef.current = false;
+    undoRestoredForRef.current = null;
+    originalRef.current = null;
+    setStep("setup");
+  }, [owner, standDown]);
+
   const undoRestoredForRef = useRef<string | null>(null);
   // 🧨 Has THIS session ever written a history for this night? The token below
   // orders the write after the READ, not after the restore has landed: in the
@@ -972,7 +1022,15 @@ export function PlanFlow({
         venue: venueById.get(st.venueId) ?? venueBySlug.get(st.slug),
         role: st.role as PlanRole,
       }));
-      if (stops.some((st) => !st.venue)) break;
+      // A stop whose venue has left the catalogue makes THIS entry
+      // unrestorable. Keeping the run adjacent to the HEAD matters: breaking
+      // here kept the oldest prefix, so one bad entry mid-stack silently threw
+      // away every newer arrangement and a single Undo tap jumped back
+      // several replacements at once.
+      if (stops.some((st) => !st.venue)) {
+        rebuilt.length = 0; // restart the run; the head is what Undo reaches
+        continue;
+      }
       rebuilt.push({
         key: editKey,
         stops: stops as { venue: Venue; role: PlanRole }[],
@@ -981,6 +1039,13 @@ export function PlanFlow({
     }
     if (rebuilt.length > 0) {
       setUndoStack(rebuilt);
+      // 🧨 RE-PIN to the restored history's deepest entry. The pin is seeded
+      // from `baseStops`, and on a restored night that is the REPLACED
+      // arrangement — so undoing back to empty fell through to it and reported
+      // two changes on a night exactly as it started, shipping swapped: 2 on
+      // the save event. The pin has to follow the oldest arrangement we know
+      // of, not the one that happens to be persisted.
+      originalRef.current = { key: editKey, stops: rebuilt[0].stops };
       // Seeded here, so undoing a RESTORED history back to empty still clears
       // the key rather than leaving a stale one behind.
       undoWrittenRef.current = true;
@@ -1111,6 +1176,9 @@ export function PlanFlow({
       setEdited(null);
       editedRef.current = null;
       setUndoStack([]);
+      // A different night is on screen now; the card that belonged to the last
+      // one must not arrive with it.
+      setConfirmReshuffle(false);
       setVibe(np.vibe);
       setBudget(np.budget);
       // The night's own daypart, so "Try another combination" regenerates
@@ -1506,6 +1574,10 @@ export function PlanFlow({
   // Editing any input invalidates a re-opened saved plan, the saved flag, and
   // any per-stop swaps (the base plan is about to change).
   const editInputs = (fn: () => void, control: SetupControl = "where") => {
+    // Editing inputs abandons the night, so the card that offered to protect
+    // it goes too. It survived "← Edit" (which deliberately skips standDown)
+    // and reappeared on the next night reading "You've changed 0 stops".
+    setConfirmReshuffle(false);
     // plan_setup_started, fired ONCE. editInputs is the single choke point for
     // every setup control on this surface (When, Where, Vibe, Budget) and is
     // called from nothing else, so the latch here cannot be reached by a page
@@ -2103,20 +2175,32 @@ export function PlanFlow({
                 Change
               </button>
             </div>
-            {(alternatives[i]?.length ?? 0) === 0 && (
-              <p className="text-[11px] text-muted-fg mb-1.5 leading-relaxed">
-                {noOptionsReason(i)}
-              </p>
-            )}
-            {closedStops.includes(i) && (
-              <p className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed">
-                <AlertCircle
-                  className="w-3.5 h-3.5 inline-block align-[-3px] mr-1"
-                  strokeWidth={2}
-                  aria-hidden
-                />
-                Closed by the time you&apos;d get here. Change it, or start
-                earlier.
+            {/* 🧨 ONE message, and it only names a control that works. These
+                were two independent paragraphs, so the worst stop read
+                "Nothing else here works with your timings" directly above
+                "Closed by the time you'd get here. Change it, or start
+                earlier" — with Change disabled three lines up and no way to
+                start earlier on this screen at all. Following that instruction
+                meant "← Edit", which stands the night down and empties the
+                undo stack: "adjust one thing" actually meant "throw it away".
+                A reroll DOES work here and is already on the screen, so that
+                is what the copy points at. */}
+            {stopNotice(i) && (
+              <p
+                className={`text-[11px] mb-1.5 leading-relaxed ${
+                  closedStops.includes(i)
+                    ? "font-bold text-accent"
+                    : "text-muted-fg"
+                }`}
+              >
+                {closedStops.includes(i) && (
+                  <AlertCircle
+                    className="w-3.5 h-3.5 inline-block align-[-3px] mr-1"
+                    strokeWidth={2}
+                    aria-hidden
+                  />
+                )}
+                {stopNotice(i)}
               </p>
             )}
             <SwipeStop

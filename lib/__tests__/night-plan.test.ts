@@ -371,6 +371,10 @@ describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
       "no isSignOutTransition block in auth-user-context",
     ).not.toBeNull();
     expect(block![1]).toContain("clearAnonPlanKeys()");
+    // 🧨 The newest line was the only one unpinned, so it could be refactored
+    // away with the suite green — which is exactly what this test exists to
+    // prevent, and it was added in the same commit as the line.
+    expect(block![1]).toContain("clearUndoStack(");
     // The departing account's OWN slot too. Without this line the fix for it
     // could be refactored away with the suite green — the same "green test,
     // live data left behind" shape this describe block exists for.

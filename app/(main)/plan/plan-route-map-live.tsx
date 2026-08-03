@@ -2,7 +2,7 @@
 
 // The plan route on a REAL street map: Leaflet + CARTO "light_all" (Positron)
 // tiles built on OpenStreetMap data, desaturated to greyscale in CSS (see the
-// .fl-map tile filter in globals.css) so the violet markers carry the colour.
+// .fl-plan-map tile filter in globals.css) so the violet markers carry the colour.
 // Keyless — no Maps API key in the browser; tiles are public with attribution.
 // Numbered violet markers match the stop list. The walking line is SOLID when
 // OSRM returns real street geometry, DASHED when it timed out and we fell back
@@ -88,13 +88,21 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
           .join(";");
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 3000);
-        const res = await fetch(
-          `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coords}?overview=full&geometries=geojson`,
-          { signal: ctrl.signal },
-        );
-        clearTimeout(t);
-        const data = res.ok ? await res.json() : null;
-        const geo = data?.routes?.[0]?.geometry?.coordinates;
+        let data: unknown = null;
+        try {
+          const res = await fetch(
+            `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coords}?overview=full&geometries=geojson`,
+            { signal: ctrl.signal },
+          );
+          data = res.ok ? await res.json() : null;
+        } finally {
+          // Cleared on the throw path too, or every superseded fetch leaves a
+          // live abort timer behind.
+          clearTimeout(t);
+        }
+        const geo = (
+          data as { routes?: { geometry?: { coordinates?: unknown } }[] } | null
+        )?.routes?.[0]?.geometry?.coordinates;
         if (Array.isArray(geo) && geo.length > 1) {
           line = geo.map((c: [number, number]) => [c[1], c[0]]);
           dashed = false;
@@ -121,7 +129,22 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
   }, [coordsKey, ready]);
 
   // Create the map and its tiles exactly once.
+  // 🧨 Keyed on whether there is a container to draw in, not on mount alone.
+  // `pts.length < 2` unmounts the div, so a stop losing its coordinates left
+  // Leaflet bound to a detached node — and when the container came back as a
+  // fresh node the instance was still the old one, so the layer effect drew
+  // into nothing and the user got an empty bordered box for the rest of the
+  // session. It tears down when the container goes and re-creates when it
+  // returns.
+  const hasContainer = pts.length >= 2;
   useEffect(() => {
+    if (!hasContainer) {
+      mapRef.current?.remove();
+      mapRef.current = null;
+      stopLayerRef.current = null;
+      routeLayerRef.current = null;
+      return;
+    }
     if (!ref.current || mapRef.current) return;
     let cancelled = false;
     (async () => {
@@ -149,7 +172,7 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
       stopLayerRef.current = null;
       routeLayerRef.current = null;
     };
-  }, []);
+  }, [hasContainer]);
 
   if (pts.length < 2) return null;
 
