@@ -990,6 +990,8 @@ export function PlanFlow({
   // expiry, so the next dep change re-persists A's night under A's OWN key
   // after the sweep cleared it. Owner-scoped, so it is not a bleed onto the
   // next person; it defeats the sweep for that account until the page reloads.
+
+  // Which night's stored history this mount has already reconciled.
   const undoRestoredForRef = useRef<string | null>(null);
   // 🧨 Has THIS session ever written a history for this night? The token below
   // orders the write after the READ, not after the restore has landed: in the
@@ -2153,9 +2155,11 @@ export function PlanFlow({
                 type="button"
                 onClick={() => onSwap(i, 1, "button")}
                 disabled={(alternatives[i]?.length ?? 0) === 0}
-                // The same string the notice shows, so the tooltip cannot
-                // reintroduce the "start earlier" instruction that has no
-                // control on this screen.
+                // The same string the notice shows, so the two cannot
+                // diverge. Not a promise that "start earlier" never appears:
+                // an OPEN stop with no options still falls through to
+                // noOptionsReason, which says it. That case is out of this
+                // PR's scope and is listed in its limitations.
                 title={stopNotice(i) ?? undefined}
                 aria-label={`Change the ${s.role} stop`}
                 className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent disabled:text-muted-fg disabled:cursor-default"
@@ -2164,7 +2168,7 @@ export function PlanFlow({
                 Change
               </button>
             </div>
-            {/* 🧨 ONE message, and it only names a control that works. These
+            {/* 🧨 ONE message per stop, replacing two that contradicted. These
                 were two independent paragraphs, so the worst stop read
                 "Nothing else here works with your timings" directly above
                 "Closed by the time you'd get here. Change it, or start
@@ -2367,7 +2371,17 @@ export function PlanFlow({
               }
               doReshuffle();
             }}
-            disabled={confirmReshuffle}
+            // 🧨 THE SAME EXPRESSION THE CARD RENDERS ON. Gating the card on
+            // `hasReplacements` while leaving this on `confirmReshuffle` alone
+            // stranded the screen's primary forward action: open the card,
+            // then Undo (or cycle a stop back onto its original, which the
+            // base is deliberately re-offered as) and replacedCount hits zero,
+            // the card unmounts, and the flag stays true with nothing left on
+            // screen to clear it. Three taps to a permanently greyed button —
+            // the same shape as the stale undo entry this file already carries
+            // a note about. Tapping through with zero replacements correctly
+            // falls straight to doReshuffle().
+            disabled={confirmReshuffle && hasReplacements}
             className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold disabled:opacity-50"
           >
             Try another combination{" "}
