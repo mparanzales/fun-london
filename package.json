@@ -107,7 +107,7 @@
     "autoprefixer": "^10.5.4",
     "dotenv": "^17.4.2",
     "eslint": "^9.8.0",
-    "eslint-config-next": "15.5.18",
+    "eslint-config-next": "16.2.12",
     "pg": "^8.22.0",
     "postcss": "^8.5.23",
     "prettier": "^3.9.6",
