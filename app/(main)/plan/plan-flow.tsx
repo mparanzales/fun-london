@@ -1702,6 +1702,13 @@ export function PlanFlow({
     editedRef.current = prev;
     setEdited(prev);
     setSaveState("idle");
+    // 🧨 An undo answers the reshuffle question by making it moot. Without
+    // this the flag survived the card: undo back to zero replacements and the
+    // card unmounts (it renders on `hasReplacements`) while the flag stays
+    // true, so the NEXT replacement made "This throws away your changes"
+    // appear unprompted, greying the reroll until it was dismissed. The card
+    // belongs to the tap that raised it, not to the night.
+    setConfirmReshuffle(false);
     // The number the user can actually reach, not the raw stack.
     track("plan_swap_undo", { remaining: myUndo.length - 1 });
   };
