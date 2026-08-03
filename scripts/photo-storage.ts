@@ -97,10 +97,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// A quota / rate-limit error. Same regex contract as refresh-venues /
+// refresh-reviews (the fetch sites embed res.status + a body snippet in the
+// thrown message, so both the bare status and Google's error codes match).
+function isQuotaError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /\b429\b|RESOURCE_EXHAUSTED|RATE_LIMIT_EXCEEDED/.test(msg);
+}
+
+// A permission/billing refusal (API disabled, key out-of-scope, billing dead).
+// These NEVER clear on retry — every extra attempt is pure spend/noise.
+function isDeniedError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /\b403\b|PERMISSION_DENIED|REQUEST_DENIED|BILLING/i.test(msg);
+}
+
 // Run a mirror operation with a few retries on transient failure (network
-// blips, Google 5xx/429, Storage upload errors). Returns null only after every
+// blips, Google 5xx, Storage upload errors). Returns null only after every
 // attempt fails — so a momentary hiccup never makes a caller persist a keyed
 // fallback, which was the root cause of keyed URLs creeping back in.
+// COST EXCEPTIONS (2026-08-02, after the £30.32 bill):
+//   - 429/quota: ONE longer-spaced retry (a burst rate-limit often clears in
+//     seconds), then give up — a daily-quota 429 never clears intra-run and
+//     each attempt is billable. The old blind 3x retry burned 3 attempts per
+//     photo on quota-dead days.
+//   - 403/denied: no retry at all — API-disabled/billing errors are permanent
+//     for the run.
 async function withRetry<T>(
   label: string,
   fn: () => Promise<T>,
@@ -111,6 +133,22 @@ async function withRetry<T>(
       return await fn();
     } catch (e) {
       lastErr = e;
+      if (isDeniedError(e)) {
+        console.error(
+          `  [photo] ${label}: permission/billing denied — not retrying — ${(e as Error).message}`,
+        );
+        return null;
+      }
+      if (isQuotaError(e)) {
+        if (attempt === 1) {
+          await sleep(2000); // burst rate-limits usually clear in seconds
+          continue;
+        }
+        console.error(
+          `  [photo] ${label}: quota/rate limit — giving up after ${attempt} attempts.`,
+        );
+        return null;
+      }
       if (attempt < MIRROR_ATTEMPTS) await sleep(400 * attempt);
     }
   }
@@ -143,7 +181,12 @@ export async function mirrorPhotoToStorage(
     `mirror ${slug}${index > 0 ? `-${index}` : ""}`,
     async () => {
       const res = await fetch(googleMediaUrl(photoName));
-      if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
+      // Body snippet (never the URL — it carries the key) so the retry policy
+      // can tell RESOURCE_EXHAUSTED from PERMISSION_DENIED on the same status.
+      if (!res.ok)
+        throw new Error(
+          `fetch HTTP ${res.status} ${(await res.text()).slice(0, 160)}`,
+        );
       const contentType = res.headers.get("content-type") ?? "image/jpeg";
       const ext = contentType.includes("png") ? "png" : "jpg";
       const buffer = Buffer.from(await res.arrayBuffer());
@@ -232,7 +275,12 @@ export async function mirrorMapToStorage(
       `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}` +
       `&zoom=${zoom}&size=320x160&scale=2${style}&markers=${marker}&key=${key}`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`fetch HTTP ${res.status}`);
+    // Body snippet (never the URL — it carries the key): Maps Static returns
+    // plain-text reasons ("The provided API key is invalid", REQUEST_DENIED).
+    if (!res.ok)
+      throw new Error(
+        `fetch HTTP ${res.status} ${(await res.text()).slice(0, 160)}`,
+      );
     const buffer = Buffer.from(await res.arrayBuffer());
     const path = `${slug}-map.png`;
     const publicUrl = await putPhoto(path, buffer, "image/png", supabase);

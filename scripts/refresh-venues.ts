@@ -527,10 +527,20 @@ async function main() {
 
   // COST GUARD: refresh only the N STALEST venues per run (oldest
   // last_synced_at first), NOT the whole catalogue. Each venue costs one Google
-  // Place Details call; refreshing all ~2,100 daily blows the free monthly
-  // allowance. At 80/day the full catalogue rotates through in ~26 days (venue
-  // facts — rating, hours, closures — change slowly), and daily Places spend
-  // stays inside Google's free tier (≈ £0). Tune with REFRESH_LIMIT.
+  // Place Details call. Tune with REFRESH_LIMIT.
+  //
+  // ⚠️ COST MODEL CORRECTED 2026-08-02 (verified against Google's pricing
+  // sheet; this comment previously claimed 80/day "stays inside Google's free
+  // tier" and that was WRONG — it caused the £30.32 July 2026 bill). Free
+  // tiers are PER-SKU monthly buckets and the FieldMask picks the SKU: this
+  // script's mask asks for rating/userRatingCount/websiteUri/phones/
+  // regularOpeningHours, so every call bills Place Details ENTERPRISE —
+  // 1,000 free per MONTH, $20/1k after. 80/day ≈ 2,480/mo ≈ £23/mo.
+  // Inside the free tier means REFRESH_LIMIT ≤ 30 (≈930/mo) — and that
+  // bucket is shared with nothing else, but ingest-from-pending's publish
+  // details call bills the SAME SKU, so budget them together.
+  // The cron step is additionally gated by the FL_RUN_PLACES repo variable
+  // (maintenance.yml) — the fail-closed kill-switch added after the bill.
   const REFRESH_LIMIT = Number(process.env.REFRESH_LIMIT ?? "80");
   const { data: rows, error } = await readClient
     .from("venues")

@@ -12,6 +12,24 @@ name: maintenance
 #
 # Schedule: 03:00 UTC daily (≈ 03–04 London depending on DST).
 # Manual trigger also enabled — run from the Actions tab anytime.
+#
+# 💸 PLACES KILL-SWITCH (added 2026-08-02 after the £30.32 July bill).
+# The two Google-billing steps below (refresh-venues, refresh-reviews) run
+# ONLY when the repository variable FL_RUN_PLACES is exactly "true"
+# (Settings → Secrets and variables → Actions → Variables). FAIL-CLOSED:
+# variable missing or any other value → the steps are SKIPPED and the
+# workflow's free steps (embeddings, event pruning, room purge, link-check
+# lives inside refresh-venues so it pauses too) still run. This exists so
+# "pause Google spend" never again requires disabling the whole workflow
+# and losing the cleanup steps with it.
+#
+# ⚠️ COST MODEL (verified vs Google's pricing sheet 2026-08-02): free tiers
+# are PER-SKU monthly buckets and the FieldMask picks the SKU. This
+# workflow's venue refresh bills Place Details ENTERPRISE (1,000 free/mo,
+# $20/1k after) because its mask asks for rating/website/phone/hours —
+# at 80/day (~2,480/mo) that is ~£23/mo, NOT free. Before re-enabling,
+# either lower REFRESH_LIMIT to ≤30/day or split the mask. See the
+# 2026-08-02 entry in FUN_LONDON_PROJECT_HISTORY.md.
 
 on:
   schedule:
@@ -60,6 +78,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Refresh venues + write summary
+        # 💸 Google-billing step — gated by the FL_RUN_PLACES repo variable
+        # (see the kill-switch note in the header). Fail-closed on absence.
+        if: ${{ vars.FL_RUN_PLACES == 'true' }}
         env:
           # Service role key — required for UPDATE on public.venues. Stored
           # ONLY in GitHub Actions secrets.
@@ -85,6 +106,9 @@ jobs:
           fi
 
       - name: Refresh a rotating batch of reviews
+        # 💸 Google-billing step — gated by the FL_RUN_PLACES repo variable
+        # (see the kill-switch note in the header). Fail-closed on absence.
+        if: ${{ vars.FL_RUN_PLACES == 'true' }}
         # Decoupled from the whole-catalogue refresh above: pulls Google reviews
         # for ~FL_REVIEW_BATCH venues per night (oldest first), so the catalogue
         # cycles roughly monthly and the expensive reviews SKU stays affordable
@@ -97,6 +121,21 @@ jobs:
           # free tier, so reviews stay £0. (Raise once the daily quota is bumped.)
           FL_REVIEW_BATCH: "30"
         run: pnpm refresh-reviews
+
+      - name: Note that Places refresh is paused
+        # Visibility companion to the kill-switch: without this, a paused
+        # night's summary just reads "(no log captured)" — indistinguishable
+        # from a broken step. "Paused on purpose" must say so out loud.
+        if: ${{ vars.FL_RUN_PLACES != 'true' }}
+        run: |
+          {
+            echo "### 💸 Places refresh PAUSED (deliberate)"
+            echo "Repo variable FL_RUN_PLACES is not 'true', so the venue +"
+            echo "reviews refresh (and the link-check that rides inside it)"
+            echo "were skipped. Set FL_RUN_PLACES=true in Settings → Secrets"
+            echo "and variables → Actions → Variables to resume. Context: the"
+            echo "Aug 2026 billing incident (FUN_LONDON_PROJECT_HISTORY.md)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Embed venues missing embeddings
         # Safety net for the approve-time embedding in

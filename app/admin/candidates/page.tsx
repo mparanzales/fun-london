@@ -25,7 +25,19 @@ type Candidate = {
   long_description_draft: string | null;
   sources_count: number;
   chain_risk_score: number | null;
-  sources: { publication: string; url: string; title: string; date: string }[];
+  // Two source shapes coexist: scout/press sources carry publication/url/
+  // title/date; bulk-import sources (load-bulk-candidates.ts, 2026-08-02)
+  // carry {source, import_note} — the CSV's description, internal evidence
+  // for THIS approval card only (never published; see the loader's
+  // provenance rules).
+  sources: {
+    publication?: string;
+    url?: string;
+    title?: string;
+    date?: string;
+    source?: string;
+    import_note?: string | null;
+  }[];
 };
 
 type ReviewItem = {
@@ -350,16 +362,29 @@ function CandidateCard({ c }: { c: Candidate }) {
         <ul className="mt-2 flex flex-col gap-1">
           {c.sources.map((s, i) => (
             <li key={i} className="text-xs text-muted-fg leading-snug">
-              <span className="font-bold text-fg">{s.publication}</span>,{" "}
-              <a
-                href={s.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline-offset-2 hover:underline"
-              >
-                {s.title}
-              </a>{" "}
-              <span className="text-muted-fg/60">({s.date})</span>
+              {s.publication ? (
+                <>
+                  <span className="font-bold text-fg">{s.publication}</span>,{" "}
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline-offset-2 hover:underline"
+                  >
+                    {s.title}
+                  </a>{" "}
+                  <span className="text-muted-fg/60">({s.date})</span>
+                </>
+              ) : (
+                <>
+                  <span className="font-bold text-fg">
+                    {s.source === "bulk-import"
+                      ? "Bulk import"
+                      : (s.source ?? "import")}
+                  </span>
+                  {s.import_note ? <> · {s.import_note}</> : null}
+                </>
+              )}
             </li>
           ))}
         </ul>

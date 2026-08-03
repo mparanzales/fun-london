@@ -107,8 +107,11 @@ async function main(): Promise<void> {
   let failed = 0;
   let mediaFetches = 0;
   for (const v of rows) {
-    if (done >= MAX) {
-      console.log(`\nhit BACKFILL_MAX=${MAX}; stopping.`);
+    // 💸 Cap ATTEMPTS, not successes (fixed 2026-08-02): `done >= MAX` alone
+    // meant an all-failing run (dead billing, wrong SKU) never hit the cap and
+    // kept issuing a billed details call for every remaining venue.
+    if (done + failed >= MAX) {
+      console.log(`\nhit BACKFILL_MAX=${MAX} (attempts); stopping.`);
       break;
     }
     try {
