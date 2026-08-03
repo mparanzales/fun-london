@@ -1,0 +1,173 @@
+name: publish-approved
+
+# Daily publish wave — drains the human-approved candidate queue, 25/day.
+#
+# Runs scripts/ingest-from-pending.ts (its own default --limit=25 is the batch
+# cap) against pending_candidates status='approved'. Each published venue costs
+# ~10 Google calls (1 Text Search + 2 Place Details + up to 6 photo media +
+# 1 static map), all inside the per-day console quota caps set 2026-08-03.
+# When the approved queue is EMPTY the run is a free no-op (one Supabase read,
+# zero Google calls) — "until it's done" needs no extra logic.
+#
+# 💸 KILL-SWITCH (fail-closed, same pattern as maintenance.yml): the publish
+# step runs ONLY when the repo variable FL_PUBLISH_APPROVED is exactly "true"
+# (Settings → Secrets and variables → Actions → Variables). Unset/other →
+# skipped, with a loud summary note. This is SEPARATE from FL_RUN_PLACES
+# (the venue-refresh switch): publishing is deliberate, budgeted spend;
+# refreshing is background spend. One switch each.
+#
+# 💸 MONTHLY BUDGET (verified vs Google's pricing sheet 2026-08-02): the
+# binding bucket is Place Photos — 1,000 free/month, ~6 per venue, so the
+# first ~166 venues each calendar month are £0 and each venue beyond costs
+# ~$0.04. At 25/day that ceiling is reached in ~7 running days. Pausing =
+# flip the variable off; September 1 the bucket resets.
+#
+# Quota safety: a mid-run daily-quota 429 makes the script STOP gracefully
+# (exit 0) and leave the remaining candidates 'approved' for tomorrow — it
+# never drains them to ingest_failed (fixed 2026-08-04).
+#
+# Schedule: 08:15 UTC daily — just after Google's quota-day reset (PACIFIC
+# midnight = 07:00/08:00 UTC depending on DST), so every run starts with a
+# fresh daily quota, and offset from maintenance (03:00) and events (:30).
+
+on:
+  schedule:
+    # https://crontab.guru/#15_8_*_*_*
+    - cron: "15 8 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Batch size override (default 25; 'all' drains the queue)"
+        required: false
+        default: ""
+        type: string
+
+# Candidates are selected by status='approved' with no claim/lease, so two
+# overlapping runs would double-bill every candidate. Queue, never cancel.
+concurrency:
+  group: publish-approved
+  cancel-in-progress: false
+
+jobs:
+  publish-approved:
+    name: publish approved candidates
+    runs-on: ubuntu-latest
+    # Generous: 25 venues x (search + details + 6 photo mirrors + two WebP
+    # encodes each + map + reviews + local MiniLM embedding on a 2-vCPU
+    # runner, cold model download ~30 MB). A comparable local wave took ~18
+    # min for the script alone.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write # for the failure-alert step to open/comment an issue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        # Version comes from package.json "packageManager" field (pnpm@9.0.0)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Same override as maintenance.yml: supabase-js realtime needs the
+          # native WebSocket that arrived in Node 22; .nvmrc stays on 20 for
+          # the app build.
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Publish a wave of approved candidates
+        # 💸 Google-billing step — gated by FL_PUBLISH_APPROVED (see header).
+        if: ${{ vars.FL_PUBLISH_APPROVED == 'true' }}
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          # Keyless photos, mirrored to R2 (img.funldn.com) — unlike local runs,
+          # the R2 secrets are available here, so galleries land on the right
+          # storage backend.
+          FL_PHOTO_BUCKET: venue-photos
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          # Dispatch input reaches the shell ONLY via this env var — never via
+          # ${{ }} interpolation inside `run:` (expression injection would run
+          # inside a step holding every secret). The script itself fail-closes
+          # on anything that isn't a positive number or the literal "all".
+          LIMIT_INPUT: ${{ inputs.limit }}
+        run: |
+          set -o pipefail
+          if [ -n "$LIMIT_INPUT" ]; then
+            pnpm ingest:from-pending -- --limit="$LIMIT_INPUT" 2>&1 | tee publish.log
+          else
+            pnpm ingest:from-pending 2>&1 | tee publish.log
+          fi
+
+      - name: Render step summary
+        # Gated like the publish step: on paused days there is no publish.log,
+        # and an empty "(no log captured)" block above the PAUSED note reads
+        # like a failure.
+        if: ${{ always() && vars.FL_PUBLISH_APPROVED == 'true' }}
+        run: |
+          {
+            echo "## Publish wave summary"
+            echo ""
+            echo '```'
+            if grep -q "─── SUMMARY ───" publish.log 2>/dev/null; then
+              awk '/─── SUMMARY ───/{found=1} found' publish.log
+            else
+              tail -40 publish.log 2>/dev/null || echo "(no log captured)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Note that publishing is paused
+        # Same visibility companion as maintenance.yml: "paused on purpose"
+        # must be distinguishable from "broken".
+        if: ${{ vars.FL_PUBLISH_APPROVED != 'true' }}
+        run: |
+          {
+            echo "### 💸 Publish wave PAUSED (deliberate)"
+            echo "Repo variable FL_PUBLISH_APPROVED is not 'true', so no"
+            echo "candidates were published and no Google calls were made."
+            echo "Set FL_PUBLISH_APPROVED=true in Settings → Secrets and"
+            echo "variables → Actions → Variables to resume the daily wave."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Alert on failure
+        # cancelled() covers timeout-minutes kills, which are NOT failure()
+        if: failure() || cancelled()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🤖 cron failing: ${context.workflow}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Scheduled run failed: ${runUrl}`;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'cron-failure',
+              per_page: 100,
+            });
+            const hit = open.data.find((i) => i.title === title);
+            if (hit) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: hit.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['cron-failure'],
+              });
+            }
