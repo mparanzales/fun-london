@@ -25,13 +25,29 @@ name: discover-venues
 # after which EVERY cron (maintenance's refresh-venues, refresh-reviews)
 # billed at ~£1.21/day. July 2026 cost £10.30, 100% Places API.
 #
-# Weekly keeps candidate discovery alive at ~500 calls/month, leaving the
-# allowance for Tier 1 freshness (refresh-venues, 80/day = ~2.5k/month)
-# and the occasional manual backfill. Discovery is also the LEAST urgent
-# tier: the catalogue is ~2,100 auto-discovered vs ~46 curated, so the
-# bottleneck is curation, not more candidates.
+# Weekly keeps candidate discovery alive. Discovery is also the LEAST
+# urgent tier: the catalogue is ~2,100 auto-discovered vs ~46 curated, so
+# the bottleneck is curation, not more candidates.
 #
-# Before raising this cadence, check Billing -> Reports (group by SKU).
+# ⚠️ COST MATH CORRECTED 2026-08-02 (after the £30.32 July bill; verified
+# against Google's pricing sheet + this script's code):
+#   1. Free tiers are PER-SKU monthly buckets and the FieldMask picks the
+#      SKU. The grid search below asks for places.rating/userRatingCount/
+#      websiteUri, so it bills TEXT SEARCH ENTERPRISE — 1,000 free/month,
+#      $35/1k after. The old "~5,000 Pro events" figure was the wrong SKU.
+#   2. MAX_SCAN_PER_RUN does NOT bound the searches. `scanned` counts only
+#      candidates passing the pre-filter; the outer loop issues ONE billed
+#      searchText per grid cell (26 neighbourhoods x 8 categories = 208)
+#      until TARGET is queued or the grid is exhausted. Worst case per run
+#      is ~208 grid searches + up to 60 chain-check searches — so weekly
+#      alone can consume ~90% of the Text Search Enterprise bucket.
+#   3. The old "6 runs x MAX_SCAN_PER_RUN (60) = 360 calls/day" line
+#      conflated scanned candidates with API calls in both directions.
+#
+# Before raising this cadence — or re-enabling this workflow at all —
+# check Billing -> Reports (group by SKU) and budget against the 1,000/mo
+# Text Search Enterprise bucket. See the 2026-08-02 entry in
+# FUN_LONDON_PROJECT_HISTORY.md for the full audit.
 #
 # Distinct from:
 #   - maintenance.yml (Tier 1) keeps EXISTING venues fresh (daily).

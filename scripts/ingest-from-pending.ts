@@ -16,10 +16,17 @@
 // "ingest_failed") unless you pass --retry-failed.
 //
 // Run:
-//   pnpm ingest:from-pending --dry-run     # print what would happen, no writes
-//   pnpm ingest:from-pending               # write to Supabase
-//   pnpm ingest:from-pending --limit=50    # process only the first 50
+//   pnpm ingest:from-pending --dry-run     # list the queue; ZERO Google calls
+//   pnpm ingest:from-pending               # write, capped at 25 candidates
+//   pnpm ingest:from-pending --limit=50    # explicit batch size
+//   pnpm ingest:from-pending --limit=all   # drain the whole queue (deliberate)
 //   pnpm ingest:from-pending --retry-failed
+//
+// 💸 --dry-run makes NO Google requests (changed 2026-08-02: it previously
+// spent 1 Text Search + 1 Place Details per candidate — a "preview" of a
+// 500-candidate queue billed ~1,000 calls). Dry mode now only lists what
+// would be processed; the search/match preview happens in real runs, which
+// are already human-gated (approval) and batchable (--limit).
 //
 // Required environment (.env.local):
 //   NEXT_PUBLIC_SUPABASE_URL
@@ -56,8 +63,18 @@ import { mapGoogleReviews, fetchPlaceReviews } from "./google-reviews";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const RETRY_FAILED = process.argv.includes("--retry-failed");
+// 💸 FAIL-CLOSED BATCH CAP (2026-08-02): publishing bills ~10 Google calls
+// per venue (search + details + reviews + up to 6 photo media + 1 map), and
+// the Place Details call shares the 1,000/month Enterprise bucket with
+// refresh-venues. LIMIT used to default to UNLIMITED — one forgotten flag on
+// a big approved queue could spend a whole month's buckets. Default is now
+// 25/run; pass --limit=N for more, or the explicit --limit=all to drain the
+// queue deliberately.
+const DEFAULT_LIMIT = 25;
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
-const LIMIT = limitArg ? parseInt(limitArg.slice("--limit=".length), 10) : null;
+const limitVal = limitArg ? limitArg.slice("--limit=".length) : null;
+const LIMIT =
+  limitVal === "all" ? null : limitVal ? parseInt(limitVal, 10) : DEFAULT_LIMIT;
 // Milliseconds between Google API calls to stay within rate limits
 const API_DELAY_MS = 200;
 
@@ -246,7 +263,9 @@ function mapPriceLevel(level?: string): string {
 // Map Google place types to Fun London VenueType
 function mapVenueType(candidate: Candidate, googleTypes?: string[]): string {
   const typeGuess = candidate.type_guess?.toLowerCase() ?? "";
-  const importSource = candidate.sources.find((s) => s.source === "bulk-import");
+  const importSource = candidate.sources.find(
+    (s) => s.source === "bulk-import",
+  );
   const cuisine = importSource?.cuisine_type?.toLowerCase() ?? "";
   const venueLists = importSource?.vibe_lists ?? [];
 
@@ -321,6 +340,10 @@ function deriveMoodTags(candidate: Candidate): string[] {
   if (discover?.moods) return discover.moods;
 
   const source = candidate.sources.find((s) => s.source === "bulk-import");
+  // 2026-08-02: bulk-loaded candidates (load-bulk-candidates.ts) carry
+  // locally-classified moods the same way discover-venues ones do — honour
+  // them, or a cemetery garden ships with mood ["dinner"].
+  if (source?.moods) return source.moods;
   if (!source) return ["dinner"];
 
   const moods = new Set<string>();
@@ -451,8 +474,10 @@ function buildVenueRow(
     lng: details.location?.longitude ?? null,
     price: mapPriceLevel(details.priceLevel),
     // Discover-venues candidates carry their category's time of day (a
-    // gallery/park is "Day"); only legacy candidates fall back to "Evening".
-    time_of_day: discover?.time_of_day ?? "Evening",
+    // gallery/park is "Day"); bulk-loaded candidates carry a locally-
+    // classified one (2026-08-02); only legacy candidates fall back to
+    // "Evening".
+    time_of_day: discover?.time_of_day ?? source?.time_of_day ?? "Evening",
     rating: details.rating ?? 4.0,
     review_count: details.userRatingCount ?? 0,
     walking_mins: 12,
@@ -585,6 +610,15 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   const searchQuery = `${candidate.name} ${candidate.neighbourhood ?? ""} London`;
   console.log(`\n→ "${candidate.name}" (${candidate.neighbourhood ?? "?"})`);
 
+  // 💸 Dry runs are FREE: bail before any Google request. (Until 2026-08-02
+  // the search + details below ran in dry mode too and billed per candidate.)
+  if (DRY_RUN) {
+    console.log(
+      `  [dry-run] would search "${searchQuery}", fetch details, gate, publish — zero Google calls made`,
+    );
+    return { status: "dry" as const };
+  }
+
   const searchResult = await placesTextSearch(searchQuery);
   if (!searchResult) {
     throw new Error(`No Google Places result for "${searchQuery}"`);
@@ -599,7 +633,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   // Union the candidate's full tag set into the existing venue so nothing the
   // spreadsheet knows is lost, then mark the candidate "skipped" (stamping the
   // matched place_id) so it drains and never re-bills Google next pass.
-  if (!DRY_RUN && supabase) {
+  if (supabase) {
     const { data: existing } = await supabase
       .from("venues")
       .select("id, slug, vibe_tags, curation_tier")
@@ -701,16 +735,25 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     slug = `${slugify(details.displayName.text)}-${n++}`;
   usedSlugs.add(slug);
 
-  if (DRY_RUN) {
-    console.log(
-      `  [dry-run] would upsert as slug="${slug}" · type=${mapVenueType(candidate, details.types)} · booking=${bookingLinks[0]?.platform ?? "none"} · then fetch reviews + embed`,
-    );
-    return { status: "dry" as const };
-  }
-
+  // (No DRY_RUN branch here any more — dry mode returns at the top of this
+  // function, before any Google call.)
   if (!supabase) throw new Error("Supabase client not initialised");
 
   const photoUrls = await resolveVenuePhotos(details.photos, slug, supabase);
+  // 2026-08-02: refuse to publish a photo-less venue when Google HAD photos.
+  // An empty img_url is filtered out by every read path, so the venue would
+  // be INVISIBLE while the candidate drained to "ingested" and never retried.
+  // Throwing routes it to status="ingest_failed" instead → retryable via
+  // --retry-failed once the photo quota/hiccup has passed.
+  if (
+    photoStorageEnabled() &&
+    (details.photos?.length ?? 0) > 0 &&
+    photoUrls.length === 0
+  ) {
+    throw new Error(
+      `no photos mirrored for "${slug}" (Google offered ${details.photos!.length}) — not publishing an invisible venue`,
+    );
+  }
   const imgUrl = photoUrls[0] ?? FALLBACK_IMG_URL;
   const lat = details.location?.latitude ?? null;
   const lng = details.location?.longitude ?? null;

@@ -12,7 +12,9 @@
 //
 // Run:
 //   pnpm ingest                    # writes to Supabase
-//   pnpm ingest:dry                # prints what would be written, no DB write
+//   pnpm ingest:dry                # lists the seeds; ZERO Google calls, no DB write
+//                                  # (until 2026-08-02 dry mode still billed
+//                                  # 2 Places calls per seed — ~98 for a full run)
 //
 // Required environment (in .env.local):
 //   NEXT_PUBLIC_SUPABASE_URL
@@ -74,7 +76,6 @@ const supabase =
         auth: { persistSession: false },
       })
     : null;
-
 
 // ── Google Places API ────────────────────────────────────────────────────
 
@@ -279,8 +280,28 @@ async function processVenue(seed: VenueSeed): Promise<{
   inProspects: boolean;
   placeId: string;
   bookingPlatforms: BookingPlatform[];
+  dry?: boolean; // true = listed only, NOT validated against Google
 }> {
   console.log(`\n→ ${seed.slug}`);
+
+  // 💸 Dry runs are FREE: bail before any Google request. (Until 2026-08-02
+  // the search + details below ran in dry mode too — 2 billed calls per seed.)
+  // The trade: a dry run no longer validates searchQuery against Google, so
+  // it counts "would attempt", never success — a fabricated all-green summary
+  // is worse than an honest unknown.
+  if (DRY_RUN) {
+    console.log(
+      `  [dry-run] would search "${seed.searchQuery}", fetch details, mirror photos + map, upsert — zero Google calls made`,
+    );
+    return {
+      slug: seed.slug,
+      inVenues: false,
+      inProspects: false,
+      placeId: "",
+      bookingPlatforms: [],
+      dry: true,
+    };
+  }
 
   const searchResult = await placesTextSearch(seed.searchQuery);
   console.log(`  found: ${searchResult.displayName.text}`);
@@ -306,6 +327,8 @@ async function processVenue(seed: VenueSeed): Promise<{
   // (galleries/markets/parks) are catalog venues but not booking
   // partners, so they opt out of the prospects overlay via skipProspect.
   const wantsProspect = !hasMajor && !seed.skipProspect;
+  // NOTE: dry mode returns at the top of processVenue, so this branch is
+  // unreachable in --dry-run; kept for shape (write path lives in the else).
   if (DRY_RUN) {
     console.log(`  [dry-run] would upsert to venues`);
     if (wantsProspect)
@@ -387,12 +410,14 @@ async function main() {
   const results = {
     venues: [] as string[],
     prospectsOverlay: [] as string[], // also in venues
+    dry: [] as string[], // dry mode: listed, NOT validated against Google
     failed: [] as { slug: string; error: string }[],
   };
 
   for (const seed of seeds) {
     try {
       const r = await processVenue(seed);
+      if (r.dry) results.dry.push(r.slug);
       if (r.inVenues) results.venues.push(r.slug);
       if (r.inProspects) results.prospectsOverlay.push(r.slug);
     } catch (err) {
@@ -403,6 +428,11 @@ async function main() {
   }
 
   console.log("\n─────────── SUMMARY ───────────");
+  if (DRY_RUN) {
+    console.log(
+      `Would attempt ${results.dry.length} seed(s) — ~${results.dry.length * 2} Places calls + photos/maps in a real run. NOT validated against Google (dry runs make zero calls since 2026-08-02).`,
+    );
+  }
   console.log(`Venues (catalog, user-facing): ${results.venues.length}`);
   results.venues.forEach((s) => console.log(`  ✓ ${s}`));
   console.log(

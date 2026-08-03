@@ -7,7 +7,9 @@
 // galleries. Keyed places.googleapis.com URLs are used server-side ONLY; the DB
 // only ever gets the keyless `event-<id>.jpg` Storage URL (the standing invariant).
 //
-//   pnpm fix-events:dry     # show the dedupe + photo plan, write nothing
+//   pnpm fix-events:dry     # show the dedupe plan, write nothing — ZERO Google
+//                           # calls (until 2026-08-02 dry mode billed 2 Places
+//                           # calls per surviving event resolving its photo)
 //   pnpm fix-events         # apply (deletes dupes, writes real photos)
 
 import * as dotenv from "dotenv";
@@ -22,7 +24,9 @@ const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY;
 
 if (!SUPABASE_URL || !SERVICE_ROLE) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  console.error(
+    "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY",
+  );
   process.exit(1);
 }
 if (!PLACES_KEY) {
@@ -81,9 +85,31 @@ type EventRow = {
 };
 
 const STOP = new Set([
-  "the", "a", "an", "at", "by", "of", "in", "on", "for", "and", "popup",
-  "pop", "up", "shop", "store", "experience", "official", "summer", "july",
-  "2026", "2025", "london", "tour", "edition", "brand",
+  "the",
+  "a",
+  "an",
+  "at",
+  "by",
+  "of",
+  "in",
+  "on",
+  "for",
+  "and",
+  "popup",
+  "pop",
+  "up",
+  "shop",
+  "store",
+  "experience",
+  "official",
+  "summer",
+  "july",
+  "2026",
+  "2025",
+  "london",
+  "tour",
+  "edition",
+  "brand",
 ]);
 
 function nameTokens(s: string): Set<string> {
@@ -104,7 +130,10 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 function normVenue(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24);
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 24);
 }
 
 function datesOverlap(a: EventRow, b: EventRow): boolean {
@@ -138,7 +167,9 @@ async function main() {
     process.exit(1);
   }
   const events = (data ?? []) as EventRow[];
-  console.log(`Loaded ${events.length} events · ${WRITE ? "WRITE" : "DRY RUN"}\n`);
+  console.log(
+    `Loaded ${events.length} events · ${WRITE ? "WRITE" : "DRY RUN"}\n`,
+  );
 
   // ── Phase 1: dedupe ──────────────────────────────────────────────────────
   // Two events are the same when they're at the same venue, their date ranges
@@ -201,8 +232,21 @@ async function main() {
   const survivors = events.filter((e) => !toDelete.some((d) => d.id === e.id));
   let imaged = 0;
   let missed = 0;
+  let planned = 0; // dry mode only — "would attempt", NOT a success count
   for (const e of survivors) {
     const query = `${e.venue_name}, ${e.area}, London`;
+    // 💸 Dry runs are FREE: bail before any Google request. (Until 2026-08-02
+    // the search + details below ran in dry mode too — 2 billed calls per
+    // surviving event, every run, for a "preview".) A dry run therefore
+    // cannot know the match rate — it counts `planned`, never `imaged`,
+    // because a fabricated 100% success line is worse than no line.
+    if (!WRITE) {
+      planned++;
+      console.log(
+        `  [dry] would resolve "${query}" on Places + mirror its photo — zero Google calls made`,
+      );
+      continue;
+    }
     const placeId = await placeIdForVenue(query);
     const photoName = placeId ? await firstPhotoName(placeId) : null;
     if (!photoName) {
@@ -210,12 +254,11 @@ async function main() {
       console.log(`  ✗ ${e.name} — no Places photo for "${e.venue_name}"`);
       continue;
     }
-    if (!WRITE) {
-      imaged++;
-      console.log(`  ✅ [dry] ${e.name} ← real photo of ${e.venue_name}`);
-      continue;
-    }
-    const mirrored = await mirrorPhotoToStorage(photoName, `event-${e.id}`, supabase);
+    const mirrored = await mirrorPhotoToStorage(
+      photoName,
+      `event-${e.id}`,
+      supabase,
+    );
     if (!mirrored) {
       missed++;
       console.log(`  ✗ ${e.name} — mirror failed`);
@@ -234,14 +277,20 @@ async function main() {
     console.log(`  ✅ ${e.name} ← real photo of ${e.venue_name}`);
   }
 
-  console.log(
-    `\nPhotos: ${imaged}/${survivors.length} got a real venue photo · ${missed} had no Places match.`,
-  );
-  console.log(
-    missed > 0
-      ? `(The ${missed} with no venue match need a decision — hide or placeholder.)`
-      : "",
-  );
+  if (!WRITE) {
+    console.log(
+      `\n[dry] would attempt ${planned}/${survivors.length} events (~${planned * 2} Places calls + ${planned} photo fetches in --write; match rate unknown without calling Google).`,
+    );
+  } else {
+    console.log(
+      `\nPhotos: ${imaged}/${survivors.length} got a real venue photo · ${missed} had no Places match.`,
+    );
+    console.log(
+      missed > 0
+        ? `(The ${missed} with no venue match need a decision — hide or placeholder.)`
+        : "",
+    );
+  }
 }
 
 main().catch((e) => {

@@ -82,8 +82,12 @@ async function main(): Promise<void> {
   let failed = 0;
   let fetches = 0;
   for (const v of rows) {
-    if (done >= MAX) {
-      console.log(`\nhit BACKFILL_MAX=${MAX}; stopping.`);
+    // 💸 Cap ATTEMPTS, not successes (fixed 2026-08-02): `done >= MAX` alone
+    // meant an all-failing run (e.g. Maps Static not enabled on the key →
+    // every fetch REQUEST_DENIED ×3 retries) never hit the cap and walked the
+    // whole catalogue.
+    if (done + failed >= MAX) {
+      console.log(`\nhit BACKFILL_MAX=${MAX} (attempts); stopping.`);
       break;
     }
     if (v.lat == null || v.lng == null) continue;
