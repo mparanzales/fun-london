@@ -100,9 +100,23 @@ function sleep(ms: number): Promise<void> {
 // A quota / rate-limit error. Same regex contract as refresh-venues /
 // refresh-reviews (the fetch sites embed res.status + a body snippet in the
 // thrown message, so both the bare status and Google's error codes match).
-function isQuotaError(e: unknown): boolean {
+// Exported as the ONE shared implementation — this regex previously existed
+// in four copies, and a drifted copy is how a quota guard silently dies.
+export function isQuotaError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
   return /\b429\b|RESOURCE_EXHAUSTED|RATE_LIMIT_EXCEEDED/.test(msg);
+}
+
+// True once ANY photo/map mirror in this process hit a quota/rate error.
+// withRetry deliberately swallows failures into `null` (so callers fall back
+// instead of persisting keyed URLs) — which also swallowed the quota signal:
+// ingest-from-pending's "no photos mirrored" throw carried no status, so its
+// graceful quota-stop could never fire on the PHOTOS bucket, the one that
+// exhausts first. This flag is the out-of-band signal. Never reset within a
+// run: once a quota is gone for the day it stays gone.
+let quotaHit = false;
+export function photoQuotaHit(): boolean {
+  return quotaHit;
 }
 
 // A permission/billing refusal (API disabled, key out-of-scope, billing dead).
@@ -147,6 +161,7 @@ async function withRetry<T>(
         console.error(
           `  [photo] ${label}: quota/rate limit — giving up after ${attempt} attempts.`,
         );
+        quotaHit = true;
         return null;
       }
       if (attempt < MIRROR_ATTEMPTS) await sleep(400 * attempt);

@@ -41,6 +41,8 @@ import {
   resolveVenuePhotos,
   mirrorMapToStorage,
   photoStorageEnabled,
+  photoQuotaHit,
+  isQuotaError,
   FALLBACK_IMG_URL,
 } from "./photo-storage";
 import {
@@ -73,8 +75,22 @@ const RETRY_FAILED = process.argv.includes("--retry-failed");
 const DEFAULT_LIMIT = 25;
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const limitVal = limitArg ? limitArg.slice("--limit=".length) : null;
-const LIMIT =
-  limitVal === "all" ? null : limitVal ? parseInt(limitVal, 10) : DEFAULT_LIMIT;
+// FAIL CLOSED on garbage: parseInt("abc") is NaN and parseInt("0") is 0 —
+// both are falsy, and `if (LIMIT)` would then apply NO limit at all, turning
+// a typo into an unbounded billed drain of the whole queue. Only "all" may
+// mean unlimited, explicitly.
+const LIMIT = ((): number | null => {
+  if (limitVal === null) return DEFAULT_LIMIT;
+  if (limitVal === "all") return null;
+  const n = parseInt(limitVal, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(
+      `Invalid --limit="${limitVal}" — use a positive number or the explicit "all". Refusing to run without a cap.`,
+    );
+    process.exit(1);
+  }
+  return n;
+})();
 // Milliseconds between Google API calls to stay within rate limits
 const API_DELAY_MS = 200;
 
@@ -750,8 +766,16 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     (details.photos?.length ?? 0) > 0 &&
     photoUrls.length === 0
   ) {
+    // withRetry swallows per-photo failures into null, so the quota signal
+    // would die here without the out-of-band flag. Photos are the FIRST
+    // bucket to exhaust — if this run tripped a photo quota, say so in the
+    // thrown message in the exact vocabulary the main loop's stop-check
+    // greps (RESOURCE_EXHAUSTED), so the whole wave stops instead of
+    // burning search+details on every remaining candidate.
     throw new Error(
-      `no photos mirrored for "${slug}" (Google offered ${details.photos!.length}) — not publishing an invisible venue`,
+      photoQuotaHit()
+        ? `RESOURCE_EXHAUSTED: photo media quota hit while mirroring "${slug}" — not publishing an invisible venue`
+        : `no photos mirrored for "${slug}" (Google offered ${details.photos!.length}) — not publishing an invisible venue`,
     );
   }
   const imgUrl = photoUrls[0] ?? FALLBACK_IMG_URL;
@@ -923,10 +947,13 @@ async function main() {
     needsReview: 0,
     failed: [] as { name: string; error: string }[],
     stuck: [] as { name: string; error: string }[],
+    processed: 0,
+    quotaStoppedAt: null as string | null,
   };
 
   for (const candidate of candidates) {
     try {
+      results.processed++;
       const r = await processCandidate(candidate, usedSlugs);
       if (r.status === "ingested") {
         results.ingested++;
@@ -939,8 +966,42 @@ async function main() {
           });
       } else if (r.status === "skipped") results.skipped++;
       else if (r.status === "needs_review") results.needsReview++;
+      // A quota error on the REVIEWS call is caught inside processCandidate's
+      // embed try/catch (the venue is already published at that point, so
+      // publishing must not fail) — but it still means the shared quota is
+      // gone. Treat it as the same scheduling event: stop the wave, leave the
+      // rest 'approved' for tomorrow, instead of billing a doomed reviews
+      // call per remaining candidate.
+      if (
+        r.status === "ingested" &&
+        r.embedError &&
+        isQuotaError(new Error(r.embedError))
+      ) {
+        results.quotaStoppedAt = candidate.name;
+        console.log(
+          `\n⏸ Quota/rate limit on the reviews call at "${candidate.name}" (venue published) — stopping the wave; remaining candidates stay queued.`,
+        );
+        break;
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // Shared-quota contract (isQuotaError = the one shared regex): a quota
+      // or rate-limit refusal is a SCHEDULING event, not this candidate's
+      // failure. Stop the batch, leave this and all remaining candidates
+      // 'approved' untouched, and exit 0 — tomorrow's cron picks them up with
+      // a fresh quota. Draining them to ingest_failed here (the old
+      // behaviour) both mislabeled them and kept firing one billed search per
+      // remaining candidate on a quota-dead day. (A per-minute burst 429
+      // also lands here — losing the rest of a wave to a burst is acceptable
+      // because the daily cron retries; the message stays honest about not
+      // knowing which kind it was.)
+      if (isQuotaError(err)) {
+        results.quotaStoppedAt = candidate.name;
+        console.log(
+          `\n⏸ Quota/rate limit at "${candidate.name}" — stopping early; it and the remaining approved candidates stay queued for the next run.`,
+        );
+        break;
+      }
       console.error(`  ✗ FAILED: ${msg}`);
       results.failed.push({ name: candidate.name, error: msg });
 
@@ -970,6 +1031,15 @@ async function main() {
   }
 
   console.log("\n─────────── SUMMARY ───────────");
+  // Denominator first — "Ingested: 2" is meaningless without "of how many".
+  console.log(
+    `Processed:                   ${results.processed}/${candidates.length} fetched this run`,
+  );
+  if (results.quotaStoppedAt) {
+    console.log(
+      `⏸ STOPPED EARLY (quota/rate limit) at "${results.quotaStoppedAt}" — ${candidates.length - results.processed} candidate(s) left queued for the next run.`,
+    );
+  }
   console.log(`Ingested (published):        ${results.ingested}`);
   console.log(`  embedded (taste-rankable): ${results.embedded}`);
   console.log(`  embed deferred (no revs):  ${results.embedDeferred}`);
