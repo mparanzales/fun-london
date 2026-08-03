@@ -374,7 +374,10 @@ describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
     // 🧨 The newest line was the only one unpinned, so it could be refactored
     // away with the suite green — which is exactly what this test exists to
     // prevent, and it was added in the same commit as the line.
-    expect(block![1]).toContain("clearUndoStack(");
+    // The ARGUMENT is the load-bearing part: clearUndoStack(nextId) clears the
+    // anon key instead of the departing owner's, and a bare-name pin stays
+    // green through that. Same shape as the line below.
+    expect(block![1]).toContain("clearUndoStack(prevIdRef.current)");
     // The departing account's OWN slot too. Without this line the fix for it
     // could be refactored away with the suite green — the same "green test,
     // live data left behind" shape this describe block exists for.

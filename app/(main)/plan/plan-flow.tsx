@@ -81,7 +81,6 @@ import {
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
-import { isSignOutTransition } from "@/lib/auth-transition";
 import { nextInCycle } from "@/lib/plan-cycle";
 import {
   entriesFor,
@@ -729,7 +728,13 @@ export function PlanFlow({
     if (closedStops.includes(i)) {
       return canChange
         ? "Closed by the time you'd get here. Change it."
-        : "Closed by the time you'd get here, and nothing open fits this slot. Try another combination below rebuilds from the time it is now.";
+        : // 🧨 No clock promise. "…rebuilds from the time it is now" is false
+          // whenever `when` is "custom" — which `activate` sets for any
+          // restored night with a pinned start — and for a restored evening
+          // night viewed in daylight, where resolveTiming returns 19:00.
+          // Naming the control is true in every case; naming the clock was
+          // not.
+          "Closed by the time you'd get here, and nothing open fits this slot. Try another combination below.";
     }
     return canChange ? null : noOptionsReason(i);
   };
@@ -965,37 +970,26 @@ export function PlanFlow({
   // exists only to carry someone across one deploy, but not a mystery.
   const baseSig = active?.plan?.createdAt ?? genStampRef.current.at;
 
-  // 🧨 STAND THE NIGHT DOWN ON THE SIGN-OUT TRANSITION, IN THIS COMPONENT.
+  // 🧨 THIS COMPONENT CANNOT OBSERVE THE SIGN-OUT TRANSITION, and must not
+  // pretend to. `authUserId` is a server prop from app/(main)/plan/page.tsx,
+  // inside the branch that has already returned <AnonPlanFlow/> when there is
+  // no user — so `owner` is a non-null string for the whole mount and never
+  // flips to null. A real sign-out calls router.refresh(), the server page
+  // re-renders into the anon branch, and PlanFlow UNMOUNTS.
   //
-  // Clearing in the auth context can never hold on its own while a mounted
-  // PlanFlow still holds the night in memory: the sweep runs, `owner` flips to
-  // null, this component re-renders, and its own persist effects write the
-  // departing account's night AND its replacement history straight into the
-  // ANON slots, milliseconds after they were emptied. The next visitor on a
-  // shared browser then rehydrates it, and signing in claims it into their
-  // account — a false conversion and someone else's night saved as their own.
+  // An earlier version of this file carried a uuid->null stand-down effect
+  // here, with fifteen lines explaining the cross-user bleed it prevented. It
+  // could not fire: the guard it depended on was unreachable by construction.
+  // A defence that cannot run is worse than none, because the comment stops
+  // the next person looking for the real one — which is the sweep in
+  // components/auth-user-context.tsx, on the auth subscription, where the
+  // transition is actually visible.
   //
-  // That is the failure lib/auth-transition.ts describes in so many words
-  // ("the retained data gets persisted back to localStorage and then migrated
-  // into the NEXT account") and the fourth appearance of the PR #129 class in
-  // this codebase. The in-memory state has to go before any write can fire, so
-  // it goes here, on the transition, not in the sweep.
-  const prevOwnerRef = useRef<string | null | undefined>(undefined);
-  useIsomorphicLayoutEffect(() => {
-    const prev = prevOwnerRef.current;
-    prevOwnerRef.current = owner;
-    if (prev === undefined || prev === owner) return;
-    if (!isSignOutTransition(prev, owner)) return;
-    standDown();
-    setEdited(null);
-    editedRef.current = null;
-    setUndoStack([]);
-    undoWrittenRef.current = false;
-    undoRestoredForRef.current = null;
-    originalRef.current = null;
-    setStep("setup");
-  }, [owner, standDown]);
-
+  // What remains, and is documented rather than defended here: a still-mounted
+  // PlanFlow keeps `owner = A` through a cross-tab sign-out or a session
+  // expiry, so the next dep change re-persists A's night under A's OWN key
+  // after the sweep cleared it. Owner-scoped, so it is not a bleed onto the
+  // next person; it defeats the sweep for that account until the page reloads.
   const undoRestoredForRef = useRef<string | null>(null);
   // 🧨 Has THIS session ever written a history for this night? The token below
   // orders the write after the READ, not after the restore has landed: in the
@@ -1574,10 +1568,6 @@ export function PlanFlow({
   // Editing any input invalidates a re-opened saved plan, the saved flag, and
   // any per-stop swaps (the base plan is about to change).
   const editInputs = (fn: () => void, control: SetupControl = "where") => {
-    // Editing inputs abandons the night, so the card that offered to protect
-    // it goes too. It survived "← Edit" (which deliberately skips standDown)
-    // and reappeared on the next night reading "You've changed 0 stops".
-    setConfirmReshuffle(false);
     // plan_setup_started, fired ONCE. editInputs is the single choke point for
     // every setup control on this surface (When, Where, Vibe, Budget) and is
     // called from nothing else, so the latch here cannot be reached by a page
@@ -2163,11 +2153,10 @@ export function PlanFlow({
                 type="button"
                 onClick={() => onSwap(i, 1, "button")}
                 disabled={(alternatives[i]?.length ?? 0) === 0}
-                title={
-                  (alternatives[i]?.length ?? 0) === 0
-                    ? noOptionsReason(i)
-                    : undefined
-                }
+                // The same string the notice shows, so the tooltip cannot
+                // reintroduce the "start earlier" instruction that has no
+                // control on this screen.
+                title={stopNotice(i) ?? undefined}
                 aria-label={`Change the ${s.role} stop`}
                 className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent disabled:text-muted-fg disabled:cursor-default"
               >
@@ -2326,7 +2315,10 @@ export function PlanFlow({
           row is handled. */}
       {
         <div className="px-5 pb-2 flex flex-col gap-2.5">
-          {confirmReshuffle && (
+          {/* Undo and per-stop Change stay live while the card is open, so
+              this has to re-check: undoing to zero left it asserting work that
+              no longer existed. */}
+          {confirmReshuffle && hasReplacements && (
             <div className="rounded-2xl border border-border bg-card p-4">
               <div className="text-[14px] font-extrabold text-heading">
                 This throws away your changes
