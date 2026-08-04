@@ -175,6 +175,8 @@ export type AnalyticsEvent =
   | "plan_reopen_conflict" // tapped a saved night with an unsaved one live
   | "plan_reopen_conflict_resolved" // and chose which to keep
   | "plan_reshuffle_confirm_shown" // reshuffle would discard manual changes
+  | "plan_edit_confirm_shown" // Edit would walk away from manual changes
+  | "plan_start_earlier" // nudged a closed-on-arrival night's start back
   | "together_room_create"
   | "together_room_join"
   | "together_swipe"

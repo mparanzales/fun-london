@@ -49,7 +49,14 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
     if (!mapRef.current || pts.length < 2) return;
     let cancelled = false;
     const run = ++runRef.current;
-    (async () => {
+    // 🧨 DEBOUNCED. Each Change or Undo used to fire its own OSRM request the
+    // moment it landed, so cycling a stop four times sent four requests to a
+    // keyless public router — and a throttled response dropped the route to
+    // dashed straight-line hops, so the line visibly changed quality between
+    // taps. Rapid taps now coalesce: markers, the re-frame and the fetch all
+    // wait for a 300 ms lull, the previous line staying drawn throughout, so
+    // one settled arrangement produces exactly one request and one redraw.
+    const settle = setTimeout(async () => {
       const L = (await import("leaflet")).default;
       const m = mapRef.current;
       if (cancelled || !m) return;
@@ -121,9 +128,10 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
         lineCap: "round",
         lineJoin: "round",
       }).addTo(m);
-    })();
+    }, 300);
     return () => {
       cancelled = true;
+      clearTimeout(settle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coordsKey, ready]);
