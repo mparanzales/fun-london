@@ -28,6 +28,7 @@ import {
   Clock,
   Footprints,
   RotateCw,
+  AlertCircle,
   Undo2,
   Check,
   Star,
@@ -37,6 +38,7 @@ import {
   computePlan,
   alternativesFor,
   withinWalkOfAll,
+  closedOnArrival,
   withinBudget,
   relinkSteps,
   isDaytimeHour,
@@ -72,12 +74,20 @@ import {
 import {
   readActivePlan,
   writeActivePlan,
+  readUndoStack,
+  writeUndoStack,
   clearActivePlan,
   claimAnonPlan,
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
 import { nextInCycle } from "@/lib/plan-cycle";
+import {
+  entriesFor,
+  originalStops as originalStopsOf,
+  replacedCount as countReplaced,
+  canUndo as canUndoFrom,
+} from "@/lib/plan-history";
 import { SwipeStop } from "./swipe-stop";
 import {
   WhenPicker,
@@ -265,6 +275,9 @@ type EditedNight = {
   cycle: Record<number, string[]>;
 };
 
+/** How many replacements Undo can walk back through. */
+const UNDO_DEPTH = 20;
+
 export function PlanFlow({
   venues,
   authUserId,
@@ -381,6 +394,7 @@ export function PlanFlow({
   // night generated ten seconds earlier — a wrong dimension, which this file
   // argues elsewhere is worse than a missing one.
   const standDown = useCallback(() => {
+    setConfirmReshuffle(false);
     setActive(null);
     anonOriginRef.current = false;
     // The replacement history belongs to the night being stood down.
@@ -407,6 +421,13 @@ export function PlanFlow({
   // duplicate is permanent. The button is the only signal a reopened night is
   // already saved, so it must not guess.
   const [savedListLoaded, setSavedListLoaded] = useState(false);
+  // 🧨 The load FAILED, as distinct from "not back yet". Save is disabled on a
+  // reopened night until the list is known, because guessing wrong writes a
+  // permanent duplicate into an insert-only table — but a disabled button with
+  // no message is indistinguishable from a broken one, and loadSavedPlans only
+  // re-runs when authUserId changes, so it stayed that way for the whole
+  // mount. The user gets told, and gets a way to try again.
+  const [savedListFailed, setSavedListFailed] = useState(false);
 
   // Current time, set AFTER mount so the open-now plan filter can't cause an
   // SSR/client hydration mismatch: the server renders fail-open (when=undefined),
@@ -505,7 +526,10 @@ export function PlanFlow({
   // Built once here and used by both the render and the handlers, so the list
   // a user is offered is provably the list the tap picks from.
   const buildOptions = useCallback(
-    (forStops: { venue: Venue; role: PlanRole }[]): Venue[][] => {
+    (
+      forStops: { venue: Venue; role: PlanRole }[],
+      opts?: { ignoreHours?: boolean },
+    ): Venue[][] => {
       const effectiveBudget = active?.source === "saved" ? "Any" : budget;
       const inBudget = venues.filter((v) =>
         withinBudget(v.price, effectiveBudget),
@@ -524,18 +548,27 @@ export function PlanFlow({
           vibe,
           budget: effectiveBudget,
           daypart: active ? active.base.daypart : computed.daypart,
-          when: nightWhen,
+          // Dropping the clock disables both hours checks, which is exactly
+          // what the diagnosis above needs to isolate them.
+          when: opts?.ignoreHours ? undefined : nightWhen,
           tasteScores,
         },
       );
-      // Re-offer the stop's ORIGINAL venue when it is still walkable with the
+      // Re-offer the stop's venue from the night's BASE when it is still
+      // walkable with the
       // neighbours as they now stand. Without it a replacement is one-way: the
       // current venue is excluded from its own list, so cycling could never
       // bring back what you started with. Tested with the SAME predicate the
       // list was built with, so the two cannot disagree.
       //
-      // 🧨 Tested with `withinWalkOfAll` against the ADJACENT stops — the same
-      // predicate the list itself was built with. An earlier version used the
+      // 🧨 Tested with `withinWalkOfAll` against the ADJACENT stops — the walk
+      // rule only, which is NO LONGER full parity with the list. The list is
+      // now built with walk PLUS open-at-arrival PLUS the later-stop rule, so
+      // cycling can put back a venue that is shut when you get there. That is
+      // deliberate: the original must stay reachable or a replacement is
+      // one-way, and the closed-stop notice covers the case out loud. Do not
+      // read this as "the two agree" — they do not, and the exemption is the
+      // point. An earlier version used the
       // looser withinWalkOfAny over every other stop, so the one venue added
       // here by hand could have been the single option that broke the walk.
       //
@@ -613,11 +646,114 @@ export function PlanFlow({
     };
   }, [active, computed, nightWhen, stops]);
 
-  // Compared against the un-swapped base of whichever night is on screen.
-  const hasReplacements = display.steps.some(
-    (s, i) =>
-      s.venue.id !== (active ? active.base.steps : computed.steps)[i]?.venue.id,
+  // Stops that will be SHUT when the user gets there. A replacement moves
+  // every later arrival, and undo restores an arrangement that was valid when
+  // it was made — either can leave a stop the user KEPT closed. Offering only
+  // open candidates is half the job; saying so is the other half.
+  //
+  // NOT from clock drift: `now` is sampled once at mount and never ticks, so
+  // sitting on the page cannot trigger this. An earlier version of this
+  // comment claimed it could, which would have sent the next reader looking
+  // for a bug in the wrong place.
+  const closedStops = closedOnArrival(display.steps);
+
+  // 🧨 Memoised, and computed ONCE for all stops. The diagnosis below called
+  // buildOptions per empty stop and was itself called twice per stop (the
+  // title attribute and the paragraph), so a full catalogue pass ran four
+  // times for one stop, on every render — the exact pattern the note on
+  // `alternatives` says was removed. Only needed when something is empty.
+  const optionsIgnoringHours = useMemo(
+    () =>
+      alternatives.some((l) => l.length === 0)
+        ? buildOptions(stops, { ignoreHours: true })
+        : [],
+    [alternatives, buildOptions, stops],
   );
+
+  // 🧨 Whether there is an arrangement to go BACK to — not whether the night
+  // differs from its base. Gating on divergence hid a fully restored history:
+  // after a refresh the stored night IS the base, so they matched and the
+  // button never rendered, with the whole stack sitting in state. It also
+  // stranded older entries the moment a cycle returned to the original.
+  const myUndo = entriesFor(undoStack, editKey);
+  // 🧨 THE ORIGINAL IS HELD, NOT DERIVED. Reading it off the deepest history
+  // entry was right until the two things that move that entry: `undoReplace`
+  // pops, so unwinding the last change fell back to the base and reported a
+  // change on a night identical to its original; and the 20-deep cap trims
+  // from the front, so past twenty replacements the deepest entry is simply
+  // not the original any more — and if the trimmed-to arrangement happened to
+  // match the screen, the reshuffle confirm was skipped again, which is the
+  // blocker this was all fixing. Pinned once per night, it cannot drift.
+  const originalRef = useRef<{
+    key: unknown;
+    stops: { venue: Venue; role: PlanRole }[];
+  } | null>(null);
+  if (originalRef.current?.key !== editKey) {
+    originalRef.current = { key: editKey, stops: baseStops };
+  }
+  // 🧨 THE NIGHT AS IT STARTED, which after a refresh is NOT `base`. The
+  // persist effect writes `display`, so a restored night's base IS the
+  // replaced arrangement — measuring against it reported zero replacements on
+  // a night with two, which meant "Try another combination" skipped its own
+  // confirm card and destroyed a restored history with no warning. Undoing on
+  // such a night inverted it the other way, claiming a change had been made
+  // when one had just been taken back. The deepest history entry is the
+  // arrangement before the first replacement, which is exactly the original.
+  // On a restored night the base IS the replaced arrangement, so the deepest
+  // stored entry is the better answer when there is one; the pin covers every
+  // case after that.
+  const original = originalStopsOf(
+    myUndo,
+    originalRef.current?.stops ?? baseStops,
+  );
+  const canUndo = canUndoFrom(myUndo, stops);
+
+  // How many stops the user has changed by hand — the thing a reshuffle would
+  // throw away, and the only honest number to put in front of them.
+  const replacedCount = countReplaced(stops, original);
+  const hasReplacements = replacedCount > 0;
+
+  // Why a stop has nothing to offer. Absence is not an explanation, and the
+  // two causes want different answers from the user.
+  // 🧨 DERIVED FROM WHAT ACTUALLY EMPTIED THE LIST, not from the stop's
+  // position. The first version read the index and asserted walkability, so a
+  // stop with nothing open at its arrival was told its neighbours were too far
+  // apart — a false cause, and it pointed at an action that would not have
+  // helped. Re-running the same query without the clock separates the two: if
+  // dropping opening hours produces options, hours are the reason.
+  // The single line under a stop, or null when there is nothing to say. A shut
+  // stop wins over a thin option list, because it is the more urgent fact.
+  const stopNotice = (i: number): string | null => {
+    const canChange = (alternatives[i]?.length ?? 0) > 0;
+    if (closedStops.includes(i)) {
+      return canChange
+        ? "Closed by the time you'd get here. Change it."
+        : // 🧨 No clock promise. "…rebuilds from the time it is now" is false
+          // whenever `when` is "custom" — which `activate` sets for any
+          // restored night with a pinned start — and for a restored evening
+          // night viewed in daylight, where resolveTiming returns 19:00.
+          // Naming the control is true in every case; naming the clock was
+          // not.
+          "Closed by the time you'd get here, and nothing open fits this slot. Try another combination below.";
+    }
+    return canChange ? null : noOptionsReason(i);
+  };
+
+  const noOptionsReason = (i: number): string => {
+    const withoutHours = optionsIgnoringHours[i] ?? [];
+    if (withoutHours.length > 0) {
+      // Both hours rules are disabled together by `ignoreHours`, so this
+      // covers two causes: the candidate is shut when you reach it, or it
+      // would push a LATER stop past closing. The wording has to be true of
+      // both, so it names the clock rather than a specific venue.
+      return "Nothing else here works with your timings. Try an earlier start.";
+    }
+    const total = stops.length;
+    if (total > 2 && i > 0 && i < total - 1) {
+      return "Nothing else fits between these two and stays walkable. Change one of the stops either side first.";
+    }
+    return "Nothing else nearby fits this slot right now. Try a different area or vibe.";
+  };
 
   // Editorial eyebrow, same convention as the Explore header: 06:00–17:59 reads
   // "today,", 18:00–05:59 "tonight,". `now` is null until mount, so SSR + first
@@ -657,6 +793,7 @@ export function PlanFlow({
       console.error("[plans] load failed:", error);
       savedListLoadedRef.current = false;
       setSavedListLoaded(false);
+      setSavedListFailed(true);
       return;
     }
     // 🧨 The rows FIRST, then the flag. React 18 batches this continuation so
@@ -667,6 +804,7 @@ export function PlanFlow({
     setSavedPlans((data as SavedPlanRow[]) ?? []);
     savedListLoadedRef.current = true;
     setSavedListLoaded(true);
+    setSavedListFailed(false);
   }, [authUserId]);
 
   useEffect(() => {
@@ -682,9 +820,11 @@ export function PlanFlow({
     // the prop bag the legacy plan_save already sent, so a dashboard can be
     // migrated without losing a dimension. No title, no venue names, no ids.
     // Stops that differ from the night this started as.
-    const swapCount = stops.filter(
-      (st, i) => st.venue.id !== baseStops[i]?.venue.id,
-    ).length;
+    // The same measure the rest of the screen uses. Against `baseStops` this
+    // shipped `swapped: 0` for a restored night with two replacements, and
+    // `swapped: 1` after undoing on one — a wrong dimension, on the conversion
+    // event, which this file argues elsewhere is worse than a missing one.
+    const swapCount = replacedCount;
     const mode: SaveMode = alreadySaved
       ? "duplicate"
       : swapCount > 0
@@ -806,6 +946,137 @@ export function PlanFlow({
   // catalogue, so there is a single place where a stale venue id is handled.
   const owner = authUserId ?? null;
 
+  // ── Undo history, across a refresh and a walk to a venue page ────────
+  //
+  // The replacement survived those trips and the history did not, so a stop
+  // you changed became permanent the moment you tapped through to check it —
+  // and getting the original back meant cycling through up to eight unlabelled
+  // options. The stack is keyed to the night's own venue ids, so a history can
+  // only ever be replayed onto the night it was made on.
+  // 🧨 SIGNED WITH THE NIGHT'S IDENTITY, NOT ITS CURRENT STOPS. Signing with
+  // the base venue ids looked right and made the whole feature a no-op that
+  // also DESTROYED what it was storing: the persist effect writes `display`,
+  // so on the next mount `activate` makes the replaced arrangement the new
+  // base and the signature no longer matches what was stored. The read was
+  // rejected, then the write effect ran with the new signature and an empty
+  // stack and removed the key. History was unreachable when it existed and
+  // erased when it was looked for. `createdAt` is stamped once per generated
+  // night and carried through every re-persist, so it survives replacements —
+  // which is exactly what a history has to be keyed on.
+  //
+  // A legacy-stash night has no `plan`, and on that mount the generated stamp
+  // is empty, so `baseSig` is "" and both effects below no-op: undo works in
+  // memory and does not persist. An acceptable degradation for a path that
+  // exists only to carry someone across one deploy, but not a mystery.
+  const baseSig = active?.plan?.createdAt ?? genStampRef.current.at;
+
+  // 🧨 THIS COMPONENT CANNOT OBSERVE THE SIGN-OUT TRANSITION, and must not
+  // pretend to. `authUserId` is a server prop from app/(main)/plan/page.tsx,
+  // inside the branch that has already returned <AnonPlanFlow/> when there is
+  // no user — so `owner` is a non-null string for the whole mount and never
+  // flips to null. A real sign-out calls router.refresh(), the server page
+  // re-renders into the anon branch, and PlanFlow UNMOUNTS.
+  //
+  // An earlier version of this file carried a uuid->null stand-down effect
+  // here, with fifteen lines explaining the cross-user bleed it prevented. It
+  // could not fire: the guard it depended on was unreachable by construction.
+  // A defence that cannot run is worse than none, because the comment stops
+  // the next person looking for the real one — which is the sweep in
+  // components/auth-user-context.tsx, on the auth subscription, where the
+  // transition is actually visible.
+  //
+  // What remains, and is documented rather than defended here: a still-mounted
+  // PlanFlow keeps `owner = A` through a cross-tab sign-out or a session
+  // expiry, so the next dep change re-persists A's night under A's OWN key
+  // after the sweep cleared it. Owner-scoped, so it is not a bleed onto the
+  // next person; it defeats the sweep for that account until the page reloads.
+
+  // Which night's stored history this mount has already reconciled.
+  const undoRestoredForRef = useRef<string | null>(null);
+  // 🧨 Has THIS session ever written a history for this night? The token below
+  // orders the write after the READ, not after the restore has landed: in the
+  // commit where the layout effect reads and calls setUndoStack, this passive
+  // effect still sees the old empty array, and empty means removeItem. It
+  // survived on React flushing passive effects before the re-render — an
+  // ordering accident — and did NOT survive when the rehydrate came back empty
+  // because a venue had left the catalogue, which deleted a history that a
+  // later mount with a complete catalogue could have used.
+  const undoWrittenRef = useRef(false);
+  useIsomorphicLayoutEffect(() => {
+    if (venues.length === 0 || baseSig === "") return;
+    const token = `${owner ?? "anon"}:${baseSig}`;
+    if (undoRestoredForRef.current === token) return;
+    undoRestoredForRef.current = token;
+    const stored = readUndoStack(owner, baseSig);
+    if (stored.length === 0) return;
+    // Rehydrate against the catalogue; a stop whose venue has gone makes that
+    // entry unrestorable, so the history stops there rather than restoring a
+    // night with a hole in it.
+    const rebuilt: EditedNight[] = [];
+    for (const entry of stored) {
+      const stops = entry.stops.map((st) => ({
+        venue: venueById.get(st.venueId) ?? venueBySlug.get(st.slug),
+        role: st.role as PlanRole,
+      }));
+      // A stop whose venue has left the catalogue makes THIS entry
+      // unrestorable. Keeping the run adjacent to the HEAD matters: breaking
+      // here kept the oldest prefix, so one bad entry mid-stack silently threw
+      // away every newer arrangement and a single Undo tap jumped back
+      // several replacements at once.
+      if (stops.some((st) => !st.venue)) {
+        rebuilt.length = 0; // restart the run; the head is what Undo reaches
+        continue;
+      }
+      rebuilt.push({
+        key: editKey,
+        stops: stops as { venue: Venue; role: PlanRole }[],
+        cycle: entry.cycle ?? {},
+      });
+    }
+    if (rebuilt.length > 0) {
+      setUndoStack(rebuilt);
+      // 🧨 RE-PIN to the restored history's deepest entry. The pin is seeded
+      // from `baseStops`, and on a restored night that is the REPLACED
+      // arrangement — so undoing back to empty fell through to it and reported
+      // two changes on a night exactly as it started, shipping swapped: 2 on
+      // the save event. The pin has to follow the oldest arrangement we know
+      // of, not the one that happens to be persisted.
+      originalRef.current = { key: editKey, stops: rebuilt[0].stops };
+      // Seeded here, so undoing a RESTORED history back to empty still clears
+      // the key rather than leaving a stale one behind.
+      undoWrittenRef.current = true;
+    }
+  }, [owner, baseSig, venues.length, editKey, venueById, venueBySlug]);
+
+  useEffect(() => {
+    if (baseSig === "") return;
+    // 🧨 NOT UNTIL THE RESTORE HAS RUN FOR THIS NIGHT. This effect fires on the
+    // first commit with an empty in-memory stack, and writeUndoStack treats
+    // empty as removeItem — so it deleted the very history the restore was
+    // about to read, before it read it. The key is per-owner, so that delete
+    // took any night's history with it.
+    if (undoRestoredForRef.current !== `${owner ?? "anon"}:${baseSig}`) return;
+    const mineNow = entriesFor(undoStack, editKey);
+    // Never CLEAR a key this session has not written. A genuine undo-to-empty
+    // still clears, because restoring a history seeds the latch too.
+    if (mineNow.length === 0 && !undoWrittenRef.current) return;
+    if (mineNow.length > 0) undoWrittenRef.current = true;
+    writeUndoStack(
+      owner,
+      baseSig,
+      undoStack
+        .filter((e) => e.key === editKey)
+        .map((e) => ({
+          stops: e.stops.map((st) => ({
+            venueId: st.venue.id,
+            slug: st.venue.slug,
+            role: st.role,
+          })),
+          cycle: e.cycle,
+        })),
+    );
+  }, [undoStack, owner, baseSig, editKey]);
+
   const activate = useCallback(
     (np: NightPlan): boolean => {
       const { stops, dropped } = hydrateStops<Venue>(np, {
@@ -901,6 +1172,9 @@ export function PlanFlow({
       setEdited(null);
       editedRef.current = null;
       setUndoStack([]);
+      // A different night is on screen now; the card that belonged to the last
+      // one must not arrive with it.
+      setConfirmReshuffle(false);
       setVibe(np.vibe);
       setBudget(np.budget);
       // The night's own daypart, so "Try another combination" regenerates
@@ -991,6 +1265,8 @@ export function PlanFlow({
   // A saved row the user tapped while an unsaved night was still in the active
   // slot. Held until they choose, rather than resolved by guessing.
   const [pendingSaved, setPendingSaved] = useState<SavedPlanRow | null>(null);
+  // Shown when "Try another combination" would discard manual replacements.
+  const [confirmReshuffle, setConfirmReshuffle] = useState(false);
 
   const openSaved = (row: SavedPlanRow) => {
     // 🧨 REOPENING USED TO DESTROY AN UNSAVED NIGHT IN SILENCE. Two taps from a
@@ -1376,10 +1652,14 @@ export function PlanFlow({
     setEdited(nextState);
     // Where we came FROM, so Undo restores this exact arrangement — which was
     // itself walkable, so undo can never land on a night that is not.
-    setUndoStack((stack) => [
-      ...stack,
-      { key: editKey, stops: currentStops, cycle: currentCycle },
-    ]);
+    setUndoStack((stack) =>
+      // Capped: nobody needs a 200-deep undo, and the whole array is
+      // re-stringified on every tap and kept for the night's 12h TTL.
+      [
+        ...stack,
+        { key: editKey, stops: currentStops, cycle: currentCycle },
+      ].slice(-UNDO_DEPTH),
+    );
     setSaveState("idle");
     // `method` is passed in by the caller, never derived from `dir`: a LEFT
     // swipe and the Change button's default argument both produce dir === 1.
@@ -1404,7 +1684,7 @@ export function PlanFlow({
     // rather than refusing to act on them. Returning early left a stale head
     // sitting on top of real history for good: the Undo button rendered and
     // did nothing, permanently, with no way for the user to clear it.
-    const mine = undoStack.filter((e) => e.key === editKey);
+    const mine = entriesFor(undoStack, editKey);
     const prev = mine[mine.length - 1];
     if (!prev) return;
     setUndoStack(mine.slice(0, -1));
@@ -1422,7 +1702,61 @@ export function PlanFlow({
     editedRef.current = prev;
     setEdited(prev);
     setSaveState("idle");
-    track("plan_swap_undo", { remaining: undoStack.length - 1 });
+    // 🧨 An undo answers the reshuffle question by making it moot. Without
+    // this the flag survived the card: undo back to zero replacements and the
+    // card unmounts (it renders on `hasReplacements`) while the flag stays
+    // true, so the NEXT replacement made "This throws away your changes"
+    // appear unprompted, greying the reroll until it was dismissed. The card
+    // belongs to the tap that raised it, not to the night.
+    setConfirmReshuffle(false);
+    // The number the user can actually reach, not the raw stack.
+    track("plan_swap_undo", { remaining: myUndo.length - 1 });
+  };
+
+  const doReshuffle = () => {
+    // The card is answered; it must not survive onto the night that replaces
+    // this one, offering to throw away "0 stops".
+    setConfirmReshuffle(false);
+    const nextOffset = offset + 1;
+    const t0 = performance.now();
+    const result = computePlan(venues, planOpts(nextOffset));
+    const duration_ms = Math.round(performance.now() - t0);
+    setSaveState("idle");
+    setEdited(null);
+    editedRef.current = null;
+    setUndoStack([]);
+    // 🧨 Stand down the restored night. Without this the button was
+    // visible but inert on any restored or claimed night: `display`
+    // kept returning the stored plan while `computed` moved on, so
+    // the screen never changed and plan_reshuffle fired anyway —
+    // counting a reshuffle the user never saw.
+    standDown();
+    setOffset(nextOffset);
+    const reshuffleProps = {
+      area: result.area, // resolved walkable pocket
+      areaKind: areaSel.kind, // legacy spelling
+      area_kind: areaSel.kind,
+      vibe,
+      budget,
+      daypart: result.daypart,
+      stops: result.steps.length, // legacy spelling
+      stop_count: result.steps.length,
+      full: result.steps.length === 3,
+      poolStage: result.poolStage, // legacy spelling
+      pool_stage: result.poolStage,
+      poolSize: result.poolSize, // legacy spelling
+      pool_size: result.poolSize,
+      duration_ms,
+      offset: nextOffset, // separates reshuffle failures from first builds
+    };
+    if (result.steps.length === 0) {
+      track("plan_generate_failed", {
+        ...reshuffleProps,
+        reason: "no_result",
+      });
+    } else {
+      track("plan_reshuffle", reshuffleProps);
+    }
   };
 
   // "Near you" — ask the browser for location and keep the night within walking
@@ -1792,7 +2126,7 @@ export function PlanFlow({
           />{" "}
           {fmtHours(display.totalMins)}
         </div>
-        {hasReplacements && (
+        {canUndo && (
           <button
             type="button"
             onClick={undoReplace}
@@ -1816,22 +2150,59 @@ export function PlanFlow({
               <div className="text-[11px] font-extrabold tracking-[0.12em] text-muted-fg uppercase">
                 {s.role}
               </div>
-              {(alternatives[i]?.length ?? 0) > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onSwap(i, 1, "button")}
-                  aria-label={`Change the ${s.role} stop`}
-                  className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent"
-                >
-                  <RotateCw
-                    className="w-3.5 h-3.5"
+              {/* 🧨 ALWAYS RENDERED. It used to vanish when a stop had no
+                  options, which reads as a bug rather than as a constraint —
+                  and it can happen for a good reason: a candidate must be
+                  within a short walk of BOTH neighbours, and open when you get
+                  there, so a stop between two distant ones can genuinely have
+                  nothing that fits. Disabled with the reason attached is
+                  honest; absent is not. Same shape the Save button already
+                  uses. */}
+              <button
+                type="button"
+                onClick={() => onSwap(i, 1, "button")}
+                disabled={(alternatives[i]?.length ?? 0) === 0}
+                // The same string the notice shows, so the two cannot
+                // diverge. Not a promise that "start earlier" never appears:
+                // an OPEN stop with no options still falls through to
+                // noOptionsReason, which says it. That case is out of this
+                // PR's scope and is listed in its limitations.
+                title={stopNotice(i) ?? undefined}
+                aria-label={`Change the ${s.role} stop`}
+                className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-accent disabled:text-muted-fg disabled:cursor-default"
+              >
+                <RotateCw className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />
+                Change
+              </button>
+            </div>
+            {/* 🧨 ONE message per stop, replacing two that contradicted. These
+                were two independent paragraphs, so the worst stop read
+                "Nothing else here works with your timings" directly above
+                "Closed by the time you'd get here. Change it, or start
+                earlier" — with Change disabled three lines up and no way to
+                start earlier on this screen at all. Following that instruction
+                meant "← Edit", which stands the night down and empties the
+                undo stack: "adjust one thing" actually meant "throw it away".
+                A reroll DOES work here and is already on the screen, so that
+                is what the copy points at. */}
+            {stopNotice(i) && (
+              <p
+                className={`text-[11px] mb-1.5 leading-relaxed ${
+                  closedStops.includes(i)
+                    ? "font-bold text-accent"
+                    : "text-muted-fg"
+                }`}
+              >
+                {closedStops.includes(i) && (
+                  <AlertCircle
+                    className="w-3.5 h-3.5 inline-block align-[-3px] mr-1"
                     strokeWidth={2}
                     aria-hidden
                   />
-                  Change
-                </button>
-              )}
-            </div>
+                )}
+                {stopNotice(i)}
+              </p>
+            )}
             <SwipeStop
               enabled={(alternatives[i]?.length ?? 0) > 0}
               onSwipe={(dir) => onSwap(i, dir, "swipe")}
@@ -1955,51 +2326,70 @@ export function PlanFlow({
           row is handled. */}
       {
         <div className="px-5 pb-2 flex flex-col gap-2.5">
+          {/* Undo and per-stop Change stay live while the card is open, so
+              this has to re-check: undoing to zero left it asserting work that
+              no longer existed. */}
+          {confirmReshuffle && hasReplacements && (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <div className="text-[14px] font-extrabold text-heading">
+                This throws away your changes
+              </div>
+              <p className="text-[12px] text-muted-fg mt-1 leading-relaxed">
+                You&apos;ve changed{" "}
+                {replacedCount === 1 ? "a stop" : `${replacedCount} stops`} on
+                this night. A new combination replaces all of it, and Undo
+                won&apos;t bring it back.
+              </p>
+              <div className="flex flex-col gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmReshuffle(false);
+                    doReshuffle();
+                  }}
+                  className="h-11 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold"
+                >
+                  Build a new combination
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmReshuffle(false)}
+                  className="h-11 rounded-2xl border-[1.5px] border-border bg-card text-[14px] font-extrabold text-fg"
+                >
+                  Keep my changes
+                </button>
+              </div>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => {
-              const nextOffset = offset + 1;
-              const t0 = performance.now();
-              const result = computePlan(venues, planOpts(nextOffset));
-              const duration_ms = Math.round(performance.now() - t0);
-              setSaveState("idle");
-              setEdited(null);
-              editedRef.current = null;
-              setUndoStack([]);
-              // 🧨 Stand down the restored night. Without this the button was
-              // visible but inert on any restored or claimed night: `display`
-              // kept returning the stored plan while `computed` moved on, so
-              // the screen never changed and plan_reshuffle fired anyway —
-              // counting a reshuffle the user never saw.
-              standDown();
-              setOffset(nextOffset);
-              const reshuffleProps = {
-                area: result.area, // resolved walkable pocket
-                areaKind: areaSel.kind, // legacy spelling
-                area_kind: areaSel.kind,
-                vibe,
-                budget,
-                daypart: result.daypart,
-                stops: result.steps.length, // legacy spelling
-                stop_count: result.steps.length,
-                full: result.steps.length === 3,
-                poolStage: result.poolStage, // legacy spelling
-                pool_stage: result.poolStage,
-                poolSize: result.poolSize, // legacy spelling
-                pool_size: result.poolSize,
-                duration_ms,
-                offset: nextOffset, // separates reshuffle failures from first builds
-              };
-              if (result.steps.length === 0) {
-                track("plan_generate_failed", {
-                  ...reshuffleProps,
-                  reason: "no_result",
+              // 🧨 ASK FIRST when there is deliberate work to lose. This is the
+              // most prominent control on the screen, it sits directly above
+              // Save, and it wiped every manual replacement with no warning —
+              // the undo stack is cleared in the same frame, so there was no
+              // way back.
+              if (hasReplacements && !confirmReshuffle) {
+                setConfirmReshuffle(true);
+                track("plan_reshuffle_confirm_shown", {
+                  replaced: replacedCount,
                 });
-              } else {
-                track("plan_reshuffle", reshuffleProps);
+                return;
               }
+              doReshuffle();
             }}
-            className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold"
+            // 🧨 THE SAME EXPRESSION THE CARD RENDERS ON. Gating the card on
+            // `hasReplacements` while leaving this on `confirmReshuffle` alone
+            // stranded the screen's primary forward action: open the card,
+            // then Undo (or cycle a stop back onto its original, which the
+            // base is deliberately re-offered as) and replacedCount hits zero,
+            // the card unmounts, and the flag stays true with nothing left on
+            // screen to clear it. Three taps to a permanently greyed button —
+            // the same shape as the stale undo entry this file already carries
+            // a note about. Tapping through with zero replacements correctly
+            // falls straight to doReshuffle().
+            disabled={confirmReshuffle && hasReplacements}
+            className="w-full h-12 rounded-2xl border-[1.5px] border-accent text-accent text-[14px] font-extrabold disabled:opacity-50"
           >
             Try another combination{" "}
             <RotateCw
@@ -2030,7 +2420,9 @@ export function PlanFlow({
                 // A reopened saved row before its list has loaded: we cannot
                 // yet tell "already saved" from "new", and guessing wrong
                 // writes a permanent duplicate.
-                (active?.source === "saved" && !savedListLoaded)
+                // Not just "saved" — any night whose already-saved status we
+                // cannot confirm. An unconfirmed live night can duplicate too.
+                !savedListLoaded
               }
               className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold disabled:opacity-70"
             >
@@ -2057,6 +2449,29 @@ export function PlanFlow({
             >
               Sign in to save this night
             </Link>
+          )}
+          {authUserId && !savedListLoaded && !savedListFailed && (
+            <p className="text-[11px] text-muted-fg leading-relaxed text-center">
+              Checking your saved nights, so this doesn&apos;t save twice.
+            </p>
+          )}
+          {authUserId && savedListFailed && (
+            <p className="text-[11px] text-muted-fg leading-relaxed text-center">
+              <AlertCircle
+                className="w-3.5 h-3.5 inline-block align-[-3px] mr-1"
+                strokeWidth={2}
+                aria-hidden
+              />
+              We couldn&apos;t check your saved nights, so Save is off to avoid
+              saving this twice.{" "}
+              <button
+                type="button"
+                onClick={() => void loadSavedPlans()}
+                className="font-extrabold text-accent underline"
+              >
+                Try again
+              </button>
+            </p>
           )}
         </div>
       }

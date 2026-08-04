@@ -21,6 +21,11 @@ import {
   memoryStorage,
   type StorageLike,
   clearAnonPlanKeys,
+  anonPlanKeys,
+  readUndoStack,
+  writeUndoStack,
+  clearUndoStack,
+  undoStackKey,
   ANON_PLAN_STASH_KEY,
   ANON_RESULT_KEY,
 } from "@/lib/active-plan";
@@ -366,6 +371,13 @@ describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
       "no isSignOutTransition block in auth-user-context",
     ).not.toBeNull();
     expect(block![1]).toContain("clearAnonPlanKeys()");
+    // 🧨 The newest line was the only one unpinned, so it could be refactored
+    // away with the suite green — which is exactly what this test exists to
+    // prevent, and it was added in the same commit as the line.
+    // The ARGUMENT is the load-bearing part: clearUndoStack(nextId) clears the
+    // anon key instead of the departing owner's, and a bare-name pin stays
+    // green through that. Same shape as the line below.
+    expect(block![1]).toContain("clearUndoStack(prevIdRef.current)");
     // The departing account's OWN slot too. Without this line the fix for it
     // could be refactored away with the suite green — the same "green test,
     // live data left behind" shape this describe block exists for.
@@ -652,29 +664,55 @@ describe("claimAnonPlan · sign in and keep the night you just built", () => {
     expect(readActivePlan("user-a", store)?.title).toBe("Built signed out");
   });
 
+  it("🧨 anonPlanKeys() lists EVERY anon key the module defines", () => {
+    // 🧨 The behavioural tests below derive from anonPlanKeys(), so they cannot
+    // notice a key that was never added to it — delete an entry and they stay
+    // green, because the check shrinks with the code. Measured: dropping the
+    // undo key from the list left all 39 passing. This reads the module's
+    // source instead, so the two cannot shrink together.
+    const src = readFileSync(
+      fileURLToPath(new URL("../active-plan.ts", import.meta.url)),
+      "utf8",
+    )
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    // Every anon-scoped storage key this module defines, by its literal.
+    const defined = [...src.matchAll(/=\s*"(fl[.:][^"]+)"/g)].map((m) => m[1]);
+    expect(defined.length).toBeGreaterThan(2);
+    const listed = anonPlanKeys().join("|");
+    for (const key of defined) {
+      expect(
+        listed,
+        `"${key}" is defined in active-plan.ts but is not in anonPlanKeys(). The next person on this browser inherits it`,
+      ).toContain(key);
+    }
+  });
+
   it("🧨 leaves NO copy behind for the next person on this browser", () => {
     // Asserted over EVERY anon-scoped key, not just the store's own slot.
     // The narrow version of this test passed while a second anon key — added
     // elsewhere, for the signed-out result screen — survived the claim, the
     // sign-out, and was rehydrated onto the next visitor. A guard that only
     // checks the key it owns cannot see the key it does not.
+    // 🧨 Over anonPlanKeys(), not over a list this test maintains. The
+    // hand-written version stayed green when a fourth anon key was added and
+    // not swept — the same class of miss it was written to prevent.
     writeActivePlan(null, plan(), store);
-    store.setItem(ANON_PLAN_STASH_KEY, '{"stops":[]}');
-    store.setItem(ANON_RESULT_KEY, '{"v":1,"payload":{}}');
+    for (const k of anonPlanKeys()) store.setItem(k, '{"seeded":true}');
+    writeActivePlan(null, plan(), store); // real entry in the canonical slot
     claimAnonPlan("user-a", store);
     expect(readActivePlan(null, store)).toBeNull();
-    for (const k of [ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+    for (const k of anonPlanKeys()) {
       expect(store.getItem(k), `${k} survived the claim`).toBeNull();
     }
   });
 
   it("🧨 clearAnonPlanKeys wipes every anon key, for sign-out", () => {
+    for (const k of anonPlanKeys()) store.setItem(k, '{"seeded":true}');
     writeActivePlan(null, plan(), store);
-    store.setItem(ANON_PLAN_STASH_KEY, '{"stops":[]}');
-    store.setItem(ANON_RESULT_KEY, '{"v":1,"payload":{}}');
     clearAnonPlanKeys(store);
     expect(readActivePlan(null, store)).toBeNull();
-    for (const k of [ANON_PLAN_STASH_KEY, ANON_RESULT_KEY]) {
+    for (const k of anonPlanKeys()) {
       expect(store.getItem(k), `${k} survived sign-out`).toBeNull();
     }
   });
@@ -709,5 +747,133 @@ describe("claimAnonPlan · sign in and keep the night you just built", () => {
   it("marks the claimed night's source so the transfer is measurable", () => {
     writeActivePlan(null, plan({ source: "generated" }), store);
     expect(claimAnonPlan("user-a", store)?.source).toBe("anon");
+  });
+});
+
+describe("the undo store", () => {
+  let store: ReturnType<typeof memoryStorage>;
+  beforeEach(() => {
+    store = memoryStorage();
+  });
+  const entry = (ids: string[]) => ({
+    stops: ids.map((id) => ({ venueId: id, slug: id, role: "Start" })),
+    cycle: {},
+  });
+
+  it("🧨 round-trips: written under a signature, read back under the same one", () => {
+    // This is the test whose absence let the whole feature ship as a no-op.
+    // The signature was derived from the night's CURRENT stops, which move
+    // when a stop is replaced, so nothing written was ever readable again —
+    // and the failed read then deleted it. Green the entire time, because
+    // nothing exercised the round trip.
+    writeUndoStack("user-a", "night-1", [entry(["v1", "v2"])], store);
+    const back = readUndoStack("user-a", "night-1", store);
+    expect(back).toHaveLength(1);
+    expect(back[0].stops.map((s) => s.venueId)).toEqual(["v1", "v2"]);
+  });
+
+  it("🧨 refuses a history belonging to a different night", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    expect(readUndoStack("user-a", "night-2", store)).toEqual([]);
+  });
+
+  it("🧨 does not hand one owner's history to another", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    expect(readUndoStack("user-b", "night-1", store)).toEqual([]);
+    expect(readUndoStack(null, "night-1", store)).toEqual([]);
+  });
+
+  it("an empty stack clears the key rather than storing nothing", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    writeUndoStack("user-a", "night-1", [], store);
+    expect(store.getItem(undoStackKey("user-a"))).toBeNull();
+  });
+
+  it("drops entries with an unusable stop rather than restoring a hole", () => {
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [
+          entry(["v1"]),
+          { stops: [{ venueId: "", slug: "", role: "Start" }], cycle: {} },
+        ],
+      }),
+    );
+    const back = readUndoStack("user-a", "night-1", store);
+    expect(back).toHaveLength(1);
+  });
+
+  it("refuses an empty slug on its own, not only an empty id", () => {
+    // The pair of guards was untestable while the fixture zeroed both fields:
+    // either one could have been deleted and the suite stayed green.
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [
+          { stops: [{ venueId: "v1", slug: "", role: "Start" }], cycle: {} },
+          { stops: [{ venueId: "", slug: "s2", role: "Start" }], cycle: {} },
+          { stops: [{ venueId: "v3", slug: "s3", role: "Start" }], cycle: {} },
+        ],
+      }),
+    );
+    expect(readUndoStack("user-a", "night-1", store)).toHaveLength(1);
+  });
+
+  it("accepts an entry whose cycle is absent, as the rotation defaults it", () => {
+    // `isCycle` returns true for null/undefined. Nothing covered that branch:
+    // delete the line and every absent-cycle entry is dropped, silently, while
+    // the suite stays green.
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [{ stops: [{ venueId: "v1", slug: "s1", role: "Start" }] }],
+      }),
+    );
+    expect(readUndoStack("user-a", "night-1", store)).toHaveLength(1);
+  });
+
+  it("🧨 refuses an unknown role and a malformed cycle", () => {
+    // localStorage is a trust boundary. An unknown role was cast straight to
+    // PlanRole; a non-array cycle throws inside the rotation and kills Change.
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({
+        v: 1,
+        sig: "night-1",
+        entries: [
+          {
+            stops: [{ venueId: "v1", slug: "v1", role: "Nonsense" }],
+            cycle: {},
+          },
+          { stops: [{ venueId: "v2", slug: "v2", role: "Start" }], cycle: 7 },
+          { stops: [{ venueId: "v3", slug: "v3", role: "Start" }], cycle: {} },
+        ],
+      }),
+    );
+    const back = readUndoStack("user-a", "night-1", store);
+    expect(back).toHaveLength(1);
+    expect(back[0].stops[0].venueId).toBe("v3");
+  });
+
+  it("survives corrupt or foreign-version JSON without throwing", () => {
+    store.setItem(undoStackKey("user-a"), "{not json");
+    expect(readUndoStack("user-a", "night-1", store)).toEqual([]);
+    store.setItem(
+      undoStackKey("user-a"),
+      JSON.stringify({ v: 99, sig: "night-1", entries: [] }),
+    );
+    expect(readUndoStack("user-a", "night-1", store)).toEqual([]);
+  });
+
+  it("🧨 clearUndoStack takes the departing owner's history with them", () => {
+    writeUndoStack("user-a", "night-1", [entry(["v1"])], store);
+    clearUndoStack("user-a", store);
+    expect(readUndoStack("user-a", "night-1", store)).toEqual([]);
   });
 });
