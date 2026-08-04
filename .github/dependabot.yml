@@ -40,3 +40,30 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: react-dom
         update-types: ["version-update:semver-major"]
+
+      # @types/node's major tracks the Node major it DESCRIBES, so it must
+      # match the runtime, not lead it. Dependabot has now proposed 26 three
+      # times (#179, #203) while we run Node 22 everywhere: engines "22.x", CI
+      # node-version 22, Vercel 22.x. #182 rejected it and explained why —
+      # types ahead of the runtime means TypeScript accepts APIs that do not
+      # exist when the code runs: green typecheck, green CI, crash in prod.
+      # Safe to ignore per this file's own rule: it is types-only, ships no
+      # runtime code, and therefore carries no CVE surface to suppress.
+      # When Node moves to 24, raise the pin and drop this entry together.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+      # eslint-config-next's major tracks the NEXT major. next itself is
+      # already ignored for majors above, so allowing this one through just
+      # produces a red PR every release (#202: 15.5.18 -> 16.2.12 while the
+      # app is on Next 15.5.22). Dev-only lint config, no runtime, no CVE
+      # surface. Unpin this in the same commit as the Next 16 migration.
+      - dependency-name: eslint-config-next
+        update-types: ["version-update:semver-major"]
+
+      # TypeScript majors are a migration, not a bump. #205 (5.9 -> 6.0) fails
+      # typecheck with TS2882 on every CSS side-effect import (globals.css,
+      # leaflet.css) — TS 6 needs an ambient module declaration those imports
+      # do not have yet. Dev-only compiler, no runtime, no CVE surface.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
