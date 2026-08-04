@@ -56,79 +56,91 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
     // taps. Rapid taps now coalesce: markers, the re-frame and the fetch all
     // wait for a 300 ms lull, the previous line staying drawn throughout, so
     // one settled arrangement produces exactly one request and one redraw.
-    const settle = setTimeout(async () => {
-      const L = (await import("leaflet")).default;
-      const m = mapRef.current;
-      if (cancelled || !m) return;
+    // No delay on the very first draw — there is nothing on the map to keep
+    // stable yet, and 300 ms of empty bordered box reads as broken.
+    const settle = setTimeout(
+      async () => {
+        const L = (await import("leaflet")).default;
+        const m = mapRef.current;
+        if (cancelled || !m) return;
 
-      const latlngs = pts.map(
-        (p) => [p.venue.lat, p.venue.lng] as [number, number],
-      );
+        const latlngs = pts.map(
+          (p) => [p.venue.lat, p.venue.lng] as [number, number],
+        );
 
-      // Markers are cheap and exact, so they swap immediately.
-      stopLayerRef.current?.remove();
-      const group = L.layerGroup().addTo(m);
-      stopLayerRef.current = group;
-      pts.forEach((p, i) => {
-        const icon = L.divIcon({
-          className: "",
-          html:
-            `<div style="width:26px;height:26px;border-radius:50%;background:${ACCENT};` +
-            `color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;` +
-            `font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)">${i + 1}</div>`,
-          iconSize: [26, 26],
-          iconAnchor: [13, 13],
-        });
-        L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(group);
-      });
-      m.fitBounds(L.latLngBounds(latlngs).pad(0.3));
-
-      // 🧨 The OLD line stays drawn while the new one is fetched. Clearing it
-      // first is what produced the flash: a blank map, then a dashed
-      // straight-line guess, then the real route — three states for one tap.
-      // Real walking geometry from the keyless OSRM foot service on OSM data.
-      let line = latlngs;
-      let dashed = true;
-      try {
-        const coords = pts
-          .map((p) => `${p.venue.lng},${p.venue.lat}`)
-          .join(";");
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 3000);
-        let data: unknown = null;
+        // 🧨 The OLD line stays drawn while the new one is fetched. Clearing it
+        // first is what produced the flash: a blank map, then a dashed
+        // straight-line guess, then the real route — three states for one tap.
+        // Real walking geometry from the keyless OSRM foot service on OSM data.
+        let line = latlngs;
+        let dashed = true;
         try {
-          const res = await fetch(
-            `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coords}?overview=full&geometries=geojson`,
-            { signal: ctrl.signal },
-          );
-          data = res.ok ? await res.json() : null;
-        } finally {
-          // Cleared on the throw path too, or every superseded fetch leaves a
-          // live abort timer behind.
-          clearTimeout(t);
+          const coords = pts
+            .map((p) => `${p.venue.lng},${p.venue.lat}`)
+            .join(";");
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 3000);
+          let data: unknown = null;
+          try {
+            const res = await fetch(
+              `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coords}?overview=full&geometries=geojson`,
+              { signal: ctrl.signal },
+            );
+            data = res.ok ? await res.json() : null;
+          } finally {
+            // Cleared on the throw path too, or every superseded fetch leaves a
+            // live abort timer behind.
+            clearTimeout(t);
+          }
+          const geo = (
+            data as {
+              routes?: { geometry?: { coordinates?: unknown } }[];
+            } | null
+          )?.routes?.[0]?.geometry?.coordinates;
+          if (Array.isArray(geo) && geo.length > 1) {
+            line = geo.map((c: [number, number]) => [c[1], c[0]]);
+            dashed = false;
+          }
+        } catch {
+          // unreachable / slow / aborted → straight-line fallback
         }
-        const geo = (
-          data as { routes?: { geometry?: { coordinates?: unknown } }[] } | null
-        )?.routes?.[0]?.geometry?.coordinates;
-        if (Array.isArray(geo) && geo.length > 1) {
-          line = geo.map((c: [number, number]) => [c[1], c[0]]);
-          dashed = false;
-        }
-      } catch {
-        // unreachable / slow / aborted → straight-line fallback
-      }
-      // A later tap has already started its own fetch; that one owns the line.
-      if (cancelled || runRef.current !== run || !mapRef.current) return;
-      routeLayerRef.current?.remove();
-      routeLayerRef.current = L.polyline(line, {
-        color: ACCENT,
-        weight: dashed ? 3 : 4,
-        opacity: 0.95,
-        ...(dashed ? { dashArray: "2 8" } : {}),
-        lineCap: "round",
-        lineJoin: "round",
-      }).addTo(m);
-    }, 300);
+        // A later tap has already started its own fetch; that one owns the line.
+        if (cancelled || runRef.current !== run || !mapRef.current) return;
+        // 🧨 ONE ATOMIC REDRAW. Markers used to move (and the frame re-fit)
+        // inside the settle while the line waited on OSRM — so for up to three
+        // seconds the map showed numbered pins at the NEW stops with a route
+        // drawn through the OLD ones, pins visibly off the line. A pin off the
+        // line reads as wrong data, not as loading. The old markers, frame and
+        // line now stay coherent together until the new set is ready, and swap
+        // in one commit.
+        stopLayerRef.current?.remove();
+        const group = L.layerGroup().addTo(m);
+        stopLayerRef.current = group;
+        pts.forEach((p, i) => {
+          const icon = L.divIcon({
+            className: "",
+            html:
+              `<div style="width:26px;height:26px;border-radius:50%;background:${ACCENT};` +
+              `color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;` +
+              `font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)">${i + 1}</div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 13],
+          });
+          L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(group);
+        });
+        m.fitBounds(L.latLngBounds(latlngs).pad(0.3));
+        routeLayerRef.current?.remove();
+        routeLayerRef.current = L.polyline(line, {
+          color: ACCENT,
+          weight: dashed ? 3 : 4,
+          opacity: 0.95,
+          ...(dashed ? { dashArray: "2 8" } : {}),
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(m);
+      },
+      stopLayerRef.current ? 300 : 0,
+    );
     return () => {
       cancelled = true;
       clearTimeout(settle);
