@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Footprints } from "lucide-react";
 import { LegalLinks } from "@/components/legal-links";
+import { fetchVenueCount } from "@/lib/queries";
+import { NIGHT_LINE } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: "About",
-  description:
-    "Fun London builds you a night out: two or three independent spots, a short walk apart, in the order you'd do them.",
+  description: NIGHT_LINE,
   alternates: { canonical: "/about" },
 };
 
@@ -70,7 +71,13 @@ const NIGHT = [
   },
 ] as const;
 
-export default function AboutPage() {
+// Static with a daily refresh: the catalogue count must stay true while the
+// publish wave adds venues, and the fetch is cookie-free (static anon client)
+// so this page stays out of the request path.
+export const revalidate = 86400;
+
+export default async function AboutPage() {
+  const venueCount = await fetchVenueCount();
   return (
     <div className="min-h-[100svh] bg-bg text-fg">
       <div className="mx-auto max-w-2xl px-6 pb-16 pt-6 sm:px-8">
@@ -101,8 +108,8 @@ export default function AboutPage() {
               not the place.
             </h1>
             <p className="mt-6 max-w-[36rem] text-[16px] leading-relaxed text-muted-fg sm:text-[17px]">
-              Fun London builds you a night out: two or three independent spots,
-              a short walk apart, in the order you&apos;d do them.
+              Fun London builds you a night out: two or three spots, a short
+              walk apart, in the order you&apos;d do them.
             </p>
           </section>
 
@@ -145,11 +152,12 @@ export default function AboutPage() {
             </ol>
 
             <p className="mt-10 max-w-[36rem] text-[14px] leading-relaxed text-muted-fg">
-              Three entries from the live catalogue, minutes apart on foot.
-              Chosen from <strong className="font-bold text-fg">2,114</strong>{" "}
-              independent venues across{" "}
-              <strong className="font-bold text-fg">67</strong> neighbourhoods,
-              every one photographed.
+              Three real stops, live in the app right now, minutes apart on
+              foot. Chosen from{" "}
+              <strong className="font-bold text-fg">
+                {venueCount.toLocaleString("en-GB")}
+              </strong>{" "}
+              venues across London, every one photographed.
             </p>
           </section>
 

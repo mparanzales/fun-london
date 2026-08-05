@@ -780,10 +780,13 @@ export async function fetchVenuesByTag(
   return (data as VenueCardRow[]).map(mapVenuePreview);
 }
 
-// Total catalogue size — for the hero trust strip ("N independent venues"),
-// so the anonymous teaser can show the real count without fetching the rows.
+// Total catalogue size — for the /about trust strip, so the number stays true
+// while the publish wave grows the catalogue daily (a hardcoded count was 42
+// venues stale within a week of being written). Cookie-free on purpose: /about
+// is a static page, and the anon role can count ids (id is in the card grant,
+// and the filters google_place_id / hidden_at are granted for exactly this).
 export async function fetchVenueCount(): Promise<number> {
-  const supabase = await createClient();
+  const supabase = createStaticAnonClient();
   const { count, error } = await supabase
     .from("venues")
     .select("id", { count: "exact", head: true })

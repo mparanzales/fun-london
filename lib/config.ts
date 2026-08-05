@@ -3,6 +3,12 @@
 // every user-facing "London" in display copy should import from here so
 // the rename is a one-line change.
 
+// The night line: the one-sentence proposition, shared by every metadata and
+// OG surface so the tagline cannot drift into four diverging copies (it was
+// already two casings and two phrasings when this constant was created).
+export const NIGHT_LINE =
+  "Fun London builds you a night out: two or three spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.";
+
 export const CITY = "London";
 
 // One source of truth for the taglines so the masthead, landing and share (OG)

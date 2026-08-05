@@ -1,3 +1,4 @@
+import { NIGHT_LINE } from "@/lib/config";
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -21,8 +22,7 @@ export const metadata: Metadata = {
     default: "Fun London: plan the night, not the place",
     template: "%s · Fun London",
   },
-  description:
-    "fun london builds you a night out: two or three independent spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.",
+  description: NIGHT_LINE,
   manifest: "/manifest.json",
   applicationName: "Fun London",
   // Site-wide sharing defaults; venue/event pages override with their own.
@@ -32,14 +32,12 @@ export const metadata: Metadata = {
     locale: "en_GB",
     url: SITE_URL,
     title: "Fun London: plan the night, not the place",
-    description:
-      "fun london builds you a night out: a walkable two or three stop evening of independent london, the table ready to book in a couple of taps.",
+    description: NIGHT_LINE,
   },
   twitter: {
     card: "summary_large_image",
     title: "Fun London: plan the night, not the place",
-    description:
-      "fun london builds you a night out: a walkable two or three stop evening of independent london, the table ready to book in a couple of taps.",
+    description: NIGHT_LINE,
   },
 };
 
