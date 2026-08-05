@@ -847,7 +847,14 @@ export function VenueDetail({
                     // opened" for reading a menu invents a booking. Same for
                     // a venue class that takes no bookings at all (market,
                     // museum): checking its closing time is not a booking.
-                    if (planHandoff && !venue.menuUrl && isReservable) {
+                    // And when a partner platform exists, Reserve is the
+                    // booking door — a website visit is then just a look.
+                    if (
+                      planHandoff &&
+                      !venue.menuUrl &&
+                      isReservable &&
+                      !topBookingLink
+                    ) {
                       writeBookingReturn(venue.slug, planHandoff.stopIndex);
                     }
                   }}

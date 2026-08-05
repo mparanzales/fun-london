@@ -386,6 +386,11 @@ describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
     // consume A's marker. Pinned in the commit that added the call, per this
     // block's own rule — an unpinned sweep is the PR #194 shape again.
     expect(block![1]).toContain("clearSessionBreadcrumbs()");
+    // The room invite: the file's own comment calls it "MANDATORY, the
+    // strongest of the three" (a BEARER CREDENTIAL), yet it was the one call
+    // in the block with no pin. Closed in the commit that restored the
+    // capture region to reach it.
+    expect(block![1]).toContain("clearRoomInvite()");
   });
 
   it("does not depend on the profile sign-out buttons", () => {

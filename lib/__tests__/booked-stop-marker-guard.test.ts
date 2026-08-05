@@ -47,6 +47,27 @@ describe("🧨 the booked-stop marker renders on healthy stops", () => {
     ).toBeLessThan(noticeAt);
   });
 
+  it("sits at the notice's own nesting depth, not inside another conditional", () => {
+    // Order alone would stay green if the marker moved ABOVE the notice but
+    // INSIDE some other conditional (say closedStops.includes(i)) — the
+    // original symptom class with a different wrapper. Prettier normalises
+    // indentation (the format gate enforces it), so equal leading whitespace
+    // on the two openers pins equal JSX depth.
+    const lines = src.split("\n");
+    const markerLine = lines.find((l) =>
+      l.includes("{bookedStop?.slug === s.venue.slug && ("),
+    );
+    const noticeLine = lines.find((l) => l.includes("{stopNotice(i) && ("));
+    expect(markerLine, "marker conditional opener not found").toBeDefined();
+    expect(noticeLine, "notice conditional opener not found").toBeDefined();
+    const indent = (l: string) => (l.match(/^\s*/) ?? [""])[0].length;
+    expect(
+      indent(markerLine!),
+      "the marker opener is indented differently from the notice opener: " +
+        "it has been nested inside another conditional",
+    ).toBe(indent(noticeLine!));
+  });
+
   it("keys the marker on the venue slug, not the stop index", () => {
     // A replaced or dropped stop shifts indices while the user is away
     // booking; the slug follows the venue. The stored stopIndex is an
