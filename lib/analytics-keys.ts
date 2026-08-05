@@ -284,6 +284,32 @@ export function readBookingReturn(): {
   }
 }
 
+// ── session breadcrumbs sweep ───────────────────────────────────────────
+
+/**
+ * Every plan-scoped session breadcrumb, in ONE list, so the sign-out
+ * transition sweeps them all with a single call. The PR #194 regression was
+ * exactly a key added elsewhere and never swept — new breadcrumbs get added
+ * HERE, not as another removeItem at the call site.
+ *
+ * ENTRY_SURFACE_KEY is deliberately not in this list: it is a coarse enum
+ * ("feed", "search", ...) describing where THIS TAB entered the app, not
+ * anything about the account, and clearing it would change its meaning.
+ */
+const SESSION_BREADCRUMB_KEYS = [PLAN_HANDOFF_KEY, BOOKING_RETURN_KEY];
+
+export function clearSessionBreadcrumbs(): void {
+  const s = session();
+  if (!s) return;
+  for (const key of SESSION_BREADCRUMB_KEYS) {
+    try {
+      s.removeItem(key);
+    } catch {
+      // Private mode. The sweep must never break the sign-out path.
+    }
+  }
+}
+
 // ── sign-in trigger ─────────────────────────────────────────────────────
 
 /**

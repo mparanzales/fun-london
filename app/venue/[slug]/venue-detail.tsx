@@ -157,16 +157,19 @@ export function VenueDetail({
   // Deliberately not a server prop: adding searchParams to this route (or its
   // /anon ISR twin) would opt it out of static rendering.
   const [planHandoff, setPlanHandoff] = useState<PlanHandoff | null>(null);
-  const handoffReadRef = useRef(false);
+  const handoffReadRef = useRef<string | null>(null);
   const [entrySurface, setEntrySurface] = useState<
     ReturnType<typeof readEntrySurface> | undefined
   >(undefined);
   useEffect(() => {
-    // One-shot latch: StrictMode's dev remount re-ran this, found the
-    // storage already consumed, and nulled the state — so from_plan and the
-    // return marker read as dead in every local verification.
-    if (!handoffReadRef.current) {
-      handoffReadRef.current = true;
+    // One-shot latch PER SLUG: StrictMode's dev remount re-ran this, found
+    // the storage already consumed, and nulled the state — so from_plan and
+    // the return marker read as dead in every local verification. Latched on
+    // the slug rather than a boolean so the dep array stays honest: if this
+    // instance is ever reused across venues, the new slug re-reads instead of
+    // carrying the previous venue's handoff onto an unrelated booking.
+    if (handoffReadRef.current !== venue.slug) {
+      handoffReadRef.current = venue.slug;
       setPlanHandoff(readPlanHandoff(venue.slug));
     }
     setEntrySurface(readEntrySurface());
@@ -841,8 +844,10 @@ export function VenueDetail({
                     // the ReserveSheet path.
                     // The WEBSITE is a booking door for a partner-less
                     // venue; the MENU is never one — marking a stop "booking
-                    // opened" for reading a menu invents a booking.
-                    if (planHandoff && !venue.menuUrl) {
+                    // opened" for reading a menu invents a booking. Same for
+                    // a venue class that takes no bookings at all (market,
+                    // museum): checking its closing time is not a booking.
+                    if (planHandoff && !venue.menuUrl && isReservable) {
                       writeBookingReturn(venue.slug, planHandoff.stopIndex);
                     }
                   }}

@@ -1536,6 +1536,9 @@ export function PlanFlow({
   // only: it scrolls to and marks that stop, and deliberately touches no
   // plan state — replacements, timing, undo history and saved identity are
   // all owned elsewhere and a booking round trip must not reset any of them.
+  // The SLUG anchors both the marker and the scroll (indices shift when a
+  // stop is replaced or dropped while the user is away); stopIndex is kept
+  // only as an analytics dimension on plan_book_return.
   const [bookedStop, setBookedStop] = useState<{
     slug: string;
     stopIndex: number;
@@ -2525,6 +2528,20 @@ export function PlanFlow({
                 undo stack: "adjust one thing" actually meant "throw it away".
                 A reroll DOES work here and is already on the screen, so that
                 is what the copy points at. */}
+            {/* 🧨 A SIBLING of the notice, not nested in it. Nested inside
+                stopNotice it only rendered on a shut or option-less stop —
+                the one stop nobody books — so the feature this PR is named
+                for was invisible in the common case. Slug-anchored ref, so a
+                dropped stop shifting indices cannot strand the scroll. */}
+            {bookedStop?.slug === s.venue.slug && (
+              <p
+                ref={bookedStopRef}
+                role="status"
+                className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
+              >
+                Booking opened here · confirm with the venue if you haven&apos;t
+              </p>
+            )}
             {stopNotice(i) && (
               <p
                 className={`text-[11px] mb-1.5 leading-relaxed ${
@@ -2533,20 +2550,6 @@ export function PlanFlow({
                     : "text-muted-fg"
                 }`}
               >
-                {/* 🧨 A SIBLING of the notice, not nested in it. Nested inside
-                stopNotice it only rendered on a shut or option-less stop —
-                the one stop nobody books — so the feature this PR is named
-                for was invisible in the common case. Slug-anchored ref, so a
-                dropped stop shifting indices cannot strand the scroll. */}
-                {bookedStop?.slug === s.venue.slug && (
-                  <p
-                    ref={bookedStopRef}
-                    className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
-                  >
-                    Booking opened here · confirm with the venue if you
-                    haven&apos;t
-                  </p>
-                )}
                 {closedStops.includes(i) && (
                   <AlertCircle
                     className="w-3.5 h-3.5 inline-block align-[-3px] mr-1"

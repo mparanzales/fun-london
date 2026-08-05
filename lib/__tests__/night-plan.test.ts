@@ -382,6 +382,10 @@ describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
     // could be refactored away with the suite green — the same "green test,
     // live data left behind" shape this describe block exists for.
     expect(block![1]).toContain("clearActivePlan(prevIdRef.current)");
+    // The session breadcrumbs (plan handoff + booking return): B must not
+    // consume A's marker. Pinned in the commit that added the call, per this
+    // block's own rule — an unpinned sweep is the PR #194 shape again.
+    expect(block![1]).toContain("clearSessionBreadcrumbs()");
   });
 
   it("does not depend on the profile sign-out buttons", () => {
