@@ -185,6 +185,13 @@ produces false greens.
 
 ---
 
+**0006 (`saved_plan_timing`) must be applied BEFORE its client merges, as one
+transaction.** The client sends `starts_at`/`ends_at` and upserts on `id` —
+against a database without 0006 every save fails PGRST204 (unknown column),
+new nights included; columns without the UPDATE policy fail re-saves 42501.
+Old clients keep working after 0006 (columns nullable, trigger inert on
+insert).
+
 ## 7 · Not built yet
 
 Plan Together, venue and event detail pages, calendar export and sharing have all

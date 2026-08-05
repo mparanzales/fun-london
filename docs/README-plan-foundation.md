@@ -42,9 +42,9 @@ night by construction rather than by remembering to clear.
   keeps the exact daypart inference `openSaved` used, and is honest about what
   it cannot recover: **vibe and budget are genuinely absent**, so they take the
   caller's current values and affect regeneration only.
-- `public.plans` has SELECT/INSERT/DELETE and **no UPDATE**, so re-saving a
-  reopened night is a new row. `savedRowId` records provenance; it never
-  reaches the write path.
+- Since 0006, `public.plans` has a self-scoped UPDATE policy: `savedRowId`
+  IS the write key, and a reopened night saves back to its own row instead of
+  duplicating. Legacy rows without timing columns keep behaving as before.
 
 ## Deliberate boundaries
 
