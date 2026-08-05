@@ -538,9 +538,11 @@ export function PlanFlow({
   // printed "arrive ~1:00 pm" — seven hours in the past, in the boldest text
   // on the card, from a clock shown nowhere on the screen. `tracksClock` is
   // the discriminator resolveTiming already computes: TRUE exactly when it
-  // returned the live clock. So a reopened evening night viewed in the
-  // evening reads "if you set off now" — verifiable, never invented — and
-  // any other combination keeps no clock at all rather than a wrong one.
+  // returned the live clock. A reopened evening night viewed in the evening
+  // shows arrivals anchored to the moment the page loaded — verifiable,
+  // never invented, though nothing on screen labels the anchor (the header
+  // carries no start time; a known limitation) — and any other combination
+  // keeps no clock at all rather than a wrong one.
   const nightWhen = useMemo(() => {
     // Generated/claimed nights with no `startsAt` stay clockless: the
     // finished-night guard dropped it deliberately, and resurrecting it
@@ -703,9 +705,12 @@ export function PlanFlow({
   // that OPENS at 23:00 with arrival 22:40 is "closed" too, and stepping the
   // night earlier moves it further from the fix on every tap, with the copy
   // instructing exactly that. The chip simulates the shifted night and shows
-  // only when it reduces the count. Date.now() in render is impure but safe:
-  // the result screen never SSRs (`step` starts at "setup"), and staleness
-  // only delays the chip by one render.
+  // only when it reduces the count. Date.now() in render is impure but safe
+  // here: the result screen never SSRs (`step` starts at "setup"). Staleness
+  // cuts the retiring way — nightWhen is frozen at mount while Date.now()
+  // ticks, so on a long-open page the chip retires itself as the real clock
+  // catches the night's start. Conservative in the right direction: it stops
+  // offering to move a start into the past.
   const canStartEarlier =
     closedStops.length > 0 &&
     nightWhen != null &&
@@ -797,9 +802,9 @@ export function PlanFlow({
     if (closedStops.includes(i)) {
       return canChange
         ? "Closed by the time you'd get here. Change it."
-        : // Named controls only, and both now exist on this screen: "Start 30
-          // min earlier" appears in the header whenever a stop is shut and the
-          // shifted start would still be ahead of now.
+        : // Named controls only. The chip's own rule (canStartEarlier) also
+          // requires that shifting actually reduces what is shut, so this
+          // copy names it via that flag, never by restating the rule.
           canStartEarlier
           ? "Closed by the time you'd get here, and nothing open fits this slot. Start earlier, or try another combination below."
           : "Closed by the time you'd get here, and nothing open fits this slot. Try another combination below.";
@@ -977,7 +982,10 @@ export function PlanFlow({
           {
             title: display.title,
             offset,
-            tracksClock: timing?.tracksClock ?? true,
+            // A shifted night has a CHOSEN time now, whatever the When
+            // control said — same rule as the restored branch above.
+            tracksClock:
+              startShiftMins !== 0 ? false : (timing?.tracksClock ?? true),
           },
         ),
       ),
@@ -1526,7 +1534,17 @@ export function PlanFlow({
         // back also expires the night 30 minutes earlier. That is the honest
         // consequence of genuinely starting earlier.
         ...(startShiftMins !== 0 && nightWhen
-          ? { startsAt: nightWhen.toISOString() }
+          ? {
+              startsAt: nightWhen.toISOString(),
+              // 🧨 Shifting makes the night stop being a live-clock night.
+              // Writing startsAt alone was inert on the DEFAULT path: activate
+              // re-anchors any tracksClock night to `new Date()` and throws
+              // the persisted value away — so the shift vanished on the walk
+              // back from a venue card, the shut stop returned, and nothing
+              // said anything had changed. The user chose a time; the night
+              // keeps it.
+              tracksClock: false,
+            }
           : {}),
         title: display.title,
         area: display.area,
@@ -2291,13 +2309,14 @@ export function PlanFlow({
             <Clock className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />
             Start 30 min earlier
           </button>
-        ) : startShiftMins !== 0 ? (
-          // 🧨 An INERT readout holds the slot once the night is shifted. A
-          // successful tap used to unmount the button entirely, sliding "Undo
-          // change" into the exact position of a likely second eager tap —
-          // and Undo pops a curated stop with no redo. This also gives the
-          // shift the readout it otherwise lacked: nothing else on the header
-          // says the clock moved.
+        ) : null}
+        {startShiftMins !== 0 ? (
+          // 🧨 An INERT readout, ALONGSIDE the chip rather than as its
+          // else-branch. As the else it vanished exactly when a user was most
+          // likely to tap twice — a shift that helped but did not fully fix
+          // kept the chip and dropped the readout. Alongside, it reports every
+          // shift, and when a successful tap unmounts the chip it still holds
+          // the row so "Undo change" cannot slide under a second eager tap.
           <span className="mt-2.5 mr-2 inline-flex items-center gap-1.5 bg-white/10 text-white/80 rounded-lg px-2.5 py-1 text-[11px] font-bold">
             <Clock className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />
             Starting {-startShiftMins} min earlier
@@ -2593,17 +2612,23 @@ export function PlanFlow({
               type="button"
               onClick={onSave}
               disabled={
-                // "error" stays ENABLED: the button is the retry. Greying it
-                // after a failure left a dead primary with no way forward.
+                // "error" stays ENABLED: the button is the retry — including
+                // when the error-path list reload ALSO failed (same outage),
+                // which used to grey a button still labelled "tap to retry"
+                // over a paragraph saying Save is off. The duplicate risk the
+                // list gate exists for is moot mid-outage: a retry that
+                // cannot reach the server cannot insert anything.
                 saveState === "saving" ||
                 saveState === "saved" ||
                 alreadySaved ||
-                // A reopened saved row before its list has loaded: we cannot
-                // yet tell "already saved" from "new", and guessing wrong
-                // writes a permanent duplicate.
-                // Not just "saved" — any night whose already-saved status we
-                // cannot confirm. An unconfirmed live night can duplicate too.
-                !savedListLoaded
+                (saveState !== "error" &&
+                  // A reopened saved row before its list has loaded: we cannot
+                  // yet tell "already saved" from "new", and guessing wrong
+                  // writes a permanent duplicate.
+                  // Not just "saved": any night whose already-saved status we
+                  // cannot confirm. An unconfirmed live night can duplicate
+                  // too.
+                  !savedListLoaded)
               }
               className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold disabled:opacity-70"
             >

@@ -72,6 +72,28 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
         // first is what produced the flash: a blank map, then a dashed
         // straight-line guess, then the real route — three states for one tap.
         // Real walking geometry from the keyless OSRM foot service on OSM data.
+        const drawStops = () => {
+          stopLayerRef.current?.remove();
+          const group = L.layerGroup().addTo(m);
+          stopLayerRef.current = group;
+          pts.forEach((p, i) => {
+            const icon = L.divIcon({
+              className: "",
+              html:
+                `<div style="width:26px;height:26px;border-radius:50%;background:${ACCENT};` +
+                `color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;` +
+                `font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)">${i + 1}</div>`,
+              iconSize: [26, 26],
+              iconAnchor: [13, 13],
+            });
+            L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(group);
+          });
+          m.fitBounds(L.latLngBounds(latlngs).pad(0.3));
+        };
+        // First draw: pins go up before the fetch — with no old set to
+        // disagree with, atomicity protects nothing and holding them just
+        // left an empty map.
+        if (!stopLayerRef.current) drawStops();
         let line = latlngs;
         let dashed = true;
         try {
@@ -106,29 +128,17 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
         }
         // A later tap has already started its own fetch; that one owns the line.
         if (cancelled || runRef.current !== run || !mapRef.current) return;
-        // 🧨 ONE ATOMIC REDRAW. Markers used to move (and the frame re-fit)
+        // 🧨 ONE ATOMIC REDRAW — FOR REDRAWS. On the FIRST draw there is no
+        // old set for the new one to disagree with, so atomicity protects
+        // nothing and holding the pins for the fetch just left an empty map;
+        // they are drawn before the fetch below. Markers used to move (and the frame re-fit)
         // inside the settle while the line waited on OSRM — so for up to three
         // seconds the map showed numbered pins at the NEW stops with a route
         // drawn through the OLD ones, pins visibly off the line. A pin off the
         // line reads as wrong data, not as loading. The old markers, frame and
         // line now stay coherent together until the new set is ready, and swap
         // in one commit.
-        stopLayerRef.current?.remove();
-        const group = L.layerGroup().addTo(m);
-        stopLayerRef.current = group;
-        pts.forEach((p, i) => {
-          const icon = L.divIcon({
-            className: "",
-            html:
-              `<div style="width:26px;height:26px;border-radius:50%;background:${ACCENT};` +
-              `color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;` +
-              `font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)">${i + 1}</div>`,
-            iconSize: [26, 26],
-            iconAnchor: [13, 13],
-          });
-          L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(group);
-        });
-        m.fitBounds(L.latLngBounds(latlngs).pad(0.3));
+        drawStops();
         routeLayerRef.current?.remove();
         routeLayerRef.current = L.polyline(line, {
           color: ACCENT,
@@ -170,6 +180,13 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
     (async () => {
       const L = (await import("leaflet")).default;
       if (cancelled || !ref.current || mapRef.current) return;
+      // 🧨 THE VIEW IS SET AT CREATION. L.map with no center has no view, and
+      // Leaflet queues every layer until the first one is set — so while
+      // fitBounds lived after the OSRM fetch, the box painted NOTHING (no
+      // tiles, no pins) for the whole round trip, 3 seconds where the router
+      // is slow or unreachable, on every first load. Framing here means the
+      // street map is on screen at mount and every later swap lands on a map
+      // that is already drawn.
       const m = L.map(ref.current, {
         zoomControl: false,
         scrollWheelZoom: false,
@@ -181,6 +198,11 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
         "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
         { subdomains: "abcd", maxZoom: 20 },
       ).addTo(m);
+      m.fitBounds(
+        L.latLngBounds(
+          pts.map((p) => [p.venue.lat, p.venue.lng] as [number, number]),
+        ).pad(0.3),
+      );
       mapRef.current = m;
       // Nudge the layer effect now that there is something to draw on.
       setReady((n) => n + 1);
@@ -192,6 +214,12 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
       stopLayerRef.current = null;
       routeLayerRef.current = null;
     };
+    // `pts` is deliberately NOT a dep: this effect creates the map ONCE per
+    // container, and the initial fitBounds only needs the stops that exist at
+    // that moment — the layer effect above re-frames on every change. Adding
+    // pts would tear the instance down on each replacement, which is the
+    // exact flicker the split exists to prevent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasContainer]);
 
   if (pts.length < 2) return null;

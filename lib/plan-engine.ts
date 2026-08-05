@@ -734,6 +734,9 @@ function closesALaterStop(
  * earlier step moved the night further from the fix, with the copy
  * instructing exactly that. Extracted so the suite can break it on purpose;
  * the component composes it into the chip's visibility.
+ *
+ * Compares COUNTS: a shift that re-opens two stops and darkens one still
+ * qualifies, which is the intended reading of "helps".
  */
 export function shiftReducesClosed(
   stops: { venue: Venue; role: PlanRole }[],
