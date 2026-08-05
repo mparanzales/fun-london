@@ -74,12 +74,37 @@ describe("🧨 the booked-stop marker renders on healthy stops", () => {
     // analytics dimension only.
     expect(src).toContain("bookedStop?.slug === s.venue.slug");
   });
-  it("renders only on the night the marker was consumed for", () => {
-    // PlanFlow survives Edit-anyway -> rebuild. Without the identity guard a
-    // rebuild that re-picks the SAME venue inherits "Booking opened here"
-    // for a night no booking came out of. Wrong-direction-safe: identity
-    // churn hides the line, never shows it on the wrong night.
-    expect(src).toContain("bookedNightKeyRef.current === editKey &&");
+  it("is scoped to its night by explicit clearing, not captured identity", () => {
+    // 🧨 The 1a518a1 identity guard compared an object captured in the mount
+    // passive effect against editKey — but the restore's re-render flushes
+    // AFTER that capture, so the comparison was false on every real return
+    // and the marker never rendered (both reviewers, independently). The
+    // durable rule: every night SWITCH clears bookedStop. standDown covers
+    // rebuild/reshuffle/Edit-anyway; activate covers reopen-saved and claim
+    // (safe at mount because layout effects run before passive ones).
+    expect(src).not.toContain("bookedNightKeyRef");
+    // standDown's body is brace-flat, so a non-greedy capture to its closing
+    // `}, []);` is safe here (unlike the sign-out block's first-brace trap).
+    const standDown = src.match(
+      /const standDown = useCallback\(\(\) => \{([\s\S]*?)\}, \[\]\);/,
+    );
+    expect(standDown, "standDown not found").not.toBeNull();
+    expect(standDown![1]).toContain("setBookedStop(null)");
+    // activate: the clear must sit immediately ahead of the night switch.
+    expect(
+      /setBookedStop\(null\);[\s\S]{0,700}setActive\(\{/.test(src),
+      "activate() no longer clears the marker before switching nights",
+    ).toBe(true);
+  });
+
+  it("reports the return only when the screen showed something", () => {
+    // The consumption-time event fired even when the marked stop had been
+    // replaced while the user was away and nothing rendered — 100% of events
+    // described an invisible return. The event now carries marker_shown,
+    // decided at the render, where the ref tells the truth.
+    expect(/plan_book_return", \{[\s\S]{0,200}marker_shown/.test(src)).toBe(
+      true,
+    );
   });
 });
 
@@ -106,13 +131,25 @@ describe("the write sites only record what actually happened", () => {
     "utf8",
   );
 
-  it("the ReserveSheet writes the marker only when the popup actually opened", () => {
-    // window.open returns null when a blocker or in-app webview refused it.
-    // A refused open writing the marker makes /plan assert "Booking opened
-    // here" about a site the user never saw (ux-critic blocker).
-    expect(sheet).toContain("opened !== null && fromPlan");
-    // Positive control: the write still exists at all.
-    expect(sheet).toContain("writeBookingReturn(venue.slug, stopIndex)");
+  it("the ReserveSheet hands off through a real anchor, never window.open", () => {
+    // 🧨 window.open with "noopener,noreferrer" in the features string
+    // returns null BY SPEC even when the tab opens (HTML window-open steps:
+    // noopener -> return null), so the 1a518a1 open-detection suppressed the
+    // marker on every successful handoff — and dropping the tokens to get a
+    // handle back would give the partner page a live window.opener. A
+    // user-gesture anchor is not popup-blocked and degrades to an in-place
+    // navigation in webviews, so the site is REACHED either way and the
+    // marker written on the click stays honest.
+    expect(sheet).not.toContain("window.open(");
+    expect(sheet).toContain('target="_blank"');
+    expect(sheet).toContain('rel="noopener noreferrer"');
+    expect(sheet).toContain("href={reserveUrl}");
+    // The write is gated on plan provenance only — no open-detection clause.
+    expect(
+      /if \(fromPlan && stopIndex !== null\) \{\s*writeBookingReturn\(venue\.slug, stopIndex\);/.test(
+        sheet,
+      ),
+    ).toBe(true);
   });
 
   it("the website door needs all four clauses, none deletable", () => {

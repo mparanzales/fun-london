@@ -97,6 +97,10 @@ export function DidYouBook({
       <div className="px-5 pt-4">
         <Link
           href={`/venue/${venue.slug}`}
+          // replace, not push: pushing a second /venue entry made the phone's
+          // back gesture land back on "Did you book?" — a question the user
+          // already left — in a venue ⇄ confirmed loop (ux-critic).
+          replace
           aria-label="Back"
           className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-fg/5 text-fg"
         >
@@ -147,7 +151,8 @@ export function DidYouBook({
             </button>
             <button
               type="button"
-              onClick={() => router.push(`/venue/${venue.slug}`)}
+              // replace, not push — same back-gesture loop as the arrow above.
+              onClick={() => router.replace(`/venue/${venue.slug}`)}
               className="w-full h-12 rounded-2xl border border-fg/15 text-fg font-semibold text-sm"
             >
               Not yet

@@ -417,6 +417,9 @@ export function PlanFlow({
     anonOriginRef.current = false;
     // The replacement history belongs to the night being stood down.
     setUndoStack([]);
+    // So does the booking marker: whatever night is built next, no booking
+    // came out of it. (doReshuffle and Edit-anyway both route through here.)
+    setBookedStop(null);
   }, []);
   // 🧨 Freshness is measured from GENERATION, not from the last write. The
   // effect below re-persists on every swap, and stamping a fresh createdAt
@@ -1303,6 +1306,12 @@ export function PlanFlow({
         });
       }
 
+      // The marker belongs to the night on screen BEFORE this switch. At
+      // mount this is a no-op that runs ahead of the marker's own passive
+      // consumption effect (layout before passive), so a restored night keeps
+      // its marker; a mid-session activate (reopen saved, claim) is a night
+      // switch and drops it.
+      setBookedStop(null);
       setActive({
         plan: np,
         // The night's own start, after the finished-night guard above.
@@ -1545,26 +1554,39 @@ export function PlanFlow({
   } | null>(null);
   const bookedReadRef = useRef(false);
   const bookedStopRef = useRef<HTMLParagraphElement | null>(null);
-  // The night the marker belongs to, captured at consumption. The line
-  // renders only while editKey is still that night: PlanFlow stays mounted
-  // across Edit-anyway -> rebuild, and without this a rebuild that happens
-  // to pick the SAME venue again would inherit "Booking opened here" for a
-  // night no booking ever came out of (code-reviewer, 2026-08-06). Wrong in
-  // the safe direction only: if the identity churns, the line disappears --
-  // it can never appear on the wrong night.
-  const bookedNightKeyRef = useRef<unknown>(null);
+  // 🧨 The marker is scoped to its night by EXPLICIT CLEARING in activate()
+  // and standDown(), not by comparing captured object identity. The 1a518a1
+  // identity guard captured editKeyRef in this mount effect — which runs
+  // BEFORE the restore's layout-scheduled re-render flushes, so it captured
+  // the pre-restore key and the comparison was false on every return: the
+  // marker never rendered at all (both reviewers, independently). Mount
+  // ordering makes clearing safe instead: the restore's activate() is a
+  // LAYOUT effect and this consumption is a PASSIVE one in the same mount
+  // flush, so the restore's clear always lands before the marker is set,
+  // while any LATER night switch (reopen a saved night, claim, stand-down,
+  // reshuffle) clears it — the marker can never outlive its night.
   useEffect(() => {
     if (bookedReadRef.current) return;
     bookedReadRef.current = true;
     const marker = readBookingReturn();
     if (!marker) return;
-    bookedNightKeyRef.current = editKeyRef.current;
     setBookedStop(marker);
-    track("plan_book_return", { stop_index: marker.stopIndex });
   }, []);
-  // Put them back at that exact point, once, after the marked stop renders.
+  // Put them back at that exact point, once, after the marked stop renders —
+  // and only then report the return, so marker_shown is a fact about the
+  // screen, not a hope: the raw consumption-time event fired even when the
+  // marked stop had been replaced while the user was away and nothing
+  // rendered (code-reviewer). The ref is attached by this commit if the slug
+  // matched; a StrictMode latch keeps the dev double-invoke from double
+  // counting.
+  const bookedTrackedRef = useRef(false);
   useEffect(() => {
-    if (!bookedStop) return;
+    if (!bookedStop || bookedTrackedRef.current) return;
+    bookedTrackedRef.current = true;
+    track("plan_book_return", {
+      stop_index: bookedStop.stopIndex,
+      marker_shown: bookedStopRef.current !== null,
+    });
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -2542,16 +2564,15 @@ export function PlanFlow({
                 the one stop nobody books — so the feature this PR is named
                 for was invisible in the common case. Slug-anchored ref, so a
                 dropped stop shifting indices cannot strand the scroll. */}
-            {bookedStop?.slug === s.venue.slug &&
-              bookedNightKeyRef.current === editKey && (
-                <p
-                  ref={bookedStopRef}
-                  role="status"
-                  className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
-                >
-                  Booking opened here · the venue confirms, not us
-                </p>
-              )}
+            {bookedStop?.slug === s.venue.slug && (
+              <p
+                ref={bookedStopRef}
+                role="status"
+                className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
+              >
+                Booking opened here · the venue confirms, not us
+              </p>
+            )}
             {stopNotice(i) && (
               <p
                 className={`text-[11px] mb-1.5 leading-relaxed ${

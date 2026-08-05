@@ -102,8 +102,18 @@ export function ReserveSheet({
     };
   }, []);
 
+  // 🧨 The Continue control is a real ANCHOR, not window.open. With
+  // "noopener,noreferrer" in the features string, window.open returns null
+  // BY SPEC even when the tab opens fine (HTML window-open steps: noopener
+  // -> return null), so the 1a518a1 open-detection suppressed the marker on
+  // every successful handoff — and stripping the tokens to get a handle
+  // back would hand the partner page a live window.opener. A user-gesture
+  // anchor needs no detection: browsers do not popup-block it, and an
+  // in-app webview that refuses the new tab navigates IN PLACE instead —
+  // either way the partner site is actually reached, so the marker written
+  // in onClick only ever describes a handoff that happened.
+  const reserveUrl = buildReserveUrl(target, { date, time, party });
   const onContinue = () => {
-    const url = buildReserveUrl(target, { date, time, party });
     // Outbound revenue signal: the click that affiliate commission is earned on.
     track("venue_reserve_click", {
       venue: venue.slug,
@@ -117,20 +127,10 @@ export function ReserveSheet({
       stop_index: fromPlan && stopIndex !== null ? stopIndex : undefined,
       entry_surface: entrySurface,
     });
-    // Open the booking site in a new tab on the user gesture. window.open
-    // returns null when a popup blocker or in-app webview refused it, and a
-    // refused open must write NO marker: /plan saying "Booking opened here"
-    // about a site the user never saw is a false state (ux-critic blocker,
-    // 2026-08-06). The tap event above still fires — the user did tap — but
-    // the continuity marker only records what actually happened.
-    const opened =
-      typeof window !== "undefined"
-        ? window.open(url, "_blank", "noopener,noreferrer")
-        : null;
     // The stop they went off to book, so /plan restores them to it. Only
     // when this booking came out of a plan — a standalone venue booking has
-    // no stop to return to.
-    if (opened !== null && fromPlan && stopIndex !== null) {
+    // no stop to return to. Written on the same user gesture that navigates.
+    if (fromPlan && stopIndex !== null) {
       writeBookingReturn(venue.slug, stopIndex);
     }
     const qs = new URLSearchParams({
@@ -138,6 +138,10 @@ export function ReserveSheet({
       t: time,
       p: String(party),
     }).toString();
+    // The in-place SPA route moves on to "Did you book?"; the anchor's own
+    // navigation opens the partner site. If a webview hijacks the anchor
+    // in-place instead, this push simply never commits — the user is on the
+    // booking site, which is the honest state either way.
     router.push(`/booking/${venue.slug}/confirmed?${qs}`);
   };
 
@@ -226,13 +230,15 @@ export function ReserveSheet({
           </div>
         </div>
 
-        <button
-          type="button"
+        <a
+          href={reserveUrl}
+          target="_blank"
+          rel="noopener noreferrer"
           onClick={onContinue}
-          className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px]"
+          className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px] flex items-center justify-center"
         >
           Continue to {label} →
-        </button>
+        </a>
         <p className="text-[11px] text-muted-fg text-center mt-2.5 leading-relaxed">
           Opens {label} with your details, confirm the table there, then tell us
           if you booked.
