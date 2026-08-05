@@ -199,3 +199,36 @@ describe("sign-in trigger", () => {
     expect(k.consumeSignInTrigger()).toBe("unknown");
   });
 });
+
+describe("booking return · the stop you went off to book", () => {
+  // sessionStorage-backed like the handoff; same privacy shape (slug + index
+  // + timestamp only), one-shot so it can never replay onto a later visit.
+  it("round-trips and is one-shot", async () => {
+    const k = await keys();
+    k.writeBookingReturn("the-dove", 1);
+    expect(k.readBookingReturn()).toEqual({ slug: "the-dove", stopIndex: 1 });
+    expect(k.readBookingReturn()).toBeNull(); // consumed
+  });
+  it("refuses an out-of-range index and a missing slug", async () => {
+    const k = await keys();
+    k.writeBookingReturn("x", 5 as never);
+    expect(k.readBookingReturn()).toBeNull();
+    sessionStore.set(
+      "fl.bookreturn.v1",
+      JSON.stringify({ stopIndex: 1, at: Date.now() }),
+    );
+    expect(k.readBookingReturn()).toBeNull();
+  });
+  it("expires rather than restoring a stale trip", async () => {
+    const k = await keys();
+    sessionStore.set(
+      "fl.bookreturn.v1",
+      JSON.stringify({
+        slug: "x",
+        stopIndex: 0,
+        at: Date.now() - 3 * 60 * 60 * 1000,
+      }),
+    );
+    expect(k.readBookingReturn()).toBeNull();
+  });
+});

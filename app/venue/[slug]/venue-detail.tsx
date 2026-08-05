@@ -27,6 +27,7 @@ import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
 import {
   readPlanHandoff,
+  writeBookingReturn,
   readEntrySurface,
   writeSignInTrigger,
   type PlanHandoff,
@@ -821,13 +822,20 @@ export function VenueDetail({
                   href={venue.menuUrl ?? venue.websiteUrl!}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() =>
+                  onClick={() => {
                     recordSignal("outbound_click", {
                       surface: "venue",
                       venueId: venue.id,
                       context: { target: venue.menuUrl ? "menu" : "website" },
-                    })
-                  }
+                    });
+                    // A venue with no partner platform books through its own
+                    // site, so for a plan-originated visit this outbound IS
+                    // the booking door — the return marker keeps parity with
+                    // the ReserveSheet path.
+                    if (planHandoff) {
+                      writeBookingReturn(venue.slug, planHandoff.stopIndex);
+                    }
+                  }}
                   className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Globe className="w-4 h-4" strokeWidth={2} />

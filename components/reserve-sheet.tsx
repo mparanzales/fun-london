@@ -13,6 +13,7 @@ import {
   type ReserveTarget,
 } from "@/lib/booking-link";
 import { track, type EntrySurface } from "@/lib/analytics";
+import { writeBookingReturn } from "@/lib/analytics-keys";
 import type { Venue } from "@/lib/types";
 
 export function ReserveSheet({
@@ -116,6 +117,12 @@ export function ReserveSheet({
       stop_index: fromPlan && stopIndex !== null ? stopIndex : undefined,
       entry_surface: entrySurface,
     });
+    // The stop they went off to book, so /plan restores them to it. Only
+    // when this booking came out of a plan — a standalone venue booking has
+    // no stop to return to.
+    if (fromPlan && stopIndex !== null) {
+      writeBookingReturn(venue.slug, stopIndex);
+    }
     // Open the booking site in a new tab on the user gesture (not blocked).
     if (typeof window !== "undefined") {
       window.open(url, "_blank", "noopener,noreferrer");

@@ -58,7 +58,11 @@ import {
   type SetupControl,
 } from "@/lib/analytics";
 import { saveFailReason } from "@/lib/analytics-reasons";
-import { writePlanHandoff, writeSignInTrigger } from "@/lib/analytics-keys";
+import {
+  writePlanHandoff,
+  readBookingReturn,
+  writeSignInTrigger,
+} from "@/lib/analytics-keys";
 import { recordSignal } from "@/lib/signals";
 import { googleMapsWalkingUrl } from "@/lib/plan-maps";
 import { PlanRouteMapLive } from "./plan-route-map-live";
@@ -1528,6 +1532,32 @@ export function PlanFlow({
   // must never overwrite its own row (blocker: a 3-stop night reopened as 2
   // and saved destroyed the third stop forever, silently).
   const droppedRef = useRef(0);
+  // The stop the user went off to BOOK, read one-shot on return. Display
+  // only: it scrolls to and marks that stop, and deliberately touches no
+  // plan state — replacements, timing, undo history and saved identity are
+  // all owned elsewhere and a booking round trip must not reset any of them.
+  const [bookedStop, setBookedStop] = useState<{
+    slug: string;
+    stopIndex: number;
+  } | null>(null);
+  const bookedReadRef = useRef(false);
+  const bookedStopRef = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (bookedReadRef.current) return;
+    bookedReadRef.current = true;
+    const marker = readBookingReturn();
+    if (!marker) return;
+    setBookedStop(marker);
+    track("plan_book_return", { stop_index: marker.stopIndex });
+  }, []);
+  // Put them back at that exact point, once, after the marked stop renders.
+  useEffect(() => {
+    if (!bookedStop) return;
+    bookedStopRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }, [bookedStop]);
   // Set ONLY by a successful save; null until then. Distinct from
   // pendingSaveIdRef, which is minted before any save exists.
   const lastSavedIdRef = useRef<string | null>(null);
@@ -2500,6 +2530,19 @@ export function PlanFlow({
                     : "text-muted-fg"
                 }`}
               >
+                {bookedStop?.slug === s.venue.slug && (
+                  <p
+                    ref={i === bookedStop.stopIndex ? bookedStopRef : undefined}
+                    className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
+                  >
+                    {/* 🧨 HONEST STATUS. We saw the booking door open; we cannot
+                    see whether a reservation was completed — partner sites
+                    and venue websites confirm on their side. Claiming more
+                    would be inventing a fact about someone's evening. */}
+                    Booking opened here · confirm with the venue if you
+                    haven&apos;t
+                  </p>
+                )}
                 {closedStops.includes(i) && (
                   <AlertCircle
                     className="w-3.5 h-3.5 inline-block align-[-3px] mr-1"

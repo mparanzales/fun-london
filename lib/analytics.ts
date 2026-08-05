@@ -177,6 +177,7 @@ export type AnalyticsEvent =
   | "plan_reshuffle_confirm_shown" // reshuffle would discard manual changes
   | "plan_edit_confirm_shown" // Edit would walk away from manual changes
   | "plan_start_earlier" // nudged a closed-on-arrival night's start back
+  | "plan_book_return" // came back to the plan after going off to book a stop
   | "together_room_create"
   | "together_room_join"
   | "together_swipe"

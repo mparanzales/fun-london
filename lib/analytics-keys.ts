@@ -223,6 +223,67 @@ export function readPlanHandoff(slug: string): PlanHandoff | null {
   }
 }
 
+// ── booking return ──────────────────────────────────────────────────────
+
+/**
+ * The stop the user went OFF to book, so /plan can put them back at that
+ * exact point when they return. Slug + 0-based stop index + timestamp only:
+ * no venue id, no plan title, no booking details, no room codes — the same
+ * privacy shape as the handoff above. sessionStorage, so it dies with the
+ * tab and can never bleed to another browser session.
+ *
+ * TTL is generous (2h): a booking flow on a partner site genuinely takes
+ * minutes, and an expired marker simply restores nothing.
+ */
+export const BOOKING_RETURN_KEY = "fl.bookreturn.v1";
+const BOOKING_RETURN_TTL_MS = 2 * 60 * 60 * 1000;
+
+export function writeBookingReturn(slug: string, stopIndex: number): void {
+  const s = session();
+  if (!s) return;
+  if (stopIndex !== 0 && stopIndex !== 1 && stopIndex !== 2) return;
+  try {
+    s.setItem(
+      BOOKING_RETURN_KEY,
+      JSON.stringify({ slug, stopIndex, at: Date.now() }),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+/** One-shot: removed before validation, so it can never replay later. */
+export function readBookingReturn(): {
+  slug: string;
+  stopIndex: 0 | 1 | 2;
+} | null {
+  const s = session();
+  if (!s) return null;
+  let raw: string | null = null;
+  try {
+    raw = s.getItem(BOOKING_RETURN_KEY);
+    if (raw !== null) s.removeItem(BOOKING_RETURN_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as {
+      slug?: unknown;
+      stopIndex?: unknown;
+      at?: unknown;
+    };
+    if (typeof v.slug !== "string" || v.slug.length === 0) return null;
+    if (typeof v.at !== "number" || Date.now() - v.at > BOOKING_RETURN_TTL_MS)
+      return null;
+    if (v.stopIndex !== 0 && v.stopIndex !== 1 && v.stopIndex !== 2)
+      return null;
+    return { slug: v.slug, stopIndex: v.stopIndex };
+  } catch {
+    return null;
+  }
+}
+
 // ── sign-in trigger ─────────────────────────────────────────────────────
 
 /**
