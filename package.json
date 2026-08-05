@@ -83,7 +83,7 @@
     "posthog:revoked-check": "tsx scripts/posthog-revoked-check.ts"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.5.2",
+    "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.45.4",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.1",
