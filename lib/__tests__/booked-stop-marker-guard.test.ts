@@ -55,7 +55,7 @@ describe("🧨 the booked-stop marker renders on healthy stops", () => {
     // on the two openers pins equal JSX depth.
     const lines = src.split("\n");
     const markerLine = lines.find((l) =>
-      l.includes("{bookedStop?.slug === s.venue.slug && ("),
+      l.includes("{bookedStop?.slug === s.venue.slug &&"),
     );
     const noticeLine = lines.find((l) => l.includes("{stopNotice(i) && ("));
     expect(markerLine, "marker conditional opener not found").toBeDefined();
@@ -73,5 +73,74 @@ describe("🧨 the booked-stop marker renders on healthy stops", () => {
     // booking; the slug follows the venue. The stored stopIndex is an
     // analytics dimension only.
     expect(src).toContain("bookedStop?.slug === s.venue.slug");
+  });
+  it("renders only on the night the marker was consumed for", () => {
+    // PlanFlow survives Edit-anyway -> rebuild. Without the identity guard a
+    // rebuild that re-picks the SAME venue inherits "Booking opened here"
+    // for a night no booking came out of. Wrong-direction-safe: identity
+    // churn hides the line, never shows it on the wrong night.
+    expect(src).toContain("bookedNightKeyRef.current === editKey &&");
+  });
+});
+
+describe("the write sites only record what actually happened", () => {
+  const sheet = readFileSync(
+    fileURLToPath(
+      new URL("../../components/reserve-sheet.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+  const detail = readFileSync(
+    fileURLToPath(
+      new URL("../../app/venue/[slug]/venue-detail.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+  const confirmed = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../app/booking/[slug]/confirmed/did-you-book.tsx",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+
+  it("the ReserveSheet writes the marker only when the popup actually opened", () => {
+    // window.open returns null when a blocker or in-app webview refused it.
+    // A refused open writing the marker makes /plan assert "Booking opened
+    // here" about a site the user never saw (ux-critic blocker).
+    expect(sheet).toContain("opened !== null && fromPlan");
+    // Positive control: the write still exists at all.
+    expect(sheet).toContain("writeBookingReturn(venue.slug, stopIndex)");
+  });
+
+  it("the website door needs all four clauses, none deletable", () => {
+    // 481afdd's rule: for a PARTNER venue the website visit is a look, not a
+    // booking; the MENU is never a booking door; a non-reservable venue has
+    // no bookings at all. Deleting any clause previously left the whole
+    // suite green (code-reviewer, 2026-08-06) -- this pins the condition.
+    const cond = detail.match(
+      /if \(\s*planHandoff &&\s*!venue\.menuUrl &&\s*isReservable &&\s*!topBookingLink\s*\)/,
+    );
+    expect(
+      cond,
+      "the four-clause website-door condition has been edited or removed",
+    ).not.toBeNull();
+    // Positive control.
+    expect(detail).toContain(
+      "writeBookingReturn(venue.slug, planHandoff.stopIndex)",
+    );
+  });
+
+  it("the Did-you-book screen PEEKS the marker and offers the door back", () => {
+    // Peek, never read: /plan owns the one-shot consumption. And the door
+    // must exist -- the screen between the booking and the plan not
+    // mentioning the plan was the blocker that made the feature unreachable
+    // on its main path.
+    expect(confirmed).toContain("peekBookingReturn()");
+    expect(confirmed).not.toContain("readBookingReturn(");
+    expect(confirmed).toContain('href="/plan"');
+    expect(confirmed).toContain("Back to your night");
   });
 });

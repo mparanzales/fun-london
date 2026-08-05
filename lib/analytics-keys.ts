@@ -252,20 +252,9 @@ export function writeBookingReturn(slug: string, stopIndex: number): void {
   }
 }
 
-/** One-shot: removed before validation, so it can never replay later. */
-export function readBookingReturn(): {
-  slug: string;
-  stopIndex: 0 | 1 | 2;
-} | null {
-  const s = session();
-  if (!s) return null;
-  let raw: string | null = null;
-  try {
-    raw = s.getItem(BOOKING_RETURN_KEY);
-    if (raw !== null) s.removeItem(BOOKING_RETURN_KEY);
-  } catch {
-    return null;
-  }
+type BookingReturn = { slug: string; stopIndex: 0 | 1 | 2 };
+
+function parseBookingReturn(raw: string | null): BookingReturn | null {
   if (!raw) return null;
   try {
     const v = JSON.parse(raw) as {
@@ -279,6 +268,39 @@ export function readBookingReturn(): {
     if (v.stopIndex !== 0 && v.stopIndex !== 1 && v.stopIndex !== 2)
       return null;
     return { slug: v.slug, stopIndex: v.stopIndex };
+  } catch {
+    return null;
+  }
+}
+
+/** One-shot: removed before validation, so it can never replay later. */
+export function readBookingReturn(): BookingReturn | null {
+  const s = session();
+  if (!s) return null;
+  let raw: string | null = null;
+  try {
+    raw = s.getItem(BOOKING_RETURN_KEY);
+    if (raw !== null) s.removeItem(BOOKING_RETURN_KEY);
+  } catch {
+    return null;
+  }
+  return parseBookingReturn(raw);
+}
+
+/**
+ * Non-consuming look at the marker, for the ONE screen that stands between
+ * the booking and the plan: /booking/[slug]/confirmed needs to know whether
+ * this booking came out of a night so it can offer the door back, WITHOUT
+ * spending the marker that /plan will consume a moment later. Everything
+ * else uses readBookingReturn; peeking anywhere that then navigates away
+ * from the plan would leave the one-shot semantics intact but the promise
+ * broken.
+ */
+export function peekBookingReturn(): BookingReturn | null {
+  const s = session();
+  if (!s) return null;
+  try {
+    return parseBookingReturn(s.getItem(BOOKING_RETURN_KEY));
   } catch {
     return null;
   }

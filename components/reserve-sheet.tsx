@@ -117,15 +117,21 @@ export function ReserveSheet({
       stop_index: fromPlan && stopIndex !== null ? stopIndex : undefined,
       entry_surface: entrySurface,
     });
+    // Open the booking site in a new tab on the user gesture. window.open
+    // returns null when a popup blocker or in-app webview refused it, and a
+    // refused open must write NO marker: /plan saying "Booking opened here"
+    // about a site the user never saw is a false state (ux-critic blocker,
+    // 2026-08-06). The tap event above still fires — the user did tap — but
+    // the continuity marker only records what actually happened.
+    const opened =
+      typeof window !== "undefined"
+        ? window.open(url, "_blank", "noopener,noreferrer")
+        : null;
     // The stop they went off to book, so /plan restores them to it. Only
     // when this booking came out of a plan — a standalone venue booking has
     // no stop to return to.
-    if (fromPlan && stopIndex !== null) {
+    if (opened !== null && fromPlan && stopIndex !== null) {
       writeBookingReturn(venue.slug, stopIndex);
-    }
-    // Open the booking site in a new tab on the user gesture (not blocked).
-    if (typeof window !== "undefined") {
-      window.open(url, "_blank", "noopener,noreferrer");
     }
     const qs = new URLSearchParams({
       d: date,

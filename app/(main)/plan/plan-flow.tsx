@@ -1545,11 +1545,20 @@ export function PlanFlow({
   } | null>(null);
   const bookedReadRef = useRef(false);
   const bookedStopRef = useRef<HTMLParagraphElement | null>(null);
+  // The night the marker belongs to, captured at consumption. The line
+  // renders only while editKey is still that night: PlanFlow stays mounted
+  // across Edit-anyway -> rebuild, and without this a rebuild that happens
+  // to pick the SAME venue again would inherit "Booking opened here" for a
+  // night no booking ever came out of (code-reviewer, 2026-08-06). Wrong in
+  // the safe direction only: if the identity churns, the line disappears --
+  // it can never appear on the wrong night.
+  const bookedNightKeyRef = useRef<unknown>(null);
   useEffect(() => {
     if (bookedReadRef.current) return;
     bookedReadRef.current = true;
     const marker = readBookingReturn();
     if (!marker) return;
+    bookedNightKeyRef.current = editKeyRef.current;
     setBookedStop(marker);
     track("plan_book_return", { stop_index: marker.stopIndex });
   }, []);
@@ -2533,15 +2542,16 @@ export function PlanFlow({
                 the one stop nobody books — so the feature this PR is named
                 for was invisible in the common case. Slug-anchored ref, so a
                 dropped stop shifting indices cannot strand the scroll. */}
-            {bookedStop?.slug === s.venue.slug && (
-              <p
-                ref={bookedStopRef}
-                role="status"
-                className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
-              >
-                Booking opened here · confirm with the venue if you haven&apos;t
-              </p>
-            )}
+            {bookedStop?.slug === s.venue.slug &&
+              bookedNightKeyRef.current === editKey && (
+                <p
+                  ref={bookedStopRef}
+                  role="status"
+                  className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
+                >
+                  Booking opened here · the venue confirms, not us
+                </p>
+              )}
             {stopNotice(i) && (
               <p
                 className={`text-[11px] mb-1.5 leading-relaxed ${

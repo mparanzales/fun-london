@@ -277,3 +277,35 @@ describe("clearSessionBreadcrumbs · the sign-out sweep", () => {
     expect(() => k.clearSessionBreadcrumbs()).not.toThrow();
   });
 });
+
+describe("booking return: peek vs read", () => {
+  it("peek returns the marker without consuming it; read consumes", async () => {
+    const k = await keys();
+    k.writeBookingReturn("padella", 1);
+    expect(k.peekBookingReturn()).toEqual({ slug: "padella", stopIndex: 1 });
+    // Still there: peeking must not spend the one-shot.
+    expect(k.peekBookingReturn()).toEqual({ slug: "padella", stopIndex: 1 });
+    expect(k.readBookingReturn()).toEqual({ slug: "padella", stopIndex: 1 });
+    // Gone: read is the one-shot.
+    expect(k.readBookingReturn()).toBeNull();
+    expect(k.peekBookingReturn()).toBeNull();
+  });
+
+  it("peek applies the same validation as read", async () => {
+    const k = await keys();
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({ slug: "x", stopIndex: 7, at: Date.now() }),
+    );
+    expect(k.peekBookingReturn()).toBeNull();
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({
+        slug: "x",
+        stopIndex: 1,
+        at: Date.now() - 3 * 60 * 60 * 1000,
+      }),
+    );
+    expect(k.peekBookingReturn()).toBeNull();
+  });
+});
