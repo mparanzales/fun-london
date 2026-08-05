@@ -33,7 +33,7 @@ night by construction rather than by remembering to clear.
 
 ## Compatibility
 
-**No migration. No schema change. No pre-merge database step.**
+**Since 0006 there IS a schema change** (timing columns + the plans UPDATE policy) — see DEPLOY.md for the apply-before-merge coupling.
 
 - `toSavedSteps` still emits an **array** with the four legacy keys and adds
   `slug`. Rows written today stay readable by code that predates the model and
