@@ -78,3 +78,13 @@ updates:
       # Unpin when the dev machine is Apple Silicon, or embeddings go CI-only.
       - dependency-name: "@huggingface/transformers"
         update-types: ["version-update:semver-major"]
+
+      # Tailwind 4 is a full migration, not a bump: the PostCSS plugin moved
+      # to @tailwindcss/postcss (which is exactly how #221 failed next build),
+      # and v4 replaces tailwind.config.ts with CSS-first configuration. This
+      # repo's entire design system (the Editorial tokens in globals.css +
+      # tailwind.config.ts, every fl-* utility) is built on the v3 config
+      # model. Migrate deliberately, with the design-reviewer gate on every
+      # screen, never via a drive-by PR. Dev-only, no runtime, no CVE surface.
+      - dependency-name: tailwindcss
+        update-types: ["version-update:semver-major"]
