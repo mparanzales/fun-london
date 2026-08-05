@@ -19,7 +19,11 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
-import { clearSignInTrigger } from "@/lib/analytics-keys";
+import {
+  clearSignInTrigger,
+  BOOKING_RETURN_KEY,
+  PLAN_HANDOFF_KEY,
+} from "@/lib/analytics-keys";
 import {
   clearAnonPlanKeys,
   clearActivePlan,
@@ -79,6 +83,14 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
         // indefinitely: owner-scoped, so B never SEES it, but it is still A's
         // data left on someone else's machine, and nothing sweeps it.
         clearActivePlan(prevIdRef.current);
+        // Session breadcrumbs are not owner-scoped, so the transition clears
+        // them: B must not consume A's booking-return or plan handoff.
+        try {
+          window.sessionStorage.removeItem(BOOKING_RETURN_KEY);
+          window.sessionStorage.removeItem(PLAN_HANDOFF_KEY);
+        } catch {
+          /* private mode */
+        }
         // 🧨 MANDATORY, not tidiness, and the strongest of the three: the room
         // invite is a BEARER CREDENTIAL in this browser's storage. The others
         // leak one person's data to the next; this one would enrol the next

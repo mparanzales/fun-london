@@ -157,11 +157,18 @@ export function VenueDetail({
   // Deliberately not a server prop: adding searchParams to this route (or its
   // /anon ISR twin) would opt it out of static rendering.
   const [planHandoff, setPlanHandoff] = useState<PlanHandoff | null>(null);
+  const handoffReadRef = useRef(false);
   const [entrySurface, setEntrySurface] = useState<
     ReturnType<typeof readEntrySurface> | undefined
   >(undefined);
   useEffect(() => {
-    setPlanHandoff(readPlanHandoff(venue.slug));
+    // One-shot latch: StrictMode's dev remount re-ran this, found the
+    // storage already consumed, and nulled the state — so from_plan and the
+    // return marker read as dead in every local verification.
+    if (!handoffReadRef.current) {
+      handoffReadRef.current = true;
+      setPlanHandoff(readPlanHandoff(venue.slug));
+    }
     setEntrySurface(readEntrySurface());
   }, [venue.slug]);
   useEffect(() => {
@@ -832,7 +839,10 @@ export function VenueDetail({
                     // site, so for a plan-originated visit this outbound IS
                     // the booking door — the return marker keeps parity with
                     // the ReserveSheet path.
-                    if (planHandoff) {
+                    // The WEBSITE is a booking door for a partner-less
+                    // venue; the MENU is never one — marking a stop "booking
+                    // opened" for reading a menu invents a booking.
+                    if (planHandoff && !venue.menuUrl) {
                       writeBookingReturn(venue.slug, planHandoff.stopIndex);
                     }
                   }}

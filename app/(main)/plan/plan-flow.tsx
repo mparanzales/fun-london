@@ -1553,8 +1553,11 @@ export function PlanFlow({
   // Put them back at that exact point, once, after the marked stop renders.
   useEffect(() => {
     if (!bookedStop) return;
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     bookedStopRef.current?.scrollIntoView({
-      behavior: "smooth",
+      behavior: reduced ? "auto" : "smooth",
       block: "center",
     });
   }, [bookedStop]);
@@ -2530,15 +2533,16 @@ export function PlanFlow({
                     : "text-muted-fg"
                 }`}
               >
+                {/* 🧨 A SIBLING of the notice, not nested in it. Nested inside
+                stopNotice it only rendered on a shut or option-less stop —
+                the one stop nobody books — so the feature this PR is named
+                for was invisible in the common case. Slug-anchored ref, so a
+                dropped stop shifting indices cannot strand the scroll. */}
                 {bookedStop?.slug === s.venue.slug && (
                   <p
-                    ref={i === bookedStop.stopIndex ? bookedStopRef : undefined}
+                    ref={bookedStopRef}
                     className="text-[11px] font-bold text-accent mb-1.5 leading-relaxed"
                   >
-                    {/* 🧨 HONEST STATUS. We saw the booking door open; we cannot
-                    see whether a reservation was completed — partner sites
-                    and venue websites confirm on their side. Claiming more
-                    would be inventing a fact about someone's evening. */}
                     Booking opened here · confirm with the venue if you
                     haven&apos;t
                   </p>
