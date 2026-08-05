@@ -393,6 +393,49 @@ describe("🧨 the anon-key clear is wired to the sign-out TRANSITION", () => {
   });
 });
 
+describe("fromSavedRow · a 0006 row reopens with its real clock", () => {
+  const base = {
+    id: "row-1",
+    title: "Chill Night in Soho",
+    neighbourhood: "Soho",
+    steps: [
+      {
+        venueId: "v1",
+        slug: "s1",
+        role: "Start",
+        dwellMins: 60,
+        walkToNextMins: 8,
+      },
+      {
+        venueId: "v2",
+        slug: "s2",
+        role: "Then",
+        dwellMins: 60,
+        walkToNextMins: null,
+      },
+    ],
+  };
+  const D = { vibe: "Chill" as const, budget: "££" as const };
+
+  it("carries starts_at into the night, as a chosen time", () => {
+    const iso = new Date("2026-08-08T19:00:00.000Z").toISOString();
+    const np = fromSavedRow({ ...base, starts_at: iso }, D);
+    expect(np?.startsAt).toBe(iso);
+    expect(np?.tracksClock).toBe(false);
+  });
+
+  it("🧨 a legacy row without timing behaves exactly as before", () => {
+    expect(fromSavedRow(base, D)?.startsAt).toBeNull();
+    expect(fromSavedRow({ ...base, starts_at: null }, D)?.startsAt).toBeNull();
+  });
+
+  it("refuses an unparseable stamp rather than minting an Invalid Date", () => {
+    expect(
+      fromSavedRow({ ...base, starts_at: "garbage" }, D)?.startsAt,
+    ).toBeNull();
+  });
+});
+
 describe("hydrateStops", () => {
   const catalogue = new Map([
     ["v1", { id: "v1", name: "One" }],

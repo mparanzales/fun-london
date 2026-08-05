@@ -93,10 +93,10 @@ export type NightPlan = {
    * The `plans.id` this was reopened from, when it was. Lets the UI say "this
    * is your saved night" without a second lookup.
    *
-   * It does NOT mean "saving updates that row": `public.plans` grants
-   * SELECT/INSERT/DELETE to `authenticated` and has no UPDATE policy, so a
-   * re-save is a new row by construction. That is a deliberate scope boundary,
-   * not an oversight — changing it needs a migration and a lifecycle decision.
+   * Since 0006 it IS the write key: a reopened night saves back to its own
+   * row (the migration added a self-scoped UPDATE policy), so re-saving an
+   * edited night updates rather than duplicates. Before 0006 the table had
+   * no UPDATE policy and every re-save was a new row by construction.
    */
   savedRowId: string | null;
   /**
@@ -303,6 +303,9 @@ export function fromSavedRow(
     title: string;
     neighbourhood: string;
     steps: unknown;
+    /** 0006: rows written since carry their real timing; older rows are null
+     *  and behave exactly as before (no clock rather than a wrong one). */
+    starts_at?: string | null;
   },
   defaults: { vibe: PlanVibe; budget: PlanBudget },
 ): NightPlan | null {
@@ -339,7 +342,16 @@ export function fromSavedRow(
     // Same inference `openSaved` has always used, kept so reopening an old
     // night does not silently change its header.
     daypart: row.title.includes("Day Out") ? "day" : "evening",
-    startsAt: null,
+    // The night's OWN clock, when the row carries one (0006). A timed
+    // reopen gets real arrivals and hours checks; activate's finished-night
+    // guard drops the clock once the night is over, so a PAST night renders
+    // stops without inventing times. tracksClock false: this was a chosen
+    // (or persisted) time, never a mount snapshot.
+    startsAt:
+      typeof row.starts_at === "string" &&
+      Number.isFinite(Date.parse(row.starts_at))
+        ? row.starts_at
+        : null,
     stops,
     source: "saved",
     savedRowId: row.id,

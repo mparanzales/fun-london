@@ -208,7 +208,12 @@ create table if not exists public.plans (
   neighbourhood text not null,
   why_it_works text not null,
   steps jsonb not null,                    -- PlanStep[]
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- 0006: the night's own timing (nullable — legacy rows behave as before)
+  -- and last-touched, backfilled to created_at for pre-0006 rows.
+  starts_at  timestamptz,
+  ends_at    timestamptz,
+  updated_at timestamptz not null default now()
 );
 create index if not exists plans_user_idx on public.plans(user_id);
 
@@ -402,6 +407,21 @@ drop policy if exists "plans self delete" on public.plans;
 create policy "plans self read"   on public.plans for select using ((select auth.uid()) = user_id);
 create policy "plans self write"  on public.plans for insert with check ((select auth.uid()) = user_id);
 create policy "plans self delete" on public.plans for delete using ((select auth.uid()) = user_id);
+drop policy if exists "plans self update" on public.plans;
+create policy "plans self update" on public.plans for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+revoke all on public.plans from anon;
+grant update on public.plans to authenticated; -- policy needs the privilege (0006)
+-- 0006: updated_at is server-authoritative and row identity is pinned in the DB.
+create or replace function public.plans_pin_row()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  new.id := old.id; new.user_id := old.user_id;
+  new.created_at := old.created_at; new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists plans_pin_row on public.plans;
+create trigger plans_pin_row before update on public.plans
+  for each row execute function public.plans_pin_row();
 
 -- ─────────────────────────────────────────────────────────
 -- Auto-create a profile row on new auth.users

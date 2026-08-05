@@ -206,6 +206,8 @@ type SavedPlanRow = {
   id: string;
   title: string;
   neighbourhood: string;
+  starts_at: string | null;
+  ends_at: string | null;
   steps: {
     venueId: string;
     role: PlanRole;
@@ -385,6 +387,12 @@ export function PlanFlow({
   // Save attempt counter. Lives outside saveState because saveState is reset to
   // "idle" by every input edit and by a reshuffle, so it cannot count retries.
   const saveAttemptRef = useRef(0);
+  // The id a NEW night will save under, minted once per night so a retry
+  // after an uncertain failure targets the same row (see onSave). Re-minted
+  // whenever the night changes (same sites that reset the undo history).
+  const pendingSaveIdRef = useRef<string>(
+    typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : "",
+  );
   // True when this night began life as an anonymous preview carried through
   // the sign-in round trip. Rides on the save events as `anon_origin`; the
   // `plan_origin` dimension carries the finer distinction between a live,
@@ -398,6 +406,9 @@ export function PlanFlow({
     setConfirmReshuffle(false);
     setConfirmEdit(false);
     setStartShiftMins(0);
+    pendingSaveIdRef.current =
+      typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : "";
+    lastSavedIdRef.current = null;
     setActive(null);
     anonOriginRef.current = false;
     // The replacement history belongs to the night being stood down.
@@ -861,7 +872,7 @@ export function PlanFlow({
     const supabase = createClient();
     const { data, error } = await supabase
       .from("plans")
-      .select("id,title,neighbourhood,steps")
+      .select("id,title,neighbourhood,steps,starts_at,ends_at")
       .eq("user_id", authUserId)
       .order("created_at", { ascending: false });
     if (error) {
@@ -900,6 +911,21 @@ export function PlanFlow({
     // `swapped: 1` after undoing on one — a wrong dimension, on the conversion
     // event, which this file argues elsewhere is worse than a missing one.
     const swapCount = replacedCount;
+    // 🧨 THREE RULES, EACH A FIXED BLOCKER:
+    // 1. A TRUNCATED reopen never updates its row — overwriting a 3-stop
+    //    night with its 2 surviving stops destroys the third forever. It
+    //    inserts as a new night instead, leaving the original intact.
+    // 2. An update NEVER nulls or silently re-dates stored timing: the
+    //    timing keys are omitted when this screen has no clock, so the row
+    //    keeps what it had (sending null erased it; sending a tracksClock
+    //    "now" re-dated last Friday to tonight).
+    // 3. One night, one row, in BOTH directions of a refresh: the id from a
+    //    successful save is written onto the night (below) and persisted, so
+    //    "edit then save again" updates the same row before AND after a
+    //    round trip.
+    const updateTarget =
+      droppedRef.current === 0 ? (active?.plan?.savedRowId ?? null) : null;
+    const targetId = updateTarget ?? (pendingSaveIdRef.current || null);
     const mode: SaveMode = alreadySaved
       ? "duplicate"
       : swapCount > 0
@@ -937,6 +963,8 @@ export function PlanFlow({
       plan_origin: active?.source ?? "live",
       mode,
       attempt,
+      // in-place updates must not count as new nights on a dashboard.
+      write_path: updateTarget ? "update" : "insert",
       anon_origin: anonOriginRef.current,
       saved_list_loaded: savedListLoadedRef.current,
     };
@@ -946,13 +974,20 @@ export function PlanFlow({
     track("plan_save_tapped", saveProps);
 
     const supabase = createClient();
+    // The night's own timing rides on the ROW (0006), not in steps, so legacy
+    // readers of `steps` are untouched. endsAt derives from the same clock the
+    // screen shows; both null for a clockless night, exactly like a legacy row.
+    const startsAtISO = nightWhen ? nightWhen.toISOString() : null;
+    const endsAtISO = nightWhen
+      ? new Date(nightWhen.getTime() + display.totalMins * 60_000).toISOString()
+      : null;
     // Save what's ON SCREEN — i.e. with any per-stop swaps applied (`display`).
     const names = display.steps.map((s) => s.venue.name).join(" → ");
     const where = display.area === ANYWHERE ? "London" : display.area;
     const kind = display.daypart === "day" ? "day out" : "night";
     // `status` is destructured purely to bucket a failure (0 = never left the
     // device, 401/403 = expired session, 429 = throttled, 5xx = server).
-    const { error, status } = await supabase.from("plans").insert({
+    const rowPayload = {
       user_id: authUserId,
       title: display.title,
       neighbourhood: display.area,
@@ -960,33 +995,56 @@ export function PlanFlow({
       // Canonical adapter. Still an ARRAY with the same four legacy keys, plus
       // `slug` — so a row written today is readable by anything that predates
       // the model, including the account-data export. See lib/night-plan.ts.
-      // 🧨 Built from what is ON SCREEN, never spread from `computed`. The
-      // spread put the LIVE engine run's vibe, budget and daypart on a
-      // restored night's adapter — the exact "stale generation metadata" this
-      // model exists to remove. It leaked nothing only because toSavedSteps
-      // throws those three away; the moment anyone widens it (which the
-      // schema note in lib/night-plan.ts anticipates), a reopened evening
-      // night saves as a day out with no test failing.
       steps: toSavedSteps(
         fromEnginePlan(
           {
+            ...computed,
             area: display.area,
-            vibe,
-            budget,
-            daypart: display.daypart,
             steps: display.steps.map((s) => ({
               ...s,
               arriveAt: s.arriveAt ?? null,
             })),
           },
-          {
-            title: display.title,
-            offset,
-            tracksClock: timing?.tracksClock ?? true,
-          },
+          { title: display.title },
         ),
       ),
-    });
+      // 🧨 An update writes timing ONLY from the night's OWN clock (the row's
+      // stored start, or a deliberate shift) — never the ambient fallback.
+      // The ambient clock re-dated last Tuesday's night to tonight when
+      // reopened in the evening, and NULLed it when reopened in daylight.
+      ...(updateTarget && active?.startsAt == null && startShiftMins === 0
+        ? {}
+        : { starts_at: startsAtISO, ends_at: endsAtISO }),
+      // updated_at is set by the plans_pin_row trigger - server-authoritative,
+      // never the client clock.
+    };
+    // 🧨 ONE ROW PER NIGHT, TWO MECHANISMS.
+    //
+    // A REOPENED saved night saves back to ITS OWN row: before 0006 the write
+    // path was insert-only, so every re-save of an edited night was a
+    // duplicate in a table with no delete UI — the reason Save used to be
+    // hidden there at all. The row id comes from the night itself
+    // (savedRowId), and RLS pins both halves to the owner.
+    //
+    // A NEW night inserts under a CLIENT-MINTED id held for the night's life,
+    // via upsert on that id — so a retry after an uncertain failure (the
+    // write landed, the response died) updates the same row instead of
+    // inserting a twin. Idempotent by key, not by luck.
+    // crypto.randomUUID needs a secure context; the ref holds "" outside one.
+    // With no key the id is omitted and the DB mints it - a retry can then
+    // duplicate, which is exactly the pre-0006 behaviour, no worse than today.
+
+    const {
+      data: savedRow,
+      error,
+      status,
+    } = targetId
+      ? await supabase
+          .from("plans")
+          .upsert({ id: targetId, ...rowPayload }, { onConflict: "id" })
+          .select("id")
+          .single()
+      : await supabase.from("plans").insert(rowPayload).select("id").single();
     if (error) {
       console.error("[plans] save failed:", error);
       // 🧨 Not back to "idle". That flickered "Saving…" and returned the
@@ -1010,6 +1068,22 @@ export function PlanFlow({
         pg_error_code: typeof error.code === "string" ? error.code : "none",
       });
       return;
+    }
+    // 🧨 The row id is recorded on the NIGHT the moment the save lands, so
+    // every later save in this session updates that row — never a twin. For
+    // an active night it rides on the plan (and the persist effect carries it
+    // to localStorage); for a live night the per-night ref becomes the key,
+    // which also closes the no-secure-context branch where the DB minted it.
+    const savedId = savedRow?.id ?? targetId;
+    if (savedId) {
+      pendingSaveIdRef.current = savedId;
+      lastSavedIdRef.current = savedId;
+      if (active?.plan && active.plan.savedRowId !== savedId) {
+        setActive({
+          ...active,
+          plan: { ...active.plan, savedRowId: savedId },
+        });
+      }
     }
     setSaveState("saved");
     recordSignal("plan_completed", { surface: "plan" });
@@ -1216,6 +1290,7 @@ export function PlanFlow({
             60_000;
         if (endsAt < Date.now()) steps = relinkSteps(stops, undefined);
       }
+      droppedRef.current = dropped;
       if (dropped > 0) {
         track("plan_restored_partial", {
           dropped,
@@ -1263,6 +1338,8 @@ export function PlanFlow({
       setConfirmReshuffle(false);
       setConfirmEdit(false);
       setStartShiftMins(0);
+      pendingSaveIdRef.current =
+        typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : "";
       setVibe(np.vibe);
       setBudget(np.budget);
       // The night's own daypart, so "Try another combination" regenerates
@@ -1292,8 +1369,10 @@ export function PlanFlow({
       const wasRightNow = np.tracksClock;
       // A night still running after midnight would seed YESTERDAY, below the
       // picker's floor, and then plan for a time already past.
-      const inThePast =
-        !!startDate && toISODate(startDate) < toISODate(new Date());
+      // Timestamps, not date strings: a start earlier TODAY passed the date
+      // compare and seeded 13:00 back into the When control, so the next
+      // generated night printed afternoon arrivals at 19:00.
+      const inThePast = !!startDate && startDate.getTime() < Date.now();
       if (startDate && !wasRightNow && !inThePast) {
         setWhen("custom");
         setCustomDate(toISODate(startDate));
@@ -1359,6 +1438,20 @@ export function PlanFlow({
   // forward action is Build, which discards them and their history.
   const [confirmEdit, setConfirmEdit] = useState(false);
 
+  // upcoming / active(now) / past / untimed — from the row's own timing. A
+  // legacy row with no timing gets no label rather than a guessed one.
+  const lifecycleOf = (row: SavedPlanRow): string | null => {
+    if (!row.starts_at) return null;
+    const start = Date.parse(row.starts_at);
+    const endRaw = row.ends_at ? Date.parse(row.ends_at) : NaN;
+    const end = Number.isFinite(endRaw) ? Math.max(endRaw, start) : start;
+    if (!Number.isFinite(start)) return null;
+    const nowMs = Date.now();
+    if (nowMs < start) return "upcoming";
+    if (nowMs <= end) return "happening now";
+    return "past";
+  };
+
   const openSaved = (row: SavedPlanRow) => {
     // 🧨 REOPENING USED TO DESTROY AN UNSAVED NIGHT IN SILENCE. Two taps from a
     // live result — "← Edit", then a row in this list — overwrote the active
@@ -1407,6 +1500,7 @@ export function PlanFlow({
         title: row.title,
         neighbourhood: row.neighbourhood,
         steps: row.steps,
+        starts_at: row.starts_at,
       },
       { vibe, budget },
     );
@@ -1430,6 +1524,13 @@ export function PlanFlow({
   // replacement carries its own createdAt, source, offset and clock intent
   // instead of minting fresh ones — which would restart the freshness window
   // and relabel its provenance on every change.
+  // Stops lost to catalogue churn on the CURRENT night. A truncated reopen
+  // must never overwrite its own row (blocker: a 3-stop night reopened as 2
+  // and saved destroyed the third stop forever, silently).
+  const droppedRef = useRef(0);
+  // Set ONLY by a successful save; null until then. Distinct from
+  // pendingSaveIdRef, which is minted before any save exists.
+  const lastSavedIdRef = useRef<string | null>(null);
   const restoredForRef = useRef<string | null | undefined>(undefined);
   // 🧨 BEFORE THE BROWSER PAINTS, not after. `step` initialises to "setup", so
   // running this as a normal effect meant the setup form was painted first and
@@ -1600,6 +1701,9 @@ export function PlanFlow({
           // read.
           tracksClock:
             startShiftMins !== 0 ? false : (timing?.tracksClock ?? true),
+          // The id of the row this night was saved to, if it was — so after a
+          // refresh "edit then save" updates that row rather than duplicating.
+          savedRowId: lastSavedIdRef.current,
         },
       ),
     );
@@ -2168,7 +2272,9 @@ export function PlanFlow({
                     {p.title}
                   </div>
                   <div className="text-[11px] text-muted-fg mt-0.5">
-                    {p.steps.length} stops · tap to re-open
+                    {p.steps.length} stops
+                    {lifecycleOf(p) ? ` · ${lifecycleOf(p)}` : ""} · tap to
+                    re-open
                   </div>
                 </button>
               ))}

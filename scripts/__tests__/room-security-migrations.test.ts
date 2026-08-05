@@ -47,6 +47,9 @@ describe("migration sequence", () => {
       "0001_plan_rooms.sql",
       "0004_server_side_room_codes.sql",
       "0005_create_room_throttle.sql",
+      // 0006: saved-night timing + the plans self-update policy. Additive,
+      // idempotent, backfills updated_at from created_at.
+      "0006_saved_plan_timing.sql",
     ]);
     for (const f of inChain) {
       const sql = readFileSync(join(DIR, f), "utf8")
@@ -521,5 +524,23 @@ describe("staging-harness guards (behaviour, not spelling)", () => {
     // picking up this import must fail here rather than pass silently.
     // verify-plan and verify-feed-rank are tracked as follow-up work.
     expect(offenders.sort()).toEqual(["verify-feed-rank.ts", "verify-plan.ts"]);
+  });
+});
+
+describe("0006 · the plans self-update policy keeps both halves", () => {
+  it("🧨 USING and WITH CHECK are both pinned to the owner", () => {
+    // Dropping WITH CHECK reopens re-homing a row to another user — the
+    // single most damaging future edit to this policy. Comment-stripped so
+    // the migration's own prose cannot satisfy it.
+    const src = readFileSync(
+      join(__dirname, "../../supabase/migrations/0006_saved_plan_timing.sql"),
+      "utf8",
+    ).replace(/--.*$/gm, "");
+    const m = src.match(
+      /create policy "plans self update"[\s\S]*?with check \(\(select auth\.uid\(\)\) = user_id\)/,
+    );
+    expect(m, "policy must carry USING and WITH CHECK, owner-pinned").not.toBeNull();
+    expect(m![0]).toContain("using ((select auth.uid()) = user_id)");
+    expect(m![0]).toContain("for update to authenticated");
   });
 });

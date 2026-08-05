@@ -88,8 +88,8 @@ export type SaveFailReason =
 
 // What kind of save this was. Note what is ABSENT and why, so nobody reads a
 // structural zero as a tracking bug:
-//   • no "update"        — the plans write is insert-only and there is no
-//                          UPDATE policy on the table.
+//   • "update" rides on write_path, not SaveMode: since 0006 a reopened or
+//     previously saved night updates its own row in place.
 //   • no "restored_anon" — a restored or claimed night IS savable (that is the
 //                          conversion path), so this would be a real state.
 //                          It is not a SaveMode because it is orthogonal to
