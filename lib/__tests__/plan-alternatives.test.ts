@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   alternativesFor,
   closedOnArrival,
+  shiftReducesClosed,
   computePlan,
   relinkSteps,
   withinWalkOfAny,
@@ -515,5 +516,64 @@ describe("closedOnArrival", () => {
   it("says nothing about a night with no clock", () => {
     const steps = [{ venue: at("x", "Bar", HERE), arriveAt: null }];
     expect(closedOnArrival(steps)).toEqual([]);
+  });
+});
+
+describe("shiftReducesClosed · the start-earlier lever only shows when it helps", () => {
+  const at19 = new Date(2026, 5, 10, 19, 0);
+  const d = at19.getDay();
+  const window = (openH: number, closeH: number): OpeningHours => ({
+    periods: [
+      {
+        open: { day: d, hour: openH, minute: 0 },
+        close: { day: d, hour: closeH, minute: 0 },
+      },
+    ],
+  });
+
+  it("true when stepping back re-opens a stop that SHUT", () => {
+    // Two stops so the second has a real arrival; it closes at 20:30 and the
+    // 19:00 start reaches it at ~20:38. Thirty minutes earlier lands inside.
+    const stops = relinkSteps(
+      [
+        { venue: at("s0", "Restaurant", HERE), role: "Start" as const },
+        {
+          venue: at("s1", "Bar", HERE, { openingHours: window(6, 20) }),
+          role: "Then" as const,
+        },
+      ],
+      at19,
+    );
+    expect(closedOnArrival(stops)).toEqual([1]); // the premise
+    expect(shiftReducesClosed(stops, at19, -60)).toBe(true);
+  });
+
+  it("🧨 false when the stop has not OPENED yet, so stepping back cannot help", () => {
+    // The direction the unguarded lever made worse: doors at 22:00, arrival
+    // ~20:38. Earlier is further from the fix. Every tap the old chip allowed
+    // here moved the night the wrong way, with the copy instructing it.
+    const stops = relinkSteps(
+      [
+        { venue: at("s0", "Restaurant", HERE), role: "Start" as const },
+        {
+          venue: at("s1", "Bar", HERE, { openingHours: window(22, 23) }),
+          role: "Then" as const,
+        },
+      ],
+      at19,
+    );
+    expect(closedOnArrival(stops)).toEqual([1]);
+    expect(shiftReducesClosed(stops, at19, -30)).toBe(false);
+  });
+
+  it("false when nothing is shut, so the lever has nothing to fix", () => {
+    const stops = relinkSteps(
+      [
+        { venue: at("s0", "Restaurant", HERE), role: "Start" as const },
+        { venue: at("s1", "Bar", HERE), role: "Then" as const },
+      ],
+      at19,
+    );
+    expect(shiftReducesClosed(stops, at19, -30)).toBe(false);
   });
 });

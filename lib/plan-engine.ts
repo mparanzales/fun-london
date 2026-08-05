@@ -724,6 +724,33 @@ function closesALaterStop(
 }
 
 /**
+ * Would starting `shiftMins` earlier (negative) or later leave FEWER stops
+ * shut on arrival?
+ *
+ * The lever this powers steps a night's start back 30 minutes at a time.
+ * Unguarded, it made some nights strictly worse forever: closedOnArrival is
+ * "not open at arrival", which is true in BOTH directions, so a music room
+ * that OPENS at 23:00 with arrival 22:40 counts as closed — and every
+ * earlier step moved the night further from the fix, with the copy
+ * instructing exactly that. Extracted so the suite can break it on purpose;
+ * the component composes it into the chip's visibility.
+ *
+ * Compares COUNTS: a shift that re-opens two stops and darkens one still
+ * qualifies, which is the intended reading of "helps".
+ */
+export function shiftReducesClosed(
+  stops: { venue: Venue; role: PlanRole }[],
+  when: Date,
+  shiftMins: number,
+): boolean {
+  const shifted = new Date(when.getTime() + shiftMins * 60_000);
+  return (
+    closedOnArrival(relinkSteps(stops, shifted)).length <
+    closedOnArrival(relinkSteps(stops, when)).length
+  );
+}
+
+/**
  * The indices of stops that will be SHUT when the user arrives.
  *
  * A night is not static: a replacement moves later arrivals, and undo restores

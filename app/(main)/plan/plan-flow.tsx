@@ -39,6 +39,7 @@ import {
   alternativesFor,
   withinWalkOfAll,
   closedOnArrival,
+  shiftReducesClosed,
   withinBudget,
   relinkSteps,
   isDaytimeHour,
@@ -373,9 +374,9 @@ export function PlanFlow({
   // not a guard; it is an early return.
   const editKeyRef = useRef<unknown>(null);
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
-    "idle",
-  );
+  const [saveState, setSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
 
   // ── Analytics-only refs (no product behaviour depends on these) ──────
   // Fire-once latch for plan_setup_started. A ref, not state: flipping it must
@@ -395,6 +396,8 @@ export function PlanFlow({
   // argues elsewhere is worse than a missing one.
   const standDown = useCallback(() => {
     setConfirmReshuffle(false);
+    setConfirmEdit(false);
+    setStartShiftMins(0);
     setActive(null);
     anonOriginRef.current = false;
     // The replacement history belongs to the night being stood down.
@@ -521,7 +524,38 @@ export function PlanFlow({
   const cycle = current?.cycle ?? {};
 
   // A restored night keeps its own clock; a live one follows the controls.
-  const nightWhen = active ? active.startsAt : timing?.when;
+  // How far the user has nudged the start, in minutes (negative = earlier).
+  // Session-level: reset whenever the night changes, carried into the persist
+  // below so a refresh keeps it.
+  const [startShiftMins, setStartShiftMins] = useState(0);
+
+  // 🧨 A REOPENED SAVED ROW GETS A CLOCK ONLY WHEN THAT CLOCK IS *NOW*.
+  // `plans` stores no start time, so these nights had none — honest about
+  // arrivals, but it also disabled every opening-hours check: a saved night
+  // could offer a shut venue and warn about nothing. The first fix fell back
+  // to the seeded controls' representative time, and that re-entered the
+  // exact bug this file records as fixed: reopening a saved Day Out at 8pm
+  // printed "arrive ~1:00 pm" — seven hours in the past, in the boldest text
+  // on the card, from a clock shown nowhere on the screen. `tracksClock` is
+  // the discriminator resolveTiming already computes: TRUE exactly when it
+  // returned the live clock. A reopened evening night viewed in the evening
+  // shows arrivals anchored to the moment the page loaded — verifiable,
+  // never invented, though nothing on screen labels the anchor (the header
+  // carries no start time; a known limitation) — and any other combination
+  // keeps no clock at all rather than a wrong one.
+  const nightWhen = useMemo(() => {
+    // Generated/claimed nights with no `startsAt` stay clockless: the
+    // finished-night guard dropped it deliberately, and resurrecting it
+    // would print arrivals for a night that is already over.
+    const base = active
+      ? (active.startsAt ??
+        (active.source === "saved" && timing?.tracksClock
+          ? timing.when
+          : undefined))
+      : timing?.when;
+    if (!base || startShiftMins === 0) return base;
+    return new Date(base.getTime() + startShiftMins * 60_000);
+  }, [active, timing, startShiftMins]);
 
   // Built once here and used by both the render and the handlers, so the list
   // a user is offered is provably the list the tap picks from.
@@ -657,6 +691,46 @@ export function PlanFlow({
   // for a bug in the wrong place.
   const closedStops = closedOnArrival(display.steps);
 
+  // 🧨 "Start earlier" exists ON THIS SCREEN now. The closed-stop warning used
+  // to suggest starting earlier while the only route to a time control was
+  // "← Edit" — which discards the night, its replacements and its history. A
+  // 30-minute step back re-anchors the clock in place: arrivals, the
+  // hours checks and every option list recompute from the shifted start, and
+  // the persist below carries it, so it survives a refresh. Hidden when the
+  // shifted start would be in the past — you cannot start before now — and
+  // when nothing is shut, because a night with no problem needs no lever.
+  const EARLIER_STEP_MINS = 30;
+  // 🧨 ...and only when the shift would actually HELP. closedOnArrival is
+  // "not open at arrival", which is true in BOTH directions — a music room
+  // that OPENS at 23:00 with arrival 22:40 is "closed" too, and stepping the
+  // night earlier moves it further from the fix on every tap, with the copy
+  // instructing exactly that. The chip simulates the shifted night and shows
+  // only when it reduces the count. Date.now() in render is impure but safe
+  // here: the result screen never SSRs (`step` starts at "setup"). Staleness
+  // cuts the retiring way — nightWhen is frozen at mount while Date.now()
+  // ticks, so on a long-open page the chip retires itself as the real clock
+  // catches the night's start. Conservative in the right direction: it stops
+  // offering to move a start into the past.
+  const canStartEarlier =
+    closedStops.length > 0 &&
+    nightWhen != null &&
+    nightWhen.getTime() - EARLIER_STEP_MINS * 60_000 >= Date.now() - 60_000 &&
+    shiftReducesClosed(stops, nightWhen, -EARLIER_STEP_MINS);
+  const startEarlier = () => {
+    if (!canStartEarlier) return;
+    // One source for both the state and the event, so a double-tap cannot
+    // report the same shift twice at different true values. saveState is NOT
+    // reset here: the shift does not change the night's venues, and wiping a
+    // "Couldn't save" message with an unrelated tap erased the screen's only
+    // error report.
+    const next = startShiftMins - EARLIER_STEP_MINS;
+    setStartShiftMins(next);
+    track("plan_start_earlier", {
+      shift_mins: next,
+      closed_stops: closedStops.length,
+    });
+  };
+
   // 🧨 Memoised, and computed ONCE for all stops. The diagnosis below called
   // buildOptions per empty stop and was itself called twice per stop (the
   // title attribute and the paragraph), so a full catalogue pass ran four
@@ -728,13 +802,12 @@ export function PlanFlow({
     if (closedStops.includes(i)) {
       return canChange
         ? "Closed by the time you'd get here. Change it."
-        : // 🧨 No clock promise. "…rebuilds from the time it is now" is false
-          // whenever `when` is "custom" — which `activate` sets for any
-          // restored night with a pinned start — and for a restored evening
-          // night viewed in daylight, where resolveTiming returns 19:00.
-          // Naming the control is true in every case; naming the clock was
-          // not.
-          "Closed by the time you'd get here, and nothing open fits this slot. Try another combination below.";
+        : // Named controls only. The chip's own rule (canStartEarlier) also
+          // requires that shifting actually reduces what is shut, so this
+          // copy names it via that flag, never by restating the rule.
+          canStartEarlier
+          ? "Closed by the time you'd get here, and nothing open fits this slot. Start earlier, or try another combination below."
+          : "Closed by the time you'd get here, and nothing open fits this slot. Try another combination below.";
     }
     return canChange ? null : noOptionsReason(i);
   };
@@ -746,7 +819,9 @@ export function PlanFlow({
       // covers two causes: the candidate is shut when you reach it, or it
       // would push a LATER stop past closing. The wording has to be true of
       // both, so it names the clock rather than a specific venue.
-      return "Nothing else here works with your timings. Try an earlier start.";
+      // Named controls only. "Try an earlier start" pointed at a chip that is
+      // hidden in exactly this state (it needs a CLOSED stop to show).
+      return "Nothing else here works with your timings. Try another combination below.";
     }
     const total = stops.length;
     if (total > 2 && i > 0 && i < total - 1) {
@@ -914,7 +989,18 @@ export function PlanFlow({
     });
     if (error) {
       console.error("[plans] save failed:", error);
-      setSaveState("idle");
+      // 🧨 Not back to "idle". That flickered "Saving…" and returned the
+      // button to "Save this night" as if nothing happened — the one durable
+      // action in the loop failing silently. "error" keeps the button live
+      // and makes it the retry.
+      setSaveState("error");
+      // 🧨 Re-check the saved list BEFORE offering the retry. A write that
+      // landed server-side but errored on the way back (5xx, timeout) leaves
+      // alreadySaved false, and the retry then inserts a second row into an
+      // insert-only table with no delete UI — the permanent duplicate three
+      // other comment blocks in this file exist to prevent. If the phantom
+      // write landed, the reload flips the button to "Saved to your nights".
+      void loadSavedPlans();
       // Only the mapped category and the SQLSTATE code. Never error.message,
       // never error.details (a full stack trace on the network path), never
       // error.hint. See lib/analytics-reasons.ts.
@@ -1172,9 +1258,11 @@ export function PlanFlow({
       setEdited(null);
       editedRef.current = null;
       setUndoStack([]);
-      // A different night is on screen now; the card that belonged to the last
-      // one must not arrive with it.
+      // A different night is on screen now; the cards and the start nudge that
+      // belonged to the last one must not arrive with it.
       setConfirmReshuffle(false);
+      setConfirmEdit(false);
+      setStartShiftMins(0);
       setVibe(np.vibe);
       setBudget(np.budget);
       // The night's own daypart, so "Try another combination" regenerates
@@ -1267,6 +1355,9 @@ export function PlanFlow({
   const [pendingSaved, setPendingSaved] = useState<SavedPlanRow | null>(null);
   // Shown when "Try another combination" would discard manual replacements.
   const [confirmReshuffle, setConfirmReshuffle] = useState(false);
+  // Shown when "← Edit" would walk away from manual replacements: setup's only
+  // forward action is Build, which discards them and their history.
+  const [confirmEdit, setConfirmEdit] = useState(false);
 
   const openSaved = (row: SavedPlanRow) => {
     // 🧨 REOPENING USED TO DESTROY AN UNSAVED NIGHT IN SILENCE. Two taps from a
@@ -1433,6 +1524,25 @@ export function PlanFlow({
       if (!src || display.steps.length === 0) return;
       writeActivePlan(owner, {
         ...src,
+        // 🧨 A nudged start survives the refresh — written ONLY when the user
+        // shifted it, so an untouched night keeps its stored clock
+        // byte-for-byte, tracksClock re-anchoring included. Side-effect,
+        // stated: isFresh measures start + duration, so each 30-minute step
+        // back also expires the night 30 minutes earlier. That is the honest
+        // consequence of genuinely starting earlier.
+        ...(startShiftMins !== 0 && nightWhen
+          ? {
+              startsAt: nightWhen.toISOString(),
+              // 🧨 Shifting makes the night stop being a live-clock night.
+              // Writing startsAt alone was inert on the DEFAULT path: activate
+              // re-anchors any tracksClock night to `new Date()` and throws
+              // the persisted value away — so the shift vanished on the walk
+              // back from a venue card, the shut stop returned, and nothing
+              // said anything had changed. The user chose a time; the night
+              // keeps it.
+              tracksClock: false,
+            }
+          : {}),
         title: display.title,
         area: display.area,
         daypart: display.daypart,
@@ -1481,7 +1591,15 @@ export function PlanFlow({
           title: display.title,
           createdAt: genStampRef.current.at,
           offset,
-          tracksClock: timing?.tracksClock ?? true,
+          // 🧨 A shifted night has a CHOSEN time, whatever the When control
+          // said. This override first landed in onSave — where toSavedSteps
+          // discards tracksClock entirely, so it was dead code — while THIS
+          // call, the one whose output activate actually reads back, kept
+          // writing true and re-anchoring the shifted start away. The fifth
+          // wrong-place landing of this series; the value lives where it is
+          // read.
+          tracksClock:
+            startShiftMins !== 0 ? false : (timing?.tracksClock ?? true),
         },
       ),
     );
@@ -1489,7 +1607,20 @@ export function PlanFlow({
     // the offset and derives from the same timing), but listed so the
     // persisted reshuffle position and clock intent cannot silently go stale
     // if that ever stops being true.
-  }, [step, active, computed, display, owner, offset, timing]);
+    // `startShiftMins`/`nightWhen` listed for the shifted-start override
+    // above; without them a nudge would not persist until some other dep
+    // moved.
+  }, [
+    step,
+    active,
+    computed,
+    display,
+    owner,
+    offset,
+    timing,
+    startShiftMins,
+    nightWhen,
+  ]);
 
   // Hydrate a night built while signed OUT. The anon /plan flow stashes its
   // result in localStorage before the sign-in round-trip (three navigations
@@ -1702,6 +1833,9 @@ export function PlanFlow({
     editedRef.current = prev;
     setEdited(prev);
     setSaveState("idle");
+    // Both cards, not one: this exact miss on the edit card made "You've
+    // changed a stop" appear unprompted with the back control greyed.
+    setConfirmEdit(false);
     // 🧨 An undo answers the reshuffle question by making it moot. Without
     // this the flag survived the card: undo back to zero replacements and the
     // card unmounts (it renders on `hasReplacements`) while the flag stays
@@ -2099,11 +2233,56 @@ export function PlanFlow({
       >
         <button
           type="button"
-          onClick={() => setStep("setup")}
-          className="bg-white/15 text-white rounded-lg px-2.5 py-1 text-[11px] font-bold mb-2.5"
+          onClick={() => {
+            // 🧨 Setup's only forward action is Build, which discards the
+            // night, its replacements and its undo history — and this button
+            // sits where a back button sits, styled like the Undo chip beside
+            // it. One tap of curiosity cost three changes with no warning.
+            if (hasReplacements && !confirmEdit) {
+              setConfirmEdit(true);
+              // One question at a time: two competing loss warnings with two
+              // disabled primaries is not a choice, it is a wall.
+              setConfirmReshuffle(false);
+              track("plan_edit_confirm_shown", { replaced: replacedCount });
+              return;
+            }
+            setConfirmEdit(false);
+            setStep("setup");
+          }}
+          disabled={confirmEdit && hasReplacements}
+          className="bg-white/15 text-white rounded-lg px-2.5 py-1 text-[11px] font-bold mb-2.5 disabled:opacity-50"
         >
           ← Edit
         </button>
+        {confirmEdit && hasReplacements && (
+          <div className="mb-2.5 rounded-2xl bg-white/15 p-3 text-left">
+            <p className="text-[12px] leading-relaxed m-0">
+              You&apos;ve changed{" "}
+              {replacedCount === 1 ? "a stop" : `${replacedCount} stops`}.
+              Rebuilding from setup won&apos;t keep{" "}
+              {replacedCount === 1 ? "it" : "them"}.
+            </p>
+            <div className="flex gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmEdit(false);
+                  setStep("setup");
+                }}
+                className="h-9 px-3 rounded-xl bg-white/25 text-white text-[12px] font-extrabold"
+              >
+                Edit anyway
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmEdit(false)}
+                className="h-9 px-3 rounded-xl bg-white text-heading text-[12px] font-extrabold"
+              >
+                Keep my night
+              </button>
+            </div>
+          </div>
+        )}
         <h2 className="text-[22px] font-extrabold m-0">
           {display.daypart === "day"
             ? "Today, the plan:"
@@ -2126,6 +2305,28 @@ export function PlanFlow({
           />{" "}
           {fmtHours(display.totalMins)}
         </div>
+        {canStartEarlier ? (
+          <button
+            type="button"
+            onClick={startEarlier}
+            className="mt-2.5 mr-2 inline-flex items-center gap-1.5 bg-white/15 text-white rounded-lg px-2.5 py-1 text-[11px] font-bold"
+          >
+            <Clock className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />
+            Start 30 min earlier
+          </button>
+        ) : null}
+        {startShiftMins !== 0 ? (
+          // 🧨 An INERT readout, ALONGSIDE the chip rather than as its
+          // else-branch. As the else it vanished exactly when a user was most
+          // likely to tap twice — a shift that helped but did not fully fix
+          // kept the chip and dropped the readout. Alongside, it reports every
+          // shift, and when a successful tap unmounts the chip it still holds
+          // the row so "Undo change" cannot slide under a second eager tap.
+          <span className="mt-2.5 mr-2 inline-flex items-center gap-1.5 bg-white/10 text-white/80 rounded-lg px-2.5 py-1 text-[11px] font-bold">
+            <Clock className="w-3.5 h-3.5" strokeWidth={2} aria-hidden />
+            Starting {-startShiftMins} min earlier
+          </span>
+        ) : null}
         {canUndo && (
           <button
             type="button"
@@ -2371,6 +2572,7 @@ export function PlanFlow({
               // way back.
               if (hasReplacements && !confirmReshuffle) {
                 setConfirmReshuffle(true);
+                setConfirmEdit(false);
                 track("plan_reshuffle_confirm_shown", {
                   replaced: replacedCount,
                 });
@@ -2415,14 +2617,23 @@ export function PlanFlow({
               type="button"
               onClick={onSave}
               disabled={
-                saveState !== "idle" ||
+                // "error" stays ENABLED: the button is the retry — including
+                // when the error-path list reload ALSO failed (same outage),
+                // which used to grey a button still labelled "tap to retry"
+                // over a paragraph saying Save is off. The duplicate risk the
+                // list gate exists for is moot mid-outage: a retry that
+                // cannot reach the server cannot insert anything.
+                saveState === "saving" ||
+                saveState === "saved" ||
                 alreadySaved ||
-                // A reopened saved row before its list has loaded: we cannot
-                // yet tell "already saved" from "new", and guessing wrong
-                // writes a permanent duplicate.
-                // Not just "saved" — any night whose already-saved status we
-                // cannot confirm. An unconfirmed live night can duplicate too.
-                !savedListLoaded
+                (saveState !== "error" &&
+                  // A reopened saved row before its list has loaded: we cannot
+                  // yet tell "already saved" from "new", and guessing wrong
+                  // writes a permanent duplicate.
+                  // Not just "saved": any night whose already-saved status we
+                  // cannot confirm. An unconfirmed live night can duplicate
+                  // too.
+                  !savedListLoaded)
               }
               className="w-full h-12 rounded-2xl bg-primary text-primary-fg text-[14px] font-extrabold disabled:opacity-70"
             >
@@ -2437,6 +2648,8 @@ export function PlanFlow({
                 </>
               ) : saveState === "saving" ? (
                 "Saving…"
+              ) : saveState === "error" ? (
+                "Couldn't save · tap to retry"
               ) : (
                 "Save this night"
               )}
@@ -2462,8 +2675,9 @@ export function PlanFlow({
                 strokeWidth={2}
                 aria-hidden
               />
-              We couldn&apos;t check your saved nights, so Save is off to avoid
-              saving this twice.{" "}
+              {saveState === "error"
+                ? "We couldn't check your saved nights either. Retrying may save this twice if the first attempt landed."
+                : "We couldn't check your saved nights, so Save is off to avoid saving this twice."}{" "}
               <button
                 type="button"
                 onClick={() => void loadSavedPlans()}
