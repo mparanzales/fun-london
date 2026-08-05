@@ -785,20 +785,37 @@ export async function fetchVenuesByTag(
 // venues stale within a week of being written). Cookie-free on purpose: /about
 // is a static page, and the anon role can count ids (id is in the card grant,
 // and the filters google_place_id / hidden_at are granted for exactly this).
-export async function fetchVenueCount(): Promise<number> {
-  const supabase = createStaticAnonClient();
-  const { count, error } = await supabase
-    .from("venues")
-    .select("id", { count: "exact", head: true })
-    .not("google_place_id", "is", null)
-    .is("hidden_at", null)
-    // Never surface a venue on a stock (Unsplash) fallback or with no real
-    // photo. Show a real Google Places photo (mirrored to our storage), or
-    // nothing.
-    .not("img_url", "ilike", "%unsplash%")
-    .neq("img_url", "");
-  if (error) throw new Error(`fetchVenueCount: ${error.message}`);
-  return count ?? 0;
+// Returns null rather than throwing when the count is unavailable, because
+// check.yml's next-build job is DELIBERATELY secret-free (its own comment:
+// verified 2026-07-25 that the build completes with no env) and /about
+// prerenders at build time. Vercel always has the public env, so every build
+// a user actually sees renders the real number; the numberless sentence is
+// the CI-prerender state and the graceful-degradation state, never the norm.
+export async function fetchVenueCount(): Promise<number | null> {
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    return null;
+  }
+  try {
+    const supabase = createStaticAnonClient();
+    const { count, error } = await supabase
+      .from("venues")
+      .select("id", { count: "exact", head: true })
+      .not("google_place_id", "is", null)
+      .is("hidden_at", null)
+      // Never surface a venue on a stock (Unsplash) fallback or with no real
+      // photo. Show a real Google Places photo (mirrored to our storage), or
+      // nothing. Same predicate as the sentence it feeds: "every one
+      // photographed" stays true by construction.
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "");
+    if (error) return null;
+    return count ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {

@@ -154,10 +154,17 @@ export default async function AboutPage() {
             <p className="mt-10 max-w-[36rem] text-[14px] leading-relaxed text-muted-fg">
               Three real stops, live in the app right now, minutes apart on
               foot. Chosen from{" "}
-              <strong className="font-bold text-fg">
-                {venueCount.toLocaleString("en-GB")}
-              </strong>{" "}
-              venues across London, every one photographed.
+              {venueCount !== null ? (
+                <>
+                  <strong className="font-bold text-fg">
+                    {venueCount.toLocaleString("en-GB")}
+                  </strong>{" "}
+                  venues across London
+                </>
+              ) : (
+                <>the live catalogue</>
+              )}
+              , every one photographed.
             </p>
           </section>
 
