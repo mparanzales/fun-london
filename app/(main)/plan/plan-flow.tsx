@@ -982,10 +982,7 @@ export function PlanFlow({
           {
             title: display.title,
             offset,
-            // A shifted night has a CHOSEN time now, whatever the When
-            // control said — same rule as the restored branch above.
-            tracksClock:
-              startShiftMins !== 0 ? false : (timing?.tracksClock ?? true),
+            tracksClock: timing?.tracksClock ?? true,
           },
         ),
       ),
@@ -1594,7 +1591,15 @@ export function PlanFlow({
           title: display.title,
           createdAt: genStampRef.current.at,
           offset,
-          tracksClock: timing?.tracksClock ?? true,
+          // 🧨 A shifted night has a CHOSEN time, whatever the When control
+          // said. This override first landed in onSave — where toSavedSteps
+          // discards tracksClock entirely, so it was dead code — while THIS
+          // call, the one whose output activate actually reads back, kept
+          // writing true and re-anchoring the shifted start away. The fifth
+          // wrong-place landing of this series; the value lives where it is
+          // read.
+          tracksClock:
+            startShiftMins !== 0 ? false : (timing?.tracksClock ?? true),
         },
       ),
     );
@@ -2670,8 +2675,9 @@ export function PlanFlow({
                 strokeWidth={2}
                 aria-hidden
               />
-              We couldn&apos;t check your saved nights, so Save is off to avoid
-              saving this twice.{" "}
+              {saveState === "error"
+                ? "We couldn't check your saved nights either. Retrying may save this twice if the first attempt landed."
+                : "We couldn't check your saved nights, so Save is off to avoid saving this twice."}{" "}
               <button
                 type="button"
                 onClick={() => void loadSavedPlans()}

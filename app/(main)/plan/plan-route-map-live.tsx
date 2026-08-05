@@ -60,94 +60,106 @@ export function PlanRouteMapLive({ steps }: { steps: RouteStep[] }) {
     // stable yet, and 300 ms of empty bordered box reads as broken.
     const settle = setTimeout(
       async () => {
-        const L = (await import("leaflet")).default;
-        const m = mapRef.current;
-        if (cancelled || !m) return;
-
-        const latlngs = pts.map(
-          (p) => [p.venue.lat, p.venue.lng] as [number, number],
-        );
-
-        // 🧨 The OLD line stays drawn while the new one is fetched. Clearing it
-        // first is what produced the flash: a blank map, then a dashed
-        // straight-line guess, then the real route — three states for one tap.
-        // Real walking geometry from the keyless OSRM foot service on OSM data.
-        const drawStops = () => {
-          stopLayerRef.current?.remove();
-          const group = L.layerGroup().addTo(m);
-          stopLayerRef.current = group;
-          pts.forEach((p, i) => {
-            const icon = L.divIcon({
-              className: "",
-              html:
-                `<div style="width:26px;height:26px;border-radius:50%;background:${ACCENT};` +
-                `color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;` +
-                `font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)">${i + 1}</div>`,
-              iconSize: [26, 26],
-              iconAnchor: [13, 13],
-            });
-            L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(group);
-          });
-          m.fitBounds(L.latLngBounds(latlngs).pad(0.3));
-        };
-        // First draw: pins go up before the fetch — with no old set to
-        // disagree with, atomicity protects nothing and holding them just
-        // left an empty map.
-        if (!stopLayerRef.current) drawStops();
-        let line = latlngs;
-        let dashed = true;
+        // Wrapped: a throw here (a failed leaflet chunk after a redeploy, a
+        // Leaflet layer error) is otherwise an unhandled rejection from a
+        // timer, with no recovery path anyway — the previous layers stay.
         try {
-          const coords = pts
-            .map((p) => `${p.venue.lng},${p.venue.lat}`)
-            .join(";");
-          const ctrl = new AbortController();
-          const t = setTimeout(() => ctrl.abort(), 3000);
-          let data: unknown = null;
+          const L = (await import("leaflet")).default;
+          const m = mapRef.current;
+          if (cancelled || !m) return;
+
+          const latlngs = pts.map(
+            (p) => [p.venue.lat, p.venue.lng] as [number, number],
+          );
+
+          // 🧨 The OLD line stays drawn while the new one is fetched. Clearing it
+          // first is what produced the flash: a blank map, then a dashed
+          // straight-line guess, then the real route — three states for one tap.
+          // Real walking geometry from the keyless OSRM foot service on OSM data.
+          const drawStops = () => {
+            stopLayerRef.current?.remove();
+            const group = L.layerGroup().addTo(m);
+            stopLayerRef.current = group;
+            pts.forEach((p, i) => {
+              const icon = L.divIcon({
+                className: "",
+                html:
+                  `<div style="width:26px;height:26px;border-radius:50%;background:${ACCENT};` +
+                  `color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;` +
+                  `font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)">${i + 1}</div>`,
+                iconSize: [26, 26],
+                iconAnchor: [13, 13],
+              });
+              L.marker([p.venue.lat, p.venue.lng], { icon }).addTo(group);
+            });
+            m.fitBounds(L.latLngBounds(latlngs).pad(0.3));
+          };
+          // First draw: pins go up before the fetch — with no old set to
+          // disagree with, atomicity protects nothing and holding them just
+          // left an empty map.
+          const firstDraw = !stopLayerRef.current;
+          if (firstDraw) drawStops();
+          let line = latlngs;
+          let dashed = true;
           try {
-            const res = await fetch(
-              `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coords}?overview=full&geometries=geojson`,
-              { signal: ctrl.signal },
-            );
-            data = res.ok ? await res.json() : null;
-          } finally {
-            // Cleared on the throw path too, or every superseded fetch leaves a
-            // live abort timer behind.
-            clearTimeout(t);
+            const coords = pts
+              .map((p) => `${p.venue.lng},${p.venue.lat}`)
+              .join(";");
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 3000);
+            let data: unknown = null;
+            try {
+              const res = await fetch(
+                `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${coords}?overview=full&geometries=geojson`,
+                { signal: ctrl.signal },
+              );
+              data = res.ok ? await res.json() : null;
+            } finally {
+              // Cleared on the throw path too, or every superseded fetch leaves a
+              // live abort timer behind.
+              clearTimeout(t);
+            }
+            const geo = (
+              data as {
+                routes?: { geometry?: { coordinates?: unknown } }[];
+              } | null
+            )?.routes?.[0]?.geometry?.coordinates;
+            if (Array.isArray(geo) && geo.length > 1) {
+              line = geo.map((c: [number, number]) => [c[1], c[0]]);
+              dashed = false;
+            }
+          } catch {
+            // unreachable / slow / aborted → straight-line fallback
           }
-          const geo = (
-            data as {
-              routes?: { geometry?: { coordinates?: unknown } }[];
-            } | null
-          )?.routes?.[0]?.geometry?.coordinates;
-          if (Array.isArray(geo) && geo.length > 1) {
-            line = geo.map((c: [number, number]) => [c[1], c[0]]);
-            dashed = false;
-          }
+          // A later tap has already started its own fetch; that one owns the line.
+          if (cancelled || runRef.current !== run || !mapRef.current) return;
+          // 🧨 ONE ATOMIC REDRAW — FOR REDRAWS. On the FIRST draw there is no
+          // old set for the new one to disagree with, so atomicity protects
+          // nothing and holding the pins for the fetch just left an empty map;
+          // they are drawn before the fetch below. Markers used to move (and the frame re-fit)
+          // inside the settle while the line waited on OSRM — so for up to three
+          // seconds the map showed numbered pins at the NEW stops with a route
+          // drawn through the OLD ones, pins visibly off the line. A pin off the
+          // line reads as wrong data, not as loading. The old markers, frame and
+          // line now stay coherent together until the new set is ready, and swap
+          // in one commit.
+          // On the first draw the pins for THIS arrangement are already up, and
+          // re-running would tear the layer down and yank fitBounds a second
+          // (third, counting creation) time — snapping back a user who panned
+          // during the fetch. Redraws still swap atomically.
+          if (!firstDraw) drawStops();
+          routeLayerRef.current?.remove();
+          routeLayerRef.current = L.polyline(line, {
+            color: ACCENT,
+            weight: dashed ? 3 : 4,
+            opacity: 0.95,
+            ...(dashed ? { dashArray: "2 8" } : {}),
+            lineCap: "round",
+            lineJoin: "round",
+          }).addTo(m);
         } catch {
-          // unreachable / slow / aborted → straight-line fallback
+          /* previous layers stay drawn */
         }
-        // A later tap has already started its own fetch; that one owns the line.
-        if (cancelled || runRef.current !== run || !mapRef.current) return;
-        // 🧨 ONE ATOMIC REDRAW — FOR REDRAWS. On the FIRST draw there is no
-        // old set for the new one to disagree with, so atomicity protects
-        // nothing and holding the pins for the fetch just left an empty map;
-        // they are drawn before the fetch below. Markers used to move (and the frame re-fit)
-        // inside the settle while the line waited on OSRM — so for up to three
-        // seconds the map showed numbered pins at the NEW stops with a route
-        // drawn through the OLD ones, pins visibly off the line. A pin off the
-        // line reads as wrong data, not as loading. The old markers, frame and
-        // line now stay coherent together until the new set is ready, and swap
-        // in one commit.
-        drawStops();
-        routeLayerRef.current?.remove();
-        routeLayerRef.current = L.polyline(line, {
-          color: ACCENT,
-          weight: dashed ? 3 : 4,
-          opacity: 0.95,
-          ...(dashed ? { dashArray: "2 8" } : {}),
-          lineCap: "round",
-          lineJoin: "round",
-        }).addTo(m);
       },
       stopLayerRef.current ? 300 : 0,
     );
