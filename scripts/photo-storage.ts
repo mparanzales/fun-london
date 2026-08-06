@@ -23,6 +23,7 @@
 //      restriction + daily quota cap.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { safeFetch } from "./safe-fetch";
 import { r2Configured, uploadPhotoToR2 } from "./r2-storage";
 
 // Read the bucket LAZILY (not at module load). Scripts call dotenv.config()
@@ -315,7 +316,12 @@ export async function mirrorImageUrlToStorage(
 ): Promise<string | null> {
   if (!photoStorageEnabled()) return null;
   try {
-    const res = await fetch(imageUrl, { redirect: "follow" });
+    // imageUrl is whatever an og:image tag on a catalogue-supplied page said,
+    // so it is fully attacker-chosen, and the bytes it returns land in a
+    // PUBLIC bucket. safeFetch keeps it on a public http(s) address and
+    // re-checks every redirect hop. No allowInitialHosts here on purpose: a pop-up's
+    // promo image legitimately lives on any CDN.
+    const res = await safeFetch(imageUrl);
     if (!res.ok) return null;
     const headerType = res.headers.get("content-type") ?? "";
     const b = Buffer.from(await res.arrayBuffer());

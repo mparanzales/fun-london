@@ -31,6 +31,7 @@ import {
   resolveVenuePhotos,
   isKeyedPhotoUrl,
 } from "./photo-storage";
+import { isBlockedUrlError, safeFetch } from "./safe-fetch";
 import {
   normalizeOpeningHours,
   type GoogleOpeningHours,
@@ -316,20 +317,23 @@ function diffRow(
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
+// These URLs come from editorial_sources[].url and creator_coverage[].url —
+// catalogue data, so the destination is attacker-influenced. safeFetch applies
+// the scheme allowlist and refuses private/loopback/link-local/metadata
+// addresses, and re-checks every redirect hop (following redirects blindly is
+// how a public URL walks the checker to 169.254.169.254).
 async function checkUrl(url: string): Promise<number | string> {
   try {
-    const headRes = await fetch(url, {
+    const headRes = await safeFetch(url, {
       method: "HEAD",
-      redirect: "follow",
       signal: AbortSignal.timeout(8000),
       headers: { "User-Agent": BROWSER_UA },
     });
     if (headRes.status < 400) return headRes.status;
     // HEAD blocked or weird — try GET before declaring dead.
     if ([403, 405, 501].includes(headRes.status)) {
-      const getRes = await fetch(url, {
+      const getRes = await safeFetch(url, {
         method: "GET",
-        redirect: "follow",
         signal: AbortSignal.timeout(10000),
         headers: {
           "User-Agent": BROWSER_UA,
@@ -340,6 +344,10 @@ async function checkUrl(url: string): Promise<number | string> {
     }
     return headRes.status;
   } catch (err) {
+    // A refusal returns a string, so classify() lands it in the soft
+    // "uncertain" bucket rather than "dead" — the link is never auto-removed
+    // on the strength of a guard refusal, it is surfaced for a human.
+    if (isBlockedUrlError(err)) return `REFUSED: ${err.message}`;
     return err instanceof Error ? err.message : "ERR";
   }
 }

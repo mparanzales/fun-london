@@ -22,6 +22,7 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
+import { isBlockedUrlError, safeFetch } from "./safe-fetch";
 
 // ── Flags ────────────────────────────────────────────────────────────────────
 
@@ -104,19 +105,29 @@ function isBotBlockedHost(host: string): boolean {
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
+// 🧨 This script grants `verified: true`, which is what un-gates the
+// "cross-checked" provenance badge (PR #42). Its premise — that a live HTTP
+// response raises the bar on an AI-generated URL — was FALSE before this
+// change, because Node's fetch resolves a data: URL and answers 200 with no
+// network involved. `new URL("data:text/plain,the-ivy-chelsea").pathname` is
+// "text/plain,the-ivy-chelsea", so nameInUrl() matched too, and a wholly
+// invented source could earn the badge on both counts at once.
+//
+// safeFetch closes that: the scheme allowlist in lib/safe-url.ts refuses
+// data:, so the check returns a string, classify() calls it "blocked", and
+// "blocked" is never verified. It also refuses private/loopback/link-local
+// addresses and re-checks each redirect hop, which is the SSRF half.
 async function checkUrl(url: string): Promise<number | string> {
   try {
-    const headRes = await fetch(url, {
+    const headRes = await safeFetch(url, {
       method: "HEAD",
-      redirect: "follow",
       signal: AbortSignal.timeout(8000),
       headers: { "User-Agent": BROWSER_UA },
     });
     if (headRes.status < 400) return headRes.status;
     if ([403, 405, 501].includes(headRes.status)) {
-      const getRes = await fetch(url, {
+      const getRes = await safeFetch(url, {
         method: "GET",
-        redirect: "follow",
         signal: AbortSignal.timeout(10000),
         headers: {
           "User-Agent": BROWSER_UA,
@@ -127,6 +138,7 @@ async function checkUrl(url: string): Promise<number | string> {
     }
     return headRes.status;
   } catch (err) {
+    if (isBlockedUrlError(err)) return `REFUSED: ${err.message}`;
     return err instanceof Error ? err.message : "ERR";
   }
 }
