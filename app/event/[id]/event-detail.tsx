@@ -18,6 +18,7 @@ import { MapTilePlaceholder } from "@/components/map-tile-placeholder";
 import { applyAffiliate } from "@/lib/affiliate";
 import { track } from "@/lib/analytics";
 import { displayEventPrice } from "@/lib/event-price";
+import { safeExternalHref } from "@/lib/safe-url";
 import type { Event, Venue } from "@/lib/types";
 
 // Event detail — mirrors the venue detail's visual language. The EVENT owns the
@@ -50,7 +51,6 @@ export function EventDetail({
   const place = event.placeDetails;
 
   const isPopup = event.isPopup;
-  const isExternal = !!event.sourceUrl && event.sourceUrl.startsWith("http");
   const longDateLabel =
     isPopup && event.endsAt
       ? `Ends ${formatLongDate(event.endsAt)}`
@@ -64,11 +64,22 @@ export function EventDetail({
     : ticketProvider
       ? `Get tickets → ${ticketProvider}`
       : "Get tickets";
+  // event.sourceUrl is catalogue data (Ticketmaster/Eventbrite ingestion,
+  // pop-up discovery), so it is scheme-checked before it can reach an href.
+  // See lib/safe-url.ts. The check wraps the FINAL string, after applyAffiliate
+  // has had its turn: that helper parses with `new URL` and returns its input
+  // untouched when parsing throws, and "javascript:alert(1)//" both parses and
+  // survives its query-param rewrite intact. Guard the sink, not the source.
+  // Each branch is wrapped where it is produced rather than once around the
+  // ternary, so the guard is visible on the line that builds the value.
   const ctaHref = isPopup
-    ? event.sourceUrl
-    : event.sourceUrl && isExternal
-      ? applyAffiliate("ticketmaster", event.sourceUrl)
-      : event.sourceUrl;
+    ? safeExternalHref(event.sourceUrl)
+    : safeExternalHref(applyAffiliate("ticketmaster", event.sourceUrl ?? ""));
+  // The old `isExternal` lived here as `sourceUrl.startsWith("http")`, gating
+  // target/rel/the external-link icon. Every href we render is now http(s) by
+  // construction, so inside the CTA below it was always true; the flag is gone
+  // rather than kept as a condition that cannot be false. (It was also a
+  // prefix test, so it passed things like "httpfoo:".)
 
   // "Get directions" target — the venue's coords, else its address, else the
   // Google Maps place link. Matches the venue page's directions behaviour.
@@ -77,7 +88,12 @@ export function EventDetail({
       ? `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`
       : place?.address
         ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(place.address)}`
-        : (place?.mapsUrl ?? null);
+        : // The first two branches build a literal google.com URL, so only this
+          // one carries a catalogue-supplied scheme.
+          safeExternalHref(place?.mapsUrl);
+
+  // Resolved from Google Places by the events pipeline, so still catalogue data.
+  const placeWebsiteHref = safeExternalHref(place?.website);
 
   const hasVenueBlock =
     !!place &&
@@ -86,7 +102,7 @@ export function EventDetail({
       place.mapUrl ||
       directionsHref ||
       place.address ||
-      place.website ||
+      placeWebsiteHref ||
       place.phone ||
       (place.reviews && place.reviews.length > 0));
 
@@ -95,11 +111,14 @@ export function EventDetail({
   // The ticket CTA, rendered twice like the venue page's action row:
   // inside the mobile fixed bar (lg:hidden) and as a static masthead
   // element at lg. One definition, so the two stay identical.
-  const ticketCta = event.sourceUrl ? (
+  // Gated on the SAFE href, not on the raw sourceUrl: when the stored link is
+  // not a usable web URL we genuinely have no ticket link, and saying so is the
+  // honest copy. Falling back to the raw string here is exactly the sink.
+  const ticketCta = ctaHref ? (
     <a
-      href={ctaHref ?? event.sourceUrl}
-      target={isExternal ? "_blank" : undefined}
-      rel={isExternal ? "noopener noreferrer" : undefined}
+      href={ctaHref}
+      target="_blank"
+      rel="noopener noreferrer"
       onClick={() =>
         track("event_ticket_click", {
           id: event.id,
@@ -113,7 +132,7 @@ export function EventDetail({
       }}
     >
       {ctaLabel}
-      {isExternal && <ExternalLink size={16} strokeWidth={2.25} aria-hidden />}
+      <ExternalLink size={16} strokeWidth={2.25} aria-hidden />
     </a>
   ) : (
     <div className="w-full h-[52px] rounded-2xl bg-muted text-muted-fg text-[15px] font-bold flex items-center justify-center">
@@ -136,6 +155,40 @@ export function EventDetail({
       Sign in to see ticket options
     </Link>
   );
+
+  // Map thumbnail, hoisted like the CTAs above rather than built inline.
+  // The IMAGE and the LINK are gated separately: directionsHref is null when
+  // the venue has no coords, no address, and a mapsUrl we rejected, and in
+  // that case the map still belongs on the page, just without somewhere to
+  // send the tap. Gating both on the href let "The venue" render as a header
+  // with nothing under it.
+  const mapFrame =
+    "relative block mt-4 h-28 lg:h-52 overflow-hidden rounded-2xl";
+  const mapThumb = !place ? null : place.mapUrl ? (
+    <Image
+      src={place.mapUrl}
+      alt={`Map of ${event.venueName}`}
+      fill
+      sizes="(max-width: 1023px) 100vw, 520px"
+      className="object-cover"
+    />
+  ) : (
+    <MapTilePlaceholder lat={place.lat} lng={place.lng} label={event.area} />
+  );
+  const mapBlock =
+    !place || !(place.mapUrl || directionsHref) ? null : directionsHref ? (
+      <a
+        href={directionsHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Open in Google Maps"
+        className={`${mapFrame} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
+      >
+        {mapThumb}
+      </a>
+    ) : (
+      <div className={mapFrame}>{mapThumb}</div>
+    );
 
   return (
     // Mobile: the max-w-md phone shell, unchanged. Desktop (lg+): the same
@@ -310,32 +363,13 @@ export function EventDetail({
             )}
 
             {/* Map thumbnail — mirrored keyless greyscale static map, same
-                treatment as the venue page. Tapping opens Google Maps. */}
-            {directionsHref && (
-              <a
-                href={directionsHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open in Google Maps"
-                className="relative block mt-4 h-28 lg:h-52 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {place.mapUrl ? (
-                  <Image
-                    src={place.mapUrl}
-                    alt={`Map of ${event.venueName}`}
-                    fill
-                    sizes="(max-width: 1023px) 100vw, 520px"
-                    className="object-cover"
-                  />
-                ) : (
-                  <MapTilePlaceholder
-                    lat={place.lat}
-                    lng={place.lng}
-                    label={event.area}
-                  />
-                )}
-              </a>
-            )}
+                treatment as the venue page. Tapping opens Google Maps.
+                The IMAGE and the LINK are gated separately: directionsHref is
+                null when the venue has no coords, no address, and a mapsUrl we
+                rejected, and in that case the map still belongs on the page,
+                just without somewhere to send the tap. Gating both on the href
+                let "The venue" render as a header with nothing under it. */}
+            {mapBlock}
 
             {place.address && (
               <p className="text-sm font-semibold text-fg mt-3">
@@ -360,9 +394,9 @@ export function EventDetail({
             </p>
 
             <div className="flex flex-wrap gap-2 mt-4">
-              {place.website && (
+              {placeWebsiteHref && (
                 <a
-                  href={place.website}
+                  href={placeWebsiteHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-full border border-fg/20 px-4 py-2 text-sm font-semibold text-fg transition-colors active:border-primary active:bg-primary active:text-white lg:hover:border-primary lg:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"

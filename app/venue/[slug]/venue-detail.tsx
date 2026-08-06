@@ -23,6 +23,7 @@ import { useSaved } from "@/components/saved-context";
 import { MapTilePlaceholder } from "@/components/map-tile-placeholder";
 import { ReserveSheet } from "@/components/reserve-sheet";
 import { platformLabel, type ReserveTarget } from "@/lib/booking-link";
+import { safeExternalHref } from "@/lib/safe-url";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
 import {
@@ -197,23 +198,44 @@ export function VenueDetail({
 
   const isReservable = RESERVABLE_TYPES.includes(venue.type);
 
-  // Top-priority booking link if we have one. The agent thesis V1:
-  // Reserve button deep-links to the venue's best-known booking URL
-  // (lowest `priority` number wins). If absent, falls through to the
-  // legacy in-app confirmation stub.
-  const topBookingLink =
-    venue.bookingLinks && venue.bookingLinks.length > 0
-      ? [...venue.bookingLinks].sort((a, b) => a.priority - b.priority)[0]
-      : null;
+  // Every outbound URL on this page is catalogue data (ingestion crons, bulk
+  // import), so it goes through safeExternalHref before it can reach an href.
+  // See lib/safe-url.ts. Null means "render no link", never "fall back to the
+  // raw string".
+  //
+  // Menu first, website second, but each checked on its own: a poisoned
+  // menu_url must not take a perfectly good website_url down with it, and the
+  // label has to describe the link we actually rendered.
+  const menuHref = safeExternalHref(venue.menuUrl);
+  const websiteHref = safeExternalHref(venue.websiteUrl);
+  const siteHref = menuHref ?? websiteHref;
 
-  // Where "Reserve" sends them: the best booking platform if we have one,
-  // else the venue's own site. The picker sheet pre-fills date/time/party
-  // into this before opening it.
-  const reserveTarget: ReserveTarget | null = topBookingLink
-    ? { platform: topBookingLink.platform, url: topBookingLink.url }
-    : venue.websiteUrl
-      ? { platform: "website", url: venue.websiteUrl }
-      : null;
+  // Best-known booking link. The agent thesis V1: Reserve deep-links to the
+  // venue's booking URL, lowest `priority` number first.
+  //
+  // The scheme check is part of the CHOICE, not a filter after it. Picking the
+  // top-priority link and then rejecting it would make one bad row discard
+  // every good row beneath it: a venue with a broken priority-1 TheFork link
+  // and a fine priority-2 OpenTable link would fall all the way through to
+  // "their site", losing the deep-link, its date/time/party pre-fill and its
+  // affiliate attribution.
+  const topBookingLink: ReserveTarget | null =
+    [...(venue.bookingLinks ?? [])]
+      .sort((a, b) => a.priority - b.priority)
+      .map((link) => {
+        const href = safeExternalHref(link.url);
+        return href ? { platform: link.platform, url: href } : null;
+      })
+      .find((v): v is ReserveTarget => v !== null) ?? null;
+
+  // Where "Reserve" sends them: the best usable booking platform, else the
+  // venue's own site. The picker sheet pre-fills date/time/party into this
+  // before opening it. buildReserveUrl re-checks the scheme at the href
+  // itself; validating here too means an unusable URL never offers a Reserve
+  // button that opens a sheet with no way out of it.
+  const reserveTarget: ReserveTarget | null =
+    topBookingLink ??
+    (websiteHref ? { platform: "website", url: websiteHref } : null);
 
   const hasRealTalk = !!venue.criticalFlags && venue.criticalFlags.length > 0;
   // Only VERIFIED provenance is surfaced. The AI-discovered editorial_sources
@@ -764,7 +786,7 @@ export function VenueDetail({
         {(venue.address ||
           (venue.lat && venue.lng) ||
           venue.phone ||
-          venue.websiteUrl) && (
+          siteHref) && (
           <div className="mt-8 lg:mt-12 lg:border-t lg:border-fg/10 lg:pt-8">
             <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg mb-3">
               Plan your visit
@@ -827,16 +849,19 @@ export function VenueDetail({
               )}
             </p>
             <div className="flex flex-wrap gap-2 mt-4">
-              {(venue.menuUrl || venue.websiteUrl) && (
+              {siteHref && (
                 <a
-                  href={venue.menuUrl ?? venue.websiteUrl!}
+                  href={siteHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => {
                     recordSignal("outbound_click", {
                       surface: "venue",
                       venueId: venue.id,
-                      context: { target: venue.menuUrl ? "menu" : "website" },
+                      // Keyed off the link we RENDERED, not off venue.menuUrl:
+                      // a rejected menu_url falls through to the website, and
+                      // the signal has to name where the user actually went.
+                      context: { target: menuHref ? "menu" : "website" },
                     });
                     // A venue with no partner platform books through its own
                     // site, so for a plan-originated visit this outbound IS
@@ -851,7 +876,7 @@ export function VenueDetail({
                     // booking door — a website visit is then just a look.
                     if (
                       planHandoff &&
-                      !venue.menuUrl &&
+                      !menuHref &&
                       isReservable &&
                       !topBookingLink
                     ) {
@@ -863,7 +888,7 @@ export function VenueDetail({
                   <Globe className="w-4 h-4" strokeWidth={2} />
                   {/* "See the menu" only when we have a real menu link; else the
                       honest "Visit website" (the homepage, not a menu). */}
-                  {venue.menuUrl ? "See the menu" : "Visit website"}
+                  {menuHref ? "See the menu" : "Visit website"}
                 </a>
               )}
               {venue.phone && (
@@ -910,33 +935,47 @@ export function VenueDetail({
                       Editorial coverage
                     </div>
                     <ul className="space-y-1">
-                      {verifiedSources.map((src, i) => (
-                        <li key={i} className="text-[13px] leading-snug">
-                          <a
-                            href={src.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
-                          >
-                            {src.publication}
-                          </a>
-                          {src.title && (
-                            <span className="text-muted-fg">
-                              {" "}
-                              , {src.title}
-                            </span>
-                          )}
-                          {src.date && (
-                            <span className="text-muted-fg/80 italic">
-                              {" · "}
-                              {new Date(src.date).toLocaleDateString("en-GB", {
-                                month: "short",
-                                year: "numeric",
-                              })}
-                            </span>
-                          )}
-                        </li>
-                      ))}
+                      {verifiedSources.map((src, i) => {
+                        // A source whose URL we cannot trust still gets
+                        // CREDITED, just not linked: dropping the row would
+                        // quietly weaken the provenance claim this section
+                        // exists to make.
+                        const srcHref = safeExternalHref(src.url);
+                        return (
+                          <li key={i} className="text-[13px] leading-snug">
+                            {srcHref ? (
+                              <a
+                                href={srcHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
+                              >
+                                {src.publication}
+                              </a>
+                            ) : (
+                              <span className="text-fg">{src.publication}</span>
+                            )}
+                            {src.title && (
+                              <span className="text-muted-fg">
+                                {" "}
+                                , {src.title}
+                              </span>
+                            )}
+                            {src.date && (
+                              <span className="text-muted-fg/80 italic">
+                                {" · "}
+                                {new Date(src.date).toLocaleDateString(
+                                  "en-GB",
+                                  {
+                                    month: "short",
+                                    year: "numeric",
+                                  },
+                                )}
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 )}
@@ -952,37 +991,46 @@ export function VenueDetail({
                       Creators covering this
                     </div>
                     <ul className="space-y-1">
-                      {verifiedCreators.map((c, i) => (
-                        <li key={i} className="text-[13px] leading-snug">
-                          <a
-                            href={c.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
-                          >
-                            {c.creator}
-                          </a>
-                          <span className="text-muted-fg/80">
-                            {" "}
-                            · {c.platform}
-                          </span>
-                          {c.verdict === "critical" && (
-                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-accent/15 text-accent">
-                              Critical
+                      {verifiedCreators.map((c, i) => {
+                        // Same rule as the sources above: credit the creator,
+                        // drop only the link.
+                        const creatorHref = safeExternalHref(c.url);
+                        return (
+                          <li key={i} className="text-[13px] leading-snug">
+                            {creatorHref ? (
+                              <a
+                                href={creatorHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg"
+                              >
+                                {c.creator}
+                              </a>
+                            ) : (
+                              <span className="text-fg">{c.creator}</span>
+                            )}
+                            <span className="text-muted-fg/80">
+                              {" "}
+                              · {c.platform}
                             </span>
-                          )}
-                          {c.verdict === "mixed" && (
-                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-fg/10 text-fg">
-                              Mixed
-                            </span>
-                          )}
-                          {c.note && (
-                            <div className="text-[12px] text-muted-fg italic mt-0.5">
-                              “{c.note}”
-                            </div>
-                          )}
-                        </li>
-                      ))}
+                            {c.verdict === "critical" && (
+                              <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-accent/15 text-accent">
+                                Critical
+                              </span>
+                            )}
+                            {c.verdict === "mixed" && (
+                              <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-fg/10 text-fg">
+                                Mixed
+                              </span>
+                            )}
+                            {c.note && (
+                              <div className="text-[12px] text-muted-fg italic mt-0.5">
+                                “{c.note}”
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 )}

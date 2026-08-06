@@ -2,6 +2,8 @@
 // Given a page's HTML + final URL, find the best link to the venue's OWN menu
 // (a /menu page or a menu PDF), or null. No network, no side effects.
 
+import { parseExternalUrl } from "@/lib/safe-url";
+
 // Links that are clearly NOT a menu (unless the URL literally contains "menu").
 const BAD =
   /(book|reserv|gift|voucher|career|job|privacy|terms|cookie|contact|about|\bnews\b|\bblog\b|press|instagram|facebook|twitter|tiktok|linkedin|login|signin|account|basket|\bcart\b|\bshop\b|newsletter|subscribe|\bfaq\b)/i;
@@ -34,13 +36,22 @@ export function findMenuUrl(html: string, finalUrl: string): string | null {
       .replace(/\s+/g, " ")
       .trim()
       .toLowerCase();
-    if (!href || /^(mailto:|tel:|javascript:)/i.test(href)) continue;
-    let abs: URL;
+    if (!href) continue;
+    let resolved: URL;
     try {
-      abs = new URL(href, base);
+      resolved = new URL(href, base);
     } catch {
       continue;
     }
+    // Allowlist the RESOLVED scheme. This replaces a denylist
+    // (/^(mailto:|tel:|javascript:)/i) that ran against the RAW string before
+    // resolution, and the URL parser strips tabs, newlines and leading spaces
+    // as it resolves: "java\tscript:alert(1)" failed that regex and then came
+    // out the other side as protocol "javascript:". Verified. mailto: and tel:
+    // now fall out for free, and this is the write-side half of the same rule
+    // the render side applies in lib/safe-url.ts.
+    const abs = parseExternalUrl(resolved.href);
+    if (!abs) continue;
     const full = abs.toString().toLowerCase();
     const host = abs.host.toLowerCase();
     const path = abs.pathname.toLowerCase();

@@ -10,6 +10,7 @@ import { redirect } from "next/navigation";
 import { getAuthUser, isAdminEmail } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/admin";
 import { updateProspect } from "./actions";
+import { safeExternalHref } from "@/lib/safe-url";
 import { BD_STATUSES } from "./constants";
 
 export const dynamic = "force-dynamic";
@@ -149,6 +150,9 @@ function NotAuthorised({ email }: { email: string }) {
 
 function ProspectCard({ p }: { p: Prospect }) {
   const meta = [p.type, p.neighbourhood].filter(Boolean).join(" · ");
+  // Imported data rendered into an ADMIN session, so the scheme is checked like
+  // every other catalogue href (lib/safe-url.ts).
+  const websiteHref = safeExternalHref(p.website_url);
   return (
     <article className="rounded-2xl bg-card border border-border p-5">
       <header className="mb-2 flex items-baseline justify-between gap-3">
@@ -173,9 +177,9 @@ function ProspectCard({ p }: { p: Prospect }) {
       )}
 
       <div className="flex flex-wrap gap-3 mb-4 text-xs font-bold">
-        {p.website_url && (
+        {websiteHref && (
           <a
-            href={p.website_url}
+            href={websiteHref}
             target="_blank"
             rel="noopener noreferrer"
             className="text-primary underline-offset-2 hover:underline"

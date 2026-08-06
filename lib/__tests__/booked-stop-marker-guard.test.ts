@@ -193,8 +193,13 @@ describe("the write sites only record what actually happened", () => {
     // booking; the MENU is never a booking door; a non-reservable venue has
     // no bookings at all. Deleting any clause previously left the whole
     // suite green (code-reviewer, 2026-08-06) -- this pins the condition.
+    //
+    // The menu clause reads `!menuHref`, not `!venue.menuUrl`: the safe-href
+    // work made the rendered link fall back to the website when menu_url is
+    // not a usable web URL, and in that case the click IS a website visit and
+    // must be classified as one. Same four clauses, keyed off what rendered.
     const cond = detail.match(
-      /if \(\s*planHandoff &&\s*!venue\.menuUrl &&\s*isReservable &&\s*!topBookingLink\s*\)/,
+      /if \(\s*planHandoff &&\s*!menuHref &&\s*isReservable &&\s*!topBookingLink\s*\)/,
     );
     expect(
       cond,

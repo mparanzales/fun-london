@@ -13,6 +13,15 @@
 //   NEXT_PUBLIC_AFFILIATE_SEVENROOMS                        → ?ref=
 //   NEXT_PUBLIC_AFFILIATE_THEFORK                           → ?partner=
 //   NEXT_PUBLIC_AFFILIATE_TICKETMASTER  (Awin/Impact id)    → ?awc= / partner param
+//
+// ⚠️ BEFORE SETTING NEXT_PUBLIC_AFFILIATE_TICKETMASTER: the event page calls
+// applyAffiliate("ticketmaster", …) for EVERY non-popup event, whatever
+// provider the link actually points at, so that id would be stamped onto
+// Eventbrite / DICE / Skiddle outbounds too. Harmless today because an unset
+// id makes the affiliate half a no-op, which is why it has not been fixed
+// separately. The provider→platform map (event-detail.tsx already derives the
+// provider for its label) has to land in the SAME change as the id, not after
+// it.
 
 import type { BookingLink } from "@/lib/types";
 

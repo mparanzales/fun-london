@@ -6,6 +6,7 @@ import { SITE_URL } from "@/lib/config";
 import { VenueDetail } from "./venue-detail";
 import { DetailAuthWall } from "@/components/detail-auth-wall";
 import { DesktopNav } from "@/components/desktop-nav";
+import { jsonLdHtml } from "@/lib/json-ld";
 
 // Shared implementation behind TWO routes:
 //   /venue/[slug]       — dynamic; reads the auth cookie, full data signed-in
@@ -108,7 +109,7 @@ export async function VenuePageBody({
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml(jsonLd) }}
       />
       {/* Desktop-only top nav (hidden lg:block) — visitors landing here from
           Google/shared links on a laptop need a way into the rest of the app.

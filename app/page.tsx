@@ -7,6 +7,7 @@
 import type { Metadata } from "next";
 import { CITY, TAGLINE, SITE_URL } from "@/lib/config";
 import { SplashClient } from "./splash-client";
+import { jsonLdHtml } from "@/lib/json-ld";
 
 // Force dynamic so "/" never gets statically generated at build time.
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export default function SplashPage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml(jsonLd) }}
       />
       <SplashClient />
     </>
