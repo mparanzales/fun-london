@@ -5,22 +5,24 @@
 
 export const CITY = "London";
 
-// The night line: the one-sentence proposition, shared by every metadata and
-// OG surface so the tagline cannot drift into four diverging copies (it was
-// already two casings and two phrasings when this constant was created).
+// The night line: METADATA AND SHARED-LINK DESCRIPTION ONLY (Maria's approved
+// copy, 2026-08-06). Shared by every metadata and OG surface so the line
+// cannot drift into four diverging copies -- it was already two casings and
+// two phrasings when this constant was created.
 //
-// 🧨 It must only claim what the product can deliver on every surface it
-// reaches. The earlier tail "with the table ready to book in a couple of taps"
-// was cut before this shipped: there is NO live-availability feed (see the
-// note in venue-detail.tsx about never surfacing "tables free"), only one of
-// the four booking states is taps-to-book, and booking links are moat fields
-// an anonymous visitor never sees -- yet OG/Twitter is exactly where anonymous
-// visitors meet us first. What IS true on every surface is the handoff.
+// 🧨 Do NOT extend this into a booking explanation or a second slogan. An
+// earlier draft carried "with the table ready to book in a couple of taps",
+// which is an availability claim the product refuses to make anywhere else:
+// there is no live-availability feed (see the note in venue-detail.tsx about
+// never surfacing "tables free"), only one of the four booking states is
+// taps-to-book, and booking links are moat fields an anonymous visitor never
+// sees -- yet OG/Twitter is exactly where anonymous visitors meet us first.
+// The slogan is TAGLINE below; this constant is not a second one.
 //
 // Sentence case here is deliberate and is NOT a bug to "fix": display copy is
 // lowercase, metadata is sentence case, because a lowercase opening in a
 // Google snippet reads as an error to a partnerships reader.
-export const NIGHT_LINE = `Fun ${CITY} builds you a night out: two or three spots, a short walk apart, in the order you'd do them. Booking happens on the venue's own platform.`;
+export const NIGHT_LINE = `A whole night out in ${CITY}, from the first place to the last.`;
 
 // TAGLINE — the mission line; used as the masthead and OG secondary line.
 // (A second constant, LEAD_TAGLINE, was deleted here: it had zero consumers

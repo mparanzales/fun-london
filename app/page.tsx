@@ -4,9 +4,8 @@
 // feed). The old marketing landing was removed; the home of the product is the
 // Explore feed, and "What's on" (/events) is the second tab.
 
-import { NIGHT_LINE } from "@/lib/config";
 import type { Metadata } from "next";
-import { CITY, TAGLINE, SITE_URL } from "@/lib/config";
+import { CITY, TAGLINE, SITE_URL, NIGHT_LINE } from "@/lib/config";
 import { SplashClient } from "./splash-client";
 import { jsonLdHtml } from "@/lib/json-ld";
 

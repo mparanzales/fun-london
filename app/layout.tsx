@@ -1,10 +1,9 @@
-import { NIGHT_LINE } from "@/lib/config";
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthUserProvider } from "@/components/auth-user-context";
 import { AuthedProviders } from "@/components/authed-providers";
-import { SITE_URL } from "@/lib/config";
+import { SITE_URL, NIGHT_LINE } from "@/lib/config";
 import { ROOM_INVITE_INLINE_SCRIPT } from "@/lib/room-invite";
 import "./globals.css";
 

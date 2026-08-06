@@ -12,7 +12,7 @@ export default function PrivacyPage() {
   return (
     <>
       <h1>Privacy Policy</h1>
-      <p className="text-muted-fg">Last updated: 2 June 2026</p>
+      <p className="text-muted-fg">Last updated: 6 August 2026</p>
 
       <p>
         This policy explains how Fun London (&quot;we&quot;) collects, uses and

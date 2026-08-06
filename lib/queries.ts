@@ -811,7 +811,14 @@ export async function fetchVenueCount(): Promise<number | null> {
       // photographed" stays true by construction.
       .not("img_url", "ilike", "%unsplash%")
       .neq("img_url", "");
-    if (error) return null;
+    if (error) {
+      // Loud, because the fallback is silent BY DESIGN: /about renders "the
+      // live catalogue" instead of a number, and `revalidate = 86400` bakes
+      // that in for a day. Without a log, a permanently broken count is
+      // indistinguishable from a page that simply chose the prose branch.
+      console.error("fetchVenueCount:", error.message);
+      return null;
+    }
     // `||` not `??`, deliberately: a zero count must degrade to the prose
     // fallback, not render "Chosen from 0 venues across London". A build
     // against an empty or filtered-out catalogue is not hypothetical -- Vercel
@@ -819,7 +826,8 @@ export async function fetchVenueCount(): Promise<number | null> {
     // so a zero would be baked into the page a partner opens from a preview
     // link. Zero venues is "unavailable", not a fact worth printing.
     return count || null;
-  } catch {
+  } catch (e) {
+    console.error("fetchVenueCount:", e instanceof Error ? e.message : e);
     return null;
   }
 }

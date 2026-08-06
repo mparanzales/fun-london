@@ -7,11 +7,7 @@ import { NIGHT_LINE } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: "About",
-  // NOT NIGHT_LINE: /about is the page partnerships and press type in before
-  // replying to an email, so it earns its own snippet rather than repeating
-  // the site default. This sentence is the page's own approved copy.
-  description:
-    "Diners arrive decided. Fun London plans the night, then hands them to the platform the venue already uses.",
+  description: NIGHT_LINE,
   alternates: { canonical: "/about" },
 };
 
@@ -112,15 +108,15 @@ export default async function AboutPage() {
               not the place.
             </h1>
             <p className="mt-6 max-w-[36rem] text-[16px] leading-relaxed text-muted-fg sm:text-[17px]">
-              Fun London builds you a night out: two or three spots, a short
-              walk apart, in the order you&apos;d do them.
+              a pint at half six. dinner by candlelight at eight. jazz after
+              ten.
             </p>
           </section>
 
           {/* ── The night line: one real plan, from the live catalogue ──── */}
           <section className="mt-20 sm:mt-24" aria-label="An example night">
             <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-muted-fg">
-              one plan · three stops · soho
+              soho · from 18:30
             </p>
 
             <ol className="fl-stagger mt-8">
