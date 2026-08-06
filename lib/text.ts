@@ -47,8 +47,23 @@ const RESIDUAL_CONTROLS = new RegExp(
 // Recovery can land on the invisible end of General Punctuation (zero-width
 // joiners, and the left/right-to-right marks). A stray direction mark flips
 // the rest of a title, so collapse the space-like ones and drop the invisible.
+//
+// 🧨 A CATEGORY, not a hand-listed range. The old set was written out by
+// hand, and looked complete twice over while it was not: it missed the Unicode 6.3
+// bidi ISOLATES (U+2066-U+2069, which reverse text exactly like the U+202A
+// embeddings), and it missed U+061C, the word joiner block U+2060-U+2064, and
+// the tag characters U+E0000-U+E007F that are today's invisible-smuggling
+// vector. Every one of those is \p{Cf} (Unicode "format"), so matching the
+// category cannot go stale one block at a time the way a written-out range
+// already did. Nothing in \p{Cf} is a printable character, so this respects the
+// "never delete a printable" rule at the top of this file.
+//
+// U+2028 and U+2029 are added by hand because they are Zl/Zp, NOT Cf — and
+// because PUNCT_RUN below can MANUFACTURE them: a mojibake tail byte of 0xA8 or
+// 0xA9 recovers to exactly those two codepoints, so without this the repair
+// could hand a line separator to a downstream sink.
 const RECOVERED_SPACES = new RegExp("[\\u2000-\\u200A]", "g");
-const RECOVERED_INVISIBLE = new RegExp("[\\u200B-\\u200F\\u202A-\\u202E]", "g");
+const RECOVERED_INVISIBLE = new RegExp("[\\p{Cf}\\u2028\\u2029]", "gu");
 
 const DASH_RE = new RegExp("\\s*[\\u2014\\u2013]\\s*", "g"); // em / en dash
 const DBL_HYPHEN_RE = / -{2} /g;

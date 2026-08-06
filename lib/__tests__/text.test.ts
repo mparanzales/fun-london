@@ -141,3 +141,75 @@ describe("ingest keeps provider fidelity, read applies the brand rule", () => {
     }
   });
 });
+
+// ── Bidi controls: BOTH blocks, not just the older one ──────────────────────
+//
+// A direction-override character reverses everything rendered after it, so a
+// venue name carrying one flips the rest of a card, an OG title and the
+// LOCATION of a downloaded calendar entry. The set used to stop at U+202E,
+// which LOOKS complete: U+2066-U+2069 are the Unicode 6.3 isolates (LRI, RLI,
+// FSI, PDI), they do the same job, and they live in a separate block.
+describe("bidi and invisible controls", () => {
+  // Built from codepoints, never pasted: this file's own header explains why
+  // a literal unprintable in source is silently rewritten by editors and git
+  // filters, which would leave the test passing against the wrong input.
+  const ch = (code: number) => String.fromCharCode(code);
+  const OLD_EMBEDDINGS: [string, string][] = [
+    ["LRE U+202A", ch(0x202a)],
+    ["RLE U+202B", ch(0x202b)],
+    ["PDF U+202C", ch(0x202c)],
+    ["LRO U+202D", ch(0x202d)],
+    ["RLO U+202E", ch(0x202e)],
+  ];
+  const ISOLATES: [string, string][] = [
+    ["LRI U+2066", ch(0x2066)],
+    ["RLI U+2067", ch(0x2067)],
+    ["FSI U+2068", ch(0x2068)],
+    ["PDI U+2069", ch(0x2069)],
+  ];
+
+  it.each([...OLD_EMBEDDINGS, ...ISOLATES])(
+    "repairMojibake strips %s out of a venue name",
+    (_label, ch) => {
+      expect(repairMojibake(`Rooftop${ch} Bar`)).toBe("Rooftop Bar");
+    },
+  );
+
+  it.each([...OLD_EMBEDDINGS, ...ISOLATES])(
+    "tidyText strips %s too, so editorial copy is covered as well",
+    (_label, ch) => {
+      expect(tidyText(`Rooftop${ch} Bar`)).toBe("Rooftop Bar");
+    },
+  );
+
+  it("strips the zero-widths and the BOM", () => {
+    expect(repairMojibake(`Roof${ch(0x200b)}top${ch(0xfeff)} Bar`)).toBe(
+      "Rooftop Bar",
+    );
+  });
+
+  // The other half of the contract: it must not become a blunt instrument.
+  // "Never delete a printable character" is the rule this file already carries.
+  it("leaves every printable character exactly where it was", () => {
+    for (const s of [
+      "The Photographers' Gallery, 16\u201318 Ramillies Street",
+      "Hermanos Colombian Coffee Roasters \u2013 Angel Lane",
+      "Knightsbridge / Belgravia",
+      "Bar Américain",
+      "Élysée",
+    ]) {
+      expect(repairMojibake(s)).toBe(s);
+    }
+  });
+
+  // 🧨 The exact reason venue names do NOT go through tidyText. This is not a
+  // style preference: both strings below are live catalogue values.
+  it("tidyText WOULD rewrite proper nouns, which is why names use repairMojibake", () => {
+    expect(
+      tidyText("Hermanos Colombian Coffee Roasters \u2013 Angel Lane"),
+    ).toBe("Hermanos Colombian Coffee Roasters, Angel Lane");
+    expect(
+      tidyText("The Photographers' Gallery, 16\u201318 Ramillies Street"),
+    ).toBe("The Photographers' Gallery, 16, 18 Ramillies Street");
+  });
+});

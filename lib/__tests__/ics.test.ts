@@ -63,8 +63,37 @@ const BASE = {
   startsAt: "2026-09-12T19:30:00.000Z",
   location: "The Bar, Soho, London",
   description: "Tickets: https://example.com/t",
-  url: "https://example.com/t",
+  url: "https://tickets.example.net/t",
 };
+
+// buildIcs and icsDataUrl are now nullable (an unrepresentable date yields no
+// calendar entry at all). Every test below that is ABOUT something else routes
+// through these, so a regression that starts returning null everywhere fails
+// loudly here instead of quietly turning those assertions into no-ops.
+function buildOk(input: Parameters<typeof buildIcs>[0]): string {
+  const ics = buildIcs(input);
+  expect(
+    ics,
+    "buildIcs returned null for input it should accept",
+  ).not.toBeNull();
+  return ics as string;
+}
+
+function dataUrlOk(input: Parameters<typeof icsDataUrl>[0]): string {
+  const url = icsDataUrl(input);
+  expect(
+    url,
+    "icsDataUrl returned null for input it should accept",
+  ).not.toBeNull();
+  return url as string;
+}
+
+// Reads one content line by property name. startsWith on purpose: if someone
+// respells the property (URL;VALUE=URI:), this MISSES it and the test fails
+// loudly rather than a looser regex quietly blessing a new spelling.
+function valueOf(ics: string, prop: string): string | undefined {
+  return contentLines(ics).find((l) => l.startsWith(`${prop}:`));
+}
 
 // What a calendar app sees after it splits the file on CRLF.
 function contentLines(ics: string): string[] {
@@ -101,6 +130,16 @@ function assertNoInjection(ics: string, label: string): void {
     `${label}: more than one VEVENT`,
   ).toHaveLength(1);
   expect(lines.filter((l) => l === "END:VEVENT")).toHaveLength(1);
+  // The allowlist above checks property NAMES, so "BEGIN:VALARM" passes it on
+  // the strength of "BEGIN". Pin the values of the structural lines too.
+  expect(
+    lines.filter((l) => l.startsWith("BEGIN:")),
+    `${label}: unexpected BEGIN component`,
+  ).toEqual(["BEGIN:VCALENDAR", "BEGIN:VEVENT"]);
+  expect(
+    lines.filter((l) => l.startsWith("END:")),
+    `${label}: unexpected END component`,
+  ).toEqual(["END:VEVENT", "END:VCALENDAR"]);
 }
 
 // The browser percent-decodes the data URL when it writes the .ics to disk, so
@@ -119,7 +158,7 @@ function injection(brk: string): string {
 describe("buildIcs line-break escaping", () => {
   // The named regression: a lone CR, which the old /\r?\n/ rule missed.
   it("a bare CR in the event name cannot open a second VEVENT", () => {
-    const ics = buildIcs({
+    const ics = buildOk({
       ...BASE,
       title: `Rooftop${injection("\r")}`,
     });
@@ -142,7 +181,7 @@ describe("buildIcs line-break escaping", () => {
     "%s cannot inject a property from any catalogue field",
     (_label, brk) => {
       const payload = injection(brk);
-      const ics = buildIcs({
+      const ics = buildOk({
         uid: `${BASE.uid}${payload}`,
         title: `Rooftop${payload}`,
         startsAt: BASE.startsAt,
@@ -157,13 +196,13 @@ describe("buildIcs line-break escaping", () => {
   it.each(BREAKS)(
     "%s is still neutralised in the downloaded .ics file",
     (_label, brk) => {
-      const url = icsDataUrl({ ...BASE, title: `Rooftop${injection(brk)}` });
+      const url = dataUrlOk({ ...BASE, title: `Rooftop${injection(brk)}` });
       assertNoInjection(downloadedFile(url), `${_label} via data URL`);
     },
   );
 
   it("collapses one CRLF into one escaped break, not two", () => {
-    const ics = buildIcs({ ...BASE, title: "Line one\r\nLine two" });
+    const ics = buildOk({ ...BASE, title: "Line one\r\nLine two" });
     const summary = contentLines(ics).find((l) => l.startsWith("SUMMARY:"));
     expect(summary).toBe("SUMMARY:Line one\\nLine two");
   });
@@ -174,7 +213,7 @@ describe("icsDataUrl percent-encoding", () => {
   // this file would stay green without it: no other fixture contains a "%",
   // so decodeURIComponent is the identity function on all of them.
   it("a literal %0D%0A in a catalogue value cannot decode back into a real break", () => {
-    const url = icsDataUrl({
+    const url = dataUrlOk({
       ...BASE,
       title: "Rooftop%0D%0ABEGIN:VEVENT%0D%0ASUMMARY:Injected%0D%0AEND:VEVENT",
     });
@@ -182,7 +221,7 @@ describe("icsDataUrl percent-encoding", () => {
   });
 
   it("leaves no raw # in the payload, which would truncate the file at the fragment", () => {
-    const url = icsDataUrl({ ...BASE, title: "Rooftop #1 Session" });
+    const url = dataUrlOk({ ...BASE, title: "Rooftop #1 Session" });
     const payload = url.slice("data:text/calendar;charset=utf-8,".length);
     expect(payload).not.toContain("#");
     expect(downloadedFile(url)).toContain("SUMMARY:Rooftop #1 Session");
@@ -191,7 +230,7 @@ describe("icsDataUrl percent-encoding", () => {
 
 describe("buildIcs control characters", () => {
   it("drops C0 controls and DEL, which RFC 5545 forbids in TEXT", () => {
-    const ics = buildIcs({
+    const ics = buildOk({
       ...BASE,
       title: "Rooftop\x00 Session\x1f\x7f",
     });
@@ -200,7 +239,7 @@ describe("buildIcs control characters", () => {
   });
 
   it("keeps HTAB, the one control RFC 5545 allows", () => {
-    const ics = buildIcs({ ...BASE, title: "Rooftop\tSession" });
+    const ics = buildOk({ ...BASE, title: "Rooftop\tSession" });
     const summary = contentLines(ics).find((l) => l.startsWith("SUMMARY:"));
     expect(summary).toBe("SUMMARY:Rooftop\tSession");
   });
@@ -208,13 +247,13 @@ describe("buildIcs control characters", () => {
 
 describe("buildIcs existing escaping and shape", () => {
   it("escapes backslash, semicolon and comma, in that order", () => {
-    const ics = buildIcs({ ...BASE, title: "A\\B;C,D" });
+    const ics = buildOk({ ...BASE, title: "A\\B;C,D" });
     const summary = contentLines(ics).find((l) => l.startsWith("SUMMARY:"));
     expect(summary).toBe("SUMMARY:A\\\\B\\;C\\,D");
   });
 
   it("emits a well formed single event with CRLF separators", () => {
-    const ics = buildIcs(BASE);
+    const ics = buildOk(BASE);
     assertNoInjection(ics, "clean input");
     expect(contentLines(ics)[0]).toBe("BEGIN:VCALENDAR");
     expect(contentLines(ics).at(-1)).toBe("END:VCALENDAR");
@@ -227,7 +266,7 @@ describe("buildIcs existing escaping and shape", () => {
   // and Z. Pinning the SHAPE catches anyone who "simplifies" these three lines
   // to interpolate input.startsAt directly.
   it("emits machine-generated timestamps only in DTSTAMP, DTSTART and DTEND", () => {
-    const ics = buildIcs(BASE);
+    const ics = buildOk(BASE);
     for (const prop of ["DTSTAMP", "DTSTART", "DTEND"]) {
       const line = contentLines(ics).find((l) => l.startsWith(`${prop}:`));
       expect(line, `${prop} missing or not machine-generated`).toMatch(
@@ -237,7 +276,7 @@ describe("buildIcs existing escaping and shape", () => {
   });
 
   it("omits the optional properties when they are absent", () => {
-    const ics = buildIcs({
+    const ics = buildOk({
       uid: BASE.uid,
       title: BASE.title,
       startsAt: BASE.startsAt,
@@ -246,5 +285,175 @@ describe("buildIcs existing escaping and shape", () => {
     expect(ics).not.toContain("DESCRIPTION:");
     expect(ics).not.toContain("URL:");
     assertNoInjection(ics, "minimal input");
+  });
+});
+
+// ── RFC 5545 value types: URL is a URI, not TEXT ────────────────────────────
+//
+// §3.3.11 defines the backslash escapes as part of the TEXT value type only,
+// and §3.8.4.6 gives URL the URI value type. Consumers do not un-escape a URI,
+// so running the TEXT escaper over a ticket link does not escape it, it
+// CORRUPTS it: `?a=1,2` is delivered as `?a=1\,2` and no longer resolves.
+describe("URL is a URI value, not TEXT", () => {
+  // Commas and semicolons are ordinary legal URL characters. A Google Maps
+  // link puts a comma between latitude and longitude, so this shape is real.
+  const REAL_URL =
+    "https://tickets.example.com/e/rooftop,soho?ll=51.5,-0.13;t=2";
+
+  it("delivers commas and semicolons verbatim, with no TEXT escaping", () => {
+    const ics = buildOk({ ...BASE, url: REAL_URL });
+    expect(valueOf(ics, "URL")).toBe(`URL:${REAL_URL}`);
+  });
+
+  // The discriminator that stops the fix spreading one property too far.
+  // DESCRIPTION is TEXT even when its content happens to be a URL, because the
+  // value type belongs to the property, not to what you put in it.
+  it("keeps TEXT escaping in DESCRIPTION even when it contains the same URL", () => {
+    const ics = buildOk({
+      ...BASE,
+      url: REAL_URL,
+      description: `Tickets: ${REAL_URL}`,
+    });
+    expect(valueOf(ics, "DESCRIPTION")).toBe(
+      "DESCRIPTION:Tickets: https://tickets.example.com/e/rooftop\\,soho?ll=51.5\\,-0.13\\;t=2",
+    );
+  });
+
+  it("keeps TEXT escaping in LOCATION", () => {
+    const ics = buildOk({ ...BASE, location: "The Bar, Soho; London" });
+    expect(valueOf(ics, "LOCATION")).toBe("LOCATION:The Bar\\, Soho\\; London");
+  });
+
+  // Dropping the escaping must not drop the injection guard with it: a URI
+  // still occupies exactly one content line.
+  it.each(BREAKS)(
+    "omits the URL property when the URI carries %s",
+    (label, brk) => {
+      const ics = buildOk({ ...BASE, url: `https://example.com/t${brk}evil` });
+      expect(valueOf(ics, "URL"), `URL survived with ${label}`).toBeUndefined();
+      assertNoInjection(ics, `uri with ${label}`);
+    },
+  );
+
+  // 🧨 Without this case the OTHER_CONTROL strip on the URI path can be deleted
+  // and the whole suite stays green: no other URL fixture carries a C0 control.
+  it.each([
+    ["NUL", "\x00"],
+    ["unit separator", "\x1f"],
+    ["DEL", "\x7f"],
+    ["HTAB", "\t"],
+  ])("omits the URL property when the URI carries %s", (label, ch) => {
+    const ics = buildOk({
+      ...BASE,
+      url: `https://tickets.example.net/t${ch}x`,
+    });
+    expect(valueOf(ics, "URL"), `URL survived with ${label}`).toBeUndefined();
+    // Not just "the property is missing": the value must be nowhere in the
+    // file under any spelling.
+    expect(ics).not.toContain("tickets.example.net");
+    assertNoInjection(ics, `uri with ${label}`);
+  });
+
+  // Fail closed, and specifically DO NOT strip the offending character: that
+  // would silently publish a URL pointing somewhere the data never said.
+  it("never rewrites a broken URI into a different working destination", () => {
+    const ics = buildOk({ ...BASE, url: "https://exa\rmple.com/tickets" });
+    expect(valueOf(ics, "URL")).toBeUndefined();
+    // The whole point of failing closed: the break must not simply be deleted,
+    // which would publish a link to a host the catalogue never contained.
+    expect(ics).not.toContain("https://example.com/tickets");
+    expect(ics).not.toContain("mple.com/tickets");
+  });
+
+  // 🧨 Calendar clients LINKIFY the URL property, so this is a real sink in
+  // someone's calendar app, not just a formatting question. Without this block
+  // the scheme allowlist can be deleted and the whole suite stays green.
+  it.each([
+    "javascript:alert(1)",
+    "JavaScript:alert(document.domain)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "file:///etc/passwd",
+    "about:blank",
+  ])("omits the URL property for the non-web scheme %j", (raw) => {
+    const ics = buildOk({ ...BASE, url: raw });
+    expect(valueOf(ics, "URL"), `${raw} survived`).toBeUndefined();
+    expect(ics.toLowerCase()).not.toContain("javascript");
+    expect(ics.toLowerCase()).not.toContain("vbscript");
+    expect(ics.toLowerCase()).not.toContain("etc/passwd");
+    assertNoInjection(ics, `scheme ${raw}`);
+  });
+
+  // safeExternalHref strips userinfo, because "https://ticketmaster.com@evil
+  // .com/x" reads as ticketmaster.com to a person glancing at it. The calendar
+  // entry is exactly the place someone glances.
+  it("strips userinfo from the ticket URL", () => {
+    const ics = buildOk({
+      ...BASE,
+      url: "https://tickets.example.net@evil.example.org/x",
+    });
+    expect(valueOf(ics, "URL")).toBe("URL:https://evil.example.org/x");
+  });
+
+  it("survives the data-URL round trip unescaped", () => {
+    const file = downloadedFile(dataUrlOk({ ...BASE, url: REAL_URL }));
+    expect(valueOf(file, "URL")).toBe(`URL:${REAL_URL}`);
+    assertNoInjection(file, "uri via data url");
+  });
+});
+
+// ── Dates JS cannot represent must fail safe ────────────────────────────────
+//
+// events.starts_at is `timestamptz not null`, so these are unreachable from a
+// well-formed row today. They are reachable from Postgres, though: its range
+// runs to 294276 AD and it accepts the literal 'infinity'. A throw here lands
+// during ISR generation of the anon twin, failing the CACHED signed-out page
+// for every visitor, not just the one render.
+// 🧨 Note for anyone tempted to simplify lib/ics.ts: the start check and the
+// end check are DELIBERATELY redundant, and removing either one alone is an
+// EQUIVALENT MUTANT that this file cannot catch. NaN + n is NaN, so an
+// unparseable start is still caught by the end check, and vice versa. Both
+// removed together turns 7 tests red. Redundant is the point: each one becomes
+// load-bearing the moment the other is refactored.
+describe("unrepresentable dates fail safe", () => {
+  const BAD: [string, string][] = [
+    ["free text", "banana"],
+    ["empty string", ""],
+    ["postgres infinity", "infinity"],
+    ["postgres -infinity", "-infinity"],
+    ["year beyond the JS Date range", "+300000-01-01T00:00:00.000Z"],
+    // 🧨 The one a throw-only guard lets through: toISOString() SUCCEEDS here
+    // and returns the expanded "+010000-..." form, which strips to a signed
+    // ten-digit DATE-TIME that strict clients reject outright.
+    [
+      "year 10000, which serialises to the expanded form",
+      "+010000-01-01T00:00:00.000Z",
+    ],
+    ["year 275760, the last JS can hold", "+275760-09-13T00:00:00.000Z"],
+    ["the string null", "null"],
+  ];
+
+  it.each(BAD)("returns null instead of throwing for %s", (_label, value) => {
+    expect(() => buildIcs({ ...BASE, startsAt: value })).not.toThrow();
+    expect(buildIcs({ ...BASE, startsAt: value })).toBeNull();
+    expect(() => icsDataUrl({ ...BASE, startsAt: value })).not.toThrow();
+    expect(icsDataUrl({ ...BASE, startsAt: value })).toBeNull();
+  });
+
+  it("falls back to two hours when the duration is not a finite number", () => {
+    const ics = buildOk({ ...BASE, durationMins: Number.NaN });
+    expect(valueOf(ics, "DTSTART")).toBe("DTSTART:20260912T193000Z");
+    expect(valueOf(ics, "DTEND")).toBe("DTEND:20260912T213000Z");
+  });
+
+  it("returns null when the duration alone pushes the end out of range", () => {
+    expect(() => buildIcs({ ...BASE, durationMins: 1e15 })).not.toThrow();
+    expect(buildIcs({ ...BASE, durationMins: 1e15 })).toBeNull();
+  });
+
+  it("still builds normally for a representable date", () => {
+    const ics = buildOk(BASE);
+    expect(valueOf(ics, "DTSTART")).toBe("DTSTART:20260912T193000Z");
+    assertNoInjection(ics, "valid date");
   });
 });
