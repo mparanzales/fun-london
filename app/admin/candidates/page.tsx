@@ -13,6 +13,7 @@ import { redirect } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/admin";
 import { getAuthUser, isAdminEmail } from "@/lib/auth";
 import { decideCandidate } from "./actions";
+import { safeExternalHref } from "@/lib/safe-url";
 
 export const dynamic = "force-dynamic";
 
@@ -413,6 +414,11 @@ function EmptyReview() {
 // ── Needs-review card (bulk imports held by the ingest quality gate) ──────
 function ReviewCard({ it }: { it: ReviewItem }) {
   const fr = it.filter_results ?? {};
+  // Candidate URLs come straight off the ingestion / bulk-import queue and are
+  // reviewed by a signed-in ADMIN, so an unchecked scheme here would run in the
+  // most privileged session we have. Same rule as every other catalogue href
+  // (lib/safe-url.ts).
+  const websiteHref = safeExternalHref(fr.website);
   return (
     <article className="rounded-2xl bg-card border border-border p-5">
       <header className="mb-3">
@@ -441,15 +447,21 @@ function ReviewCard({ it }: { it: ReviewItem }) {
           Rating {fr.rating ?? "n/a"} · {fr.reviews ?? 0} reviews ·{" "}
           {fr.business_status ?? "status unknown"}
         </div>
-        {fr.website ? (
+        {websiteHref ? (
           <a
-            href={fr.website}
+            href={websiteHref}
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-primary underline-offset-2 hover:underline break-all"
           >
             {fr.website}
           </a>
+        ) : fr.website ? (
+          // Show what was actually stored, unlinked. A reviewer deciding on
+          // this candidate needs to SEE a rejected URL, not have it vanish.
+          <span className="text-xs text-muted-fg break-all">
+            {fr.website} (not a usable web link)
+          </span>
         ) : null}
       </div>
 
@@ -521,33 +533,40 @@ function CandidateCard({ c }: { c: Candidate }) {
           Why this is here ({c.sources.length})
         </summary>
         <ul className="mt-2 flex flex-col gap-1">
-          {c.sources.map((s, i) => (
-            <li key={i} className="text-xs text-muted-fg leading-snug">
-              {s.publication ? (
-                <>
-                  <span className="font-bold text-fg">{s.publication}</span>,{" "}
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline-offset-2 hover:underline"
-                  >
-                    {s.title}
-                  </a>{" "}
-                  <span className="text-muted-fg/60">({s.date})</span>
-                </>
-              ) : (
-                <>
-                  <span className="font-bold text-fg">
-                    {s.source === "bulk-import"
-                      ? "Bulk import"
-                      : (s.source ?? "import")}
-                  </span>
-                  {s.import_note ? <> · {s.import_note}</> : null}
-                </>
-              )}
-            </li>
-          ))}
+          {c.sources.map((s, i) => {
+            const sourceHref = safeExternalHref(s.url);
+            return (
+              <li key={i} className="text-xs text-muted-fg leading-snug">
+                {s.publication ? (
+                  <>
+                    <span className="font-bold text-fg">{s.publication}</span>,{" "}
+                    {sourceHref ? (
+                      <a
+                        href={sourceHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline-offset-2 hover:underline"
+                      >
+                        {s.title}
+                      </a>
+                    ) : (
+                      <span>{s.title}</span>
+                    )}{" "}
+                    <span className="text-muted-fg/60">({s.date})</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-bold text-fg">
+                      {s.source === "bulk-import"
+                        ? "Bulk import"
+                        : (s.source ?? "import")}
+                    </span>
+                    {s.import_note ? <> · {s.import_note}</> : null}
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </details>
 

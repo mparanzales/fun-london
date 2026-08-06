@@ -11,6 +11,7 @@
 
 import type { BookingLink } from "@/lib/types";
 import { applyAffiliate } from "@/lib/affiliate";
+import { parseExternalUrl } from "@/lib/safe-url";
 
 export type ReserveTarget = { platform: BookingLink["platform"]; url: string };
 export type ReserveSlot = { date: string; time: string; party: number }; // date=YYYY-MM-DD, time=HH:MM
@@ -25,13 +26,12 @@ export function buildReserveUrl(
   // origin on the user's own tap; the old fallback returned the raw string
   // verbatim whenever new URL threw. Null drops the CTA instead: no booking
   // link beats a live sink.
-  let u: URL;
-  try {
-    u = new URL(target.url);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  //
+  // The rule itself now lives in lib/safe-url.ts, shared with every other
+  // catalogue-URL href on the site, so there is one definition to keep right
+  // rather than one per sink.
+  const u = parseExternalUrl(target.url);
+  if (!u) return null;
   const { date, time, party } = slot;
   switch (target.platform) {
     case "opentable":

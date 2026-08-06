@@ -18,6 +18,7 @@ import { Radar } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthUser, isAdminEmail } from "@/lib/auth";
 import { hidePopup } from "./actions";
+import { safeExternalHref } from "@/lib/safe-url";
 
 export const dynamic = "force-dynamic";
 
@@ -148,6 +149,9 @@ function EmptyState() {
 }
 
 function PopupCard({ p }: { p: PopupRow }) {
+  // Pop-up source URLs come from the discovery cron and are opened by an ADMIN,
+  // so the scheme is checked like every other catalogue href (lib/safe-url.ts).
+  const sourceHref = safeExternalHref(p.source_url);
   return (
     <article className="rounded-2xl bg-card border border-border p-5">
       <div className="flex items-start justify-between gap-3">
@@ -179,9 +183,9 @@ function PopupCard({ p }: { p: PopupRow }) {
         </p>
       ) : null}
 
-      {p.source_url ? (
+      {sourceHref ? (
         <a
-          href={p.source_url}
+          href={sourceHref}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-block text-[11px] font-bold text-primary underline-offset-2 hover:underline mt-2"
