@@ -5,7 +5,7 @@
 // the date/time/party they chose) so it shows in Saved → "Coming up". If
 // not, no phantom record is created.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { isGooglePlacesUrl } from "@/lib/img";
 import Link from "next/link";
@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Check } from "lucide-react";
 import { useBookings } from "@/components/bookings-context";
 import { track } from "@/lib/analytics";
+import { peekBookingReturn } from "@/lib/analytics-keys";
 import type { Venue } from "@/lib/types";
 
 function deriveDateLabel(d: Date): string {
@@ -48,6 +49,16 @@ export function DidYouBook({
   party: number;
 }) {
   const router = useRouter();
+  // Whether this booking came out of a built night. PEEKED, never consumed:
+  // /plan owns the one-shot read. When true, the primary exit from this
+  // screen is the door back to the night — the ux-critic's blocker was that
+  // the screen standing between the booking and the plan never mentioned the
+  // plan, so the PR's whole promise only fired for users who found the Plan
+  // tab on their own.
+  const [fromNight, setFromNight] = useState(false);
+  useEffect(() => {
+    setFromNight(peekBookingReturn() !== null);
+  }, []);
   const { addBooking } = useBookings();
   const [saved, setSaved] = useState(false);
 
@@ -86,6 +97,10 @@ export function DidYouBook({
       <div className="px-5 pt-4">
         <Link
           href={`/venue/${venue.slug}`}
+          // replace, not push: pushing a second /venue entry made the phone's
+          // back gesture land back on "Did you book?" — a question the user
+          // already left — in a venue ⇄ confirmed loop (ux-critic).
+          replace
           aria-label="Back"
           className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-fg/5 text-fg"
         >
@@ -136,11 +151,24 @@ export function DidYouBook({
             </button>
             <button
               type="button"
-              onClick={() => router.push(`/venue/${venue.slug}`)}
+              // replace, not push — same back-gesture loop as the arrow above.
+              onClick={() => router.replace(`/venue/${venue.slug}`)}
               className="w-full h-12 rounded-2xl border border-fg/15 text-fg font-semibold text-sm"
             >
               Not yet
             </button>
+            {fromNight && (
+              <Link
+                href="/plan"
+                // replace: /plan consumes the one-shot marker on arrival, so
+                // back-gesturing into this screen would show a door that no
+                // longer works. Leave no history entry to come back to.
+                replace
+                className="w-full h-12 rounded-2xl text-primary font-semibold text-sm flex items-center justify-center"
+              >
+                Back to your night
+              </Link>
+            )}
           </div>
         </div>
       ) : (
@@ -160,18 +188,39 @@ export function DidYouBook({
             you booked. We&apos;ve saved this here so you don&apos;t forget.
           </p>
           <div className="mt-7 flex flex-col gap-2.5">
-            <Link
-              href="/saved"
-              className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px] flex items-center justify-center"
-            >
-              See it in Coming up
-            </Link>
-            <Link
-              href="/explore"
-              className="w-full h-12 rounded-2xl border border-fg/15 text-fg font-semibold text-sm flex items-center justify-center"
-            >
-              Back to exploring
-            </Link>
+            {fromNight ? (
+              <>
+                <Link
+                  href="/plan"
+                  // replace, for the same one-shot reason as the quiet door.
+                  replace
+                  className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px] flex items-center justify-center"
+                >
+                  Back to your night
+                </Link>
+                <Link
+                  href="/saved"
+                  className="w-full h-12 rounded-2xl border border-fg/15 text-fg font-semibold text-sm flex items-center justify-center"
+                >
+                  See it in Coming up
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/saved"
+                  className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px] flex items-center justify-center"
+                >
+                  See it in Coming up
+                </Link>
+                <Link
+                  href="/explore"
+                  className="w-full h-12 rounded-2xl border border-fg/15 text-fg font-semibold text-sm flex items-center justify-center"
+                >
+                  Back to exploring
+                </Link>
+              </>
+            )}
           </div>
         </div>
       )}

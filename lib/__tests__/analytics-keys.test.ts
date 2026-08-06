@@ -199,3 +199,113 @@ describe("sign-in trigger", () => {
     expect(k.consumeSignInTrigger()).toBe("unknown");
   });
 });
+
+describe("booking return · the stop you went off to book", () => {
+  // sessionStorage-backed like the handoff; same privacy shape (slug + index
+  // + timestamp only), one-shot so it can never replay onto a later visit.
+  it("round-trips and is one-shot", async () => {
+    const k = await keys();
+    k.writeBookingReturn("the-dove", 1);
+    expect(k.readBookingReturn()).toEqual({ slug: "the-dove", stopIndex: 1 });
+    expect(k.readBookingReturn()).toBeNull(); // consumed
+  });
+  it("refuses an out-of-range index and a missing slug", async () => {
+    const k = await keys();
+    // Positive control FIRST: prove a directly-seeded marker under the
+    // exported constant reads back at all. Without it, every null below is
+    // green for the wrong reason (key renamed, reader broken) — hardcoding
+    // the key string here was exactly that vacuous shape.
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({ slug: "x", stopIndex: 1, at: Date.now() }),
+    );
+    expect(k.readBookingReturn()).toEqual({ slug: "x", stopIndex: 1 });
+    k.writeBookingReturn("x", 5 as never);
+    expect(k.readBookingReturn()).toBeNull();
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({ stopIndex: 1, at: Date.now() }),
+    );
+    expect(k.readBookingReturn()).toBeNull();
+  });
+  it("expires rather than restoring a stale trip", async () => {
+    const k = await keys();
+    // Same payload, fresh timestamp, reads back — so the null below means
+    // "expired", not "never found".
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({ slug: "x", stopIndex: 0, at: Date.now() }),
+    );
+    expect(k.readBookingReturn()).toEqual({ slug: "x", stopIndex: 0 });
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({
+        slug: "x",
+        stopIndex: 0,
+        at: Date.now() - 3 * 60 * 60 * 1000,
+      }),
+    );
+    expect(k.readBookingReturn()).toBeNull();
+  });
+});
+
+describe("clearSessionBreadcrumbs · the sign-out sweep", () => {
+  // One call over one key list, because the PR #194 regression was a key
+  // added elsewhere and never swept. The unit test proves the sweep WIPES;
+  // the night-plan source guard pins WHERE it is called from.
+  it("removes both plan breadcrumbs but leaves the entry surface", async () => {
+    const k = await keys();
+    k.writePlanHandoff("the-dove", 0);
+    k.writeBookingReturn("the-dove", 1);
+    k.writeEntrySurface("feed");
+    expect(sessionStore.has(k.PLAN_HANDOFF_KEY)).toBe(true);
+    expect(sessionStore.has(k.BOOKING_RETURN_KEY)).toBe(true);
+    k.clearSessionBreadcrumbs();
+    expect(sessionStore.has(k.PLAN_HANDOFF_KEY)).toBe(false);
+    expect(sessionStore.has(k.BOOKING_RETURN_KEY)).toBe(false);
+    // Deliberately untouched: it describes the tab's entry, not the account.
+    expect(k.readEntrySurface()).toBe("feed");
+  });
+
+  it("never throws when storage is unavailable", async () => {
+    const k = await keys();
+    vi.stubGlobal("window", {
+      get sessionStorage(): Storage {
+        throw new Error("private mode");
+      },
+    });
+    expect(() => k.clearSessionBreadcrumbs()).not.toThrow();
+  });
+});
+
+describe("booking return: peek vs read", () => {
+  it("peek returns the marker without consuming it; read consumes", async () => {
+    const k = await keys();
+    k.writeBookingReturn("padella", 1);
+    expect(k.peekBookingReturn()).toEqual({ slug: "padella", stopIndex: 1 });
+    // Still there: peeking must not spend the one-shot.
+    expect(k.peekBookingReturn()).toEqual({ slug: "padella", stopIndex: 1 });
+    expect(k.readBookingReturn()).toEqual({ slug: "padella", stopIndex: 1 });
+    // Gone: read is the one-shot.
+    expect(k.readBookingReturn()).toBeNull();
+    expect(k.peekBookingReturn()).toBeNull();
+  });
+
+  it("peek applies the same validation as read", async () => {
+    const k = await keys();
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({ slug: "x", stopIndex: 7, at: Date.now() }),
+    );
+    expect(k.peekBookingReturn()).toBeNull();
+    sessionStore.set(
+      k.BOOKING_RETURN_KEY,
+      JSON.stringify({
+        slug: "x",
+        stopIndex: 1,
+        at: Date.now() - 3 * 60 * 60 * 1000,
+      }),
+    );
+    expect(k.peekBookingReturn()).toBeNull();
+  });
+});

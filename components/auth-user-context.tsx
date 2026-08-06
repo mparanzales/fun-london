@@ -19,7 +19,10 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { setAnalyticsAuthState, resetAnalyticsIdentity } from "@/lib/analytics";
-import { clearSignInTrigger } from "@/lib/analytics-keys";
+import {
+  clearSignInTrigger,
+  clearSessionBreadcrumbs,
+} from "@/lib/analytics-keys";
 import {
   clearAnonPlanKeys,
   clearActivePlan,
@@ -79,6 +82,14 @@ export function AuthUserProvider({ children }: { children: React.ReactNode }) {
         // indefinitely: owner-scoped, so B never SEES it, but it is still A's
         // data left on someone else's machine, and nothing sweeps it.
         clearActivePlan(prevIdRef.current);
+        // Session breadcrumbs are not owner-scoped, so the transition clears
+        // them: B must not consume A's booking-return or plan handoff. ONE
+        // call over ONE key list (lib/analytics-keys.ts) — an inline
+        // removeItem here is how the PR #194 third-key regression happened.
+        // Brace-free on purpose: the guard test's block capture stops at the
+        // first closing brace, and an inline try/catch here would cut every
+        // later call (including clearRoomInvite) out of the pinned region.
+        clearSessionBreadcrumbs();
         // 🧨 MANDATORY, not tidiness, and the strongest of the three: the room
         // invite is a BEARER CREDENTIAL in this browser's storage. The others
         // leak one person's data to the next; this one would enrol the next

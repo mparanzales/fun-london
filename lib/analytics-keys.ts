@@ -223,6 +223,115 @@ export function readPlanHandoff(slug: string): PlanHandoff | null {
   }
 }
 
+// ── booking return ──────────────────────────────────────────────────────
+
+/**
+ * The stop the user went OFF to book, so /plan can put them back at that
+ * exact point when they return. Slug + 0-based stop index + timestamp only:
+ * no venue id, no plan title, no booking details, no room codes — the same
+ * privacy shape as the handoff above. sessionStorage, so it dies with the
+ * tab and can never bleed to another browser session.
+ *
+ * TTL is generous (2h): a booking flow on a partner site genuinely takes
+ * minutes, and an expired marker simply restores nothing.
+ */
+export const BOOKING_RETURN_KEY = "fl.bookreturn.v1";
+const BOOKING_RETURN_TTL_MS = 2 * 60 * 60 * 1000;
+
+export function writeBookingReturn(slug: string, stopIndex: number): void {
+  const s = session();
+  if (!s) return;
+  if (stopIndex !== 0 && stopIndex !== 1 && stopIndex !== 2) return;
+  try {
+    s.setItem(
+      BOOKING_RETURN_KEY,
+      JSON.stringify({ slug, stopIndex, at: Date.now() }),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+type BookingReturn = { slug: string; stopIndex: 0 | 1 | 2 };
+
+function parseBookingReturn(raw: string | null): BookingReturn | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as {
+      slug?: unknown;
+      stopIndex?: unknown;
+      at?: unknown;
+    };
+    if (typeof v.slug !== "string" || v.slug.length === 0) return null;
+    if (typeof v.at !== "number" || Date.now() - v.at > BOOKING_RETURN_TTL_MS)
+      return null;
+    if (v.stopIndex !== 0 && v.stopIndex !== 1 && v.stopIndex !== 2)
+      return null;
+    return { slug: v.slug, stopIndex: v.stopIndex };
+  } catch {
+    return null;
+  }
+}
+
+/** One-shot: removed before validation, so it can never replay later. */
+export function readBookingReturn(): BookingReturn | null {
+  const s = session();
+  if (!s) return null;
+  let raw: string | null = null;
+  try {
+    raw = s.getItem(BOOKING_RETURN_KEY);
+    if (raw !== null) s.removeItem(BOOKING_RETURN_KEY);
+  } catch {
+    return null;
+  }
+  return parseBookingReturn(raw);
+}
+
+/**
+ * Non-consuming look at the marker, for the ONE screen that stands between
+ * the booking and the plan: /booking/[slug]/confirmed needs to know whether
+ * this booking came out of a night so it can offer the door back, WITHOUT
+ * spending the marker that /plan will consume a moment later. Everything
+ * else uses readBookingReturn; peeking anywhere that then navigates away
+ * from the plan would leave the one-shot semantics intact but the promise
+ * broken.
+ */
+export function peekBookingReturn(): BookingReturn | null {
+  const s = session();
+  if (!s) return null;
+  try {
+    return parseBookingReturn(s.getItem(BOOKING_RETURN_KEY));
+  } catch {
+    return null;
+  }
+}
+
+// ── session breadcrumbs sweep ───────────────────────────────────────────
+
+/**
+ * Every plan-scoped session breadcrumb, in ONE list, so the sign-out
+ * transition sweeps them all with a single call. The PR #194 regression was
+ * exactly a key added elsewhere and never swept — new breadcrumbs get added
+ * HERE, not as another removeItem at the call site.
+ *
+ * ENTRY_SURFACE_KEY is deliberately not in this list: it is a coarse enum
+ * ("feed", "search", ...) describing where THIS TAB entered the app, not
+ * anything about the account, and clearing it would change its meaning.
+ */
+const SESSION_BREADCRUMB_KEYS = [PLAN_HANDOFF_KEY, BOOKING_RETURN_KEY];
+
+export function clearSessionBreadcrumbs(): void {
+  const s = session();
+  if (!s) return;
+  for (const key of SESSION_BREADCRUMB_KEYS) {
+    try {
+      s.removeItem(key);
+    } catch {
+      // Private mode. The sweep must never break the sign-out path.
+    }
+  }
+}
+
 // ── sign-in trigger ─────────────────────────────────────────────────────
 
 /**
