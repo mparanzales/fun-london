@@ -3,7 +3,9 @@
 **Source of truth:** the `AnalyticsEvent` union and the exported unions in
 `lib/analytics.ts`. A typo is a compile error; this file is the prose around it.
 
-**Branch:** `feat/analytics-foundation`, rebased onto `main` @ `da88c2f`. Last updated 2026-07-30.
+**On `main`.** Last updated 2026-08-06 against `main` @ `140e5e5`, adding the
+nine plan-series events and the save dimensions from
+[#194](https://github.com/mparanzales/fun-london/pull/194)–[#226](https://github.com/mparanzales/fun-london/pull/226).
 
 Read the two rules at the top before using any number below.
 
@@ -130,18 +132,64 @@ genuinely occur there.
 
 ### `plan_save_tapped` / `plan_save_succeeded` / `plan_save_failed`
 `tapped` fires after the in-flight guard, so its count is comparable to the
-insert count. `succeeded` fires only once the insert returns clean. `failed`
-fires only on a real failed write.
+write count. `succeeded` fires only once the write returns clean. `failed`
+fires only on a real failed write. One successful save emits **three** events
+(`tapped` + `succeeded` + the deprecated `plan_save`) with the byte-identical
+prop bag; a failed save emits two. Never union the names.
 
-Shared props: `mode`, `attempt`, `anon_origin`, `saved_list_loaded`, plus the
-same coarse plan bag the legacy event sent (`area`, `vibe`, `budget`, `daypart`,
-`stop_count`, `swapped`, `pool_stage`, `pool_size`).
+Shared props: `mode`, `write_path`, `plan_origin`, `anon_origin`, `attempt`,
+`saved_list_loaded`, plus the same coarse plan bag the legacy event sent
+(`area`, `vibe`, `budget`, `daypart`, `stop_count`, `swapped`, `pool_stage`,
+`pool_size`).
 
 `mode`: `new`, `duplicate`, `resave_after_swap`, `resave_after_reshuffle`.
-No `update` (the write is insert-only and there is no UPDATE policy on the
-table). No `restored_anon` (the Save button is unmounted in exactly the state a
-restored anon stash creates, so the value could never be produced);
-`anon_origin` carries that information instead.
+🧨 `duplicate` is a **structural zero**: the Save button's disabled expression
+includes bare `alreadySaved` and `onSave` reads the same render's value, so the
+only branch that could produce it is exactly the branch where the button cannot
+be clicked. A flat line there is the design working. Both `resave_*` values
+fire on the FIRST save of a night reached that way — no prior save is implied
+by the name.
+
+`write_path` (`insert` | `update`) — added by
+[#224](https://github.com/mparanzales/fun-london/pull/224) (2026-08-05), which
+retired two claims earlier versions of this section made:
+
+- ~~"the write is insert-only and there is no UPDATE policy on the table"~~ —
+  migration `0006_saved_plan_timing.sql` adds an owner-pinned UPDATE policy +
+  table grant and a `plans_pin_row` BEFORE UPDATE trigger. A reopened or
+  previously saved night now updates its own row in place. "update" rides
+  here, NOT on `mode`.
+- ~~"the Save button is unmounted in the restored-anon state"~~ — a restored or
+  claimed night IS savable (that is the conversion path). `plan_origin` and
+  `anon_origin` carry that information, because it is orthogonal to `mode`.
+
+🧨 **`write_path` is provenance, not the SQL verb.** `insert` means "no
+reopened row was targeted"; the statement for a live night is an upsert on a
+client-minted uuid held for the night's life, so a same-session re-save of one
+live night updates in place while reporting `insert`. Counting
+`write_path: "insert"` as "new saved nights" over-counts. Catalogue churn also
+FORCES `insert`: a reopened night that lost a stop deliberately writes a new
+row rather than overwriting the survivor set, so a spike of `insert` under
+`plan_origin: "saved"` is an ingest/hiding event — correlate with
+`plan_restored_partial` before reading it as user behaviour.
+
+`plan_origin` (`live` | `generated` | `saved` | `anon`): where the night on
+screen came from. `live` = built this session; `generated` = restored from
+localStorage after a refresh or a venue round trip; `saved` = reopened from
+the saved list; `anon` = claimed at sign-in. `pool_stage` / `pool_size` are
+null whenever `plan_origin` is not `live`, by construction: the engine kept
+computing behind a restored night and describes a different night.
+
+`anon_origin` (boolean) means "claimed on THIS page load". It is per-mount and
+misreports in both directions: a claimed night that survives a refresh sends
+`plan_origin: "anon"` with `anon_origin: false`; and the ref is cleared only by
+`standDown()`, which the reopen path never calls, so claim → "← Edit" → open a
+saved night → Save emits `anon_origin: true` on a `plan_origin: "saved"`
+night. `plan_origin` is the durable signal.
+
+`attempt` counts accepted save attempts per MOUNT, across nights, never reset.
+It is not a retry counter — the in-flight guard swallows double-taps before it
+increments.
 
 `saved_list_loaded` exists because `loadSavedPlans` swallows its error. Without
 it, a failed load would make every save look like `new`.
@@ -174,6 +222,211 @@ wrong conclusion about which stop people reject.
 
 Note: `plan_swap` and `plan_open_maps` still merge solo and group with no surface
 discriminator. The common properties do not disambiguate them.
+
+### The plan-series additions (#194–#226): shared facts
+
+Every event from here to `plan_restored_partial` fires on ONE surface: solo
+signed-in `/plan`. The anon flow and the group room lack the producing controls
+by construction (no saved list, no per-stop replacement, no undo, no
+start-earlier lever, no booking handoff), so an anon or group flat line is
+structural. None of them carries `plan_surface` — it would read `solo` on 100%
+of events, and a constant property is worse than a missing one. None existed
+before its PR's merge date: earlier data is absent, not zero. And none is
+pinned by a dashboard or an emission test yet (only `plan_book_return`'s
+`marker_shown` mechanics have a guard test) — nothing would notice if one
+stopped firing.
+
+### `plan_swap_undo`
+One tap of the "Undo change" chip stepped a stop replacement back. Fires at the
+end of the handler, after the pop really happened.
+[#197](https://github.com/mparanzales/fun-london/pull/197), 2026-08-02.
+
+Props: `remaining` — this night's history depth after the pop, 0–19
+(`UNDO_DEPTH = 20`). It is not "undos still available", and it can shrink
+between sessions for non-user reasons: the persisted history is rebuilt against
+the live catalogue on mount, and entries touching a vanished venue restart the
+run.
+
+No stop index, no method, no surface discriminator — you cannot ask which stop
+was undone, or join it to the `plan_swap` it reverses except by session
+ordering. It can only ever be a subset of `plan_swap`: a flat line means
+"nobody swaps" or "nobody regrets a swap", and those are indistinguishable
+without reading `plan_swap` alongside it.
+
+### `plan_reopen_conflict` / `plan_reopen_conflict_resolved`
+Tapping a saved night while an unsaved night is live raises the conflict card
+(`…conflict`, props: `stops` — the STORED night's count, 1–3, read from
+localStorage, not the screen) and answering it resolves it (`…resolved`,
+props: `choice`: `open_saved` | `keep_current`).
+[#197](https://github.com/mparanzales/fun-london/pull/197), 2026-08-02.
+
+Shown once per episode: a state latch keeps re-taps silent while the card is
+up. 🧨 **Only answering the card clears the latch.** Build past it instead and
+(a) no `resolved` is ever sent for that episode, (b) the stale card survives,
+and (c) every later genuine conflict is silently suppressed until it is
+answered. Expect an undercount on `…conflict` and the occasional late,
+mis-attributed `…resolved`.
+
+Not 1:1 in either direction: abandonment produces shown-with-no-resolved, and
+`keep_current` re-arms the latch, so one session can produce many pairs. Read
+`resolved / shown` as a completion rate. No correlation id joins the pair.
+
+⚠️ `choice: "open_saved"` does not mean a night actually opened — the event
+fires after the tap with no success check, and the reopen can bail silently
+when every stop's venue has left the catalogue. ⚠️ `choice` is a bare string
+at two call sites, not a union in `lib/analytics.ts`; a third value would
+typecheck.
+
+### `plan_reshuffle_confirm_shown` / `plan_edit_confirm_shown`
+The two loss-warnings on a night with manual replacements: "Try another
+combination" ([#200](https://github.com/mparanzales/fun-london/pull/200),
+2026-08-04) and "← Edit"
+([#216](https://github.com/mparanzales/fun-london/pull/216), 2026-08-05) ask
+first instead of discarding. Both fire on the tap that was REFUSED — they
+measure intercepted destructive taps, never intent that proceeded.
+
+Props: `replaced` (1–3; 0 is unreachable — the guard requires replacements to
+lose). Same prop name, same derivation, on both events: split by event name or
+the two warnings merge into one wrong conclusion.
+
+No latch on either. Every dismissal re-arms the emit, and each card's tap
+clears the OTHER card's flag, so one indecisive user can ping-pong an unbounded
+event count on a single night. Count sessions or users, never raw volume.
+
+🧨 The funnel has only one end instrumented, and differently per event:
+
+- reshuffle — accepting emits `plan_reshuffle` (or `plan_generate_failed`
+  `no_result`), declining emits nothing. And `plan_reshuffle` also fires for
+  every reshuffle that never raised a confirm, so "shown minus reshuffle" is
+  NOT an abandonment rate.
+- edit — NEITHER outcome emits ("Edit anyway" and "Keep my night" are both
+  silent), unlike the reopen pair above. This event alone cannot answer "does
+  the warning work?".
+
+The group room lets users replace stops but has NO confirm on its own back
+button — the solo-only line here reflects a missing guard in group, not
+missing analytics.
+
+### `plan_start_earlier`
+One tap of the "Start 30 min earlier" chip.
+[#216](https://github.com/mparanzales/fun-london/pull/216), 2026-08-05.
+
+Props: `shift_mins` (negative multiples of 30 — the running total for this
+mount, not the tap size) and `closed_stops` (1–3, the PRE-shift shut count).
+There is no post-shift count, and the chip only renders when the shift
+strictly reduces the count — so "did the lever help" is true by construction
+and unmeasurable from this event. What it cannot see: whether a stop stayed
+shut anyway.
+
+🧨 **Structurally impossible on the default brief.** The chip requires the
+night's start to be ≥ ~29 minutes in the future, and "Right now" (the
+default), "Today" during the day and "Tonight" in the evening all resolve the
+start to the live clock. Only "Tonight" picked during the day, a "Pick a day"
+custom start, or a restored night with a pinned future clock can emit it. The
+honest denominator is nights with a sufficiently future start — not nights
+with a shut stop.
+
+`shift_mins` resets per mount while the shifted clock persists: tap, walk to a
+venue page, come back, tap again → two `-30` events on a night that actually
+moved 60. Sum within a page session; never read max/last as displacement.
+Autocapture also records the same tap as `$autocapture`; never add the series.
+
+### `plan_book_return`
+The first signed-in `/plan` mount in a tab within 2 hours of tapping a booking
+door from a plan stop.
+[#226](https://github.com/mparanzales/fun-london/pull/226), 2026-08-06.
+
+The marker is a one-shot sessionStorage handoff written by the venue page's
+booking doors and consumed remove-before-validate, so the event means "opened
+a booking door from the plan, then reopened the plan in this tab" — reopening
+`/plan` for ANY reason counts, and it does NOT prove the partner page loaded,
+let alone a booking (`booking_self_logged` remains the only booking signal).
+Two per-mount ref latches make it once per mount, StrictMode-proof.
+
+Props: `stop_index` (0 | 1 | 2 — the index AT BOOKING TIME; the on-screen
+marker re-anchors by slug precisely because indices shift) and `marker_shown`
+(whether the "Booking opened here" paragraph actually rendered for that slug).
+
+⚠️ Missing events are not "didn't come back": TTL expiry, an intervening
+sign-out (clears the breadcrumbs), a closed tab, and private mode all lose the
+marker silently. ⚠️ There is no same-tool denominator: the ReserveSheet door
+emits `venue_reserve_click` `{from_plan: true}`, but the partner-less "Visit
+website" door emits no `track()` event at all, so this event can legitimately
+exceed `venue_reserve_click{from_plan}`. `stop_index`'s distribution measures
+which slots hold bookable venue types, not booking preference.
+
+🧨 `marker_shown` is load-bearing on effect ORDER: the restore runs in a
+layout effect and the marker consumption in a passive one, in that order.
+`lib/__tests__/booked-stop-marker-guard.test.ts` pins the scheduling and the
+expression because it regressed twice with a green suite while the PR was
+open. (Same lesson as the door itself: `window.open` + `noopener` returns null
+BY SPEC, so the door is a real anchor and the write is gated on plan
+provenance only — never on "did the popup open".)
+
+### `plan_anon_claimed`
+A night built signed-out was adopted by the account at sign-in — the
+conversion moment the anon → signed-in transfer exists for. Fires in the mount
+layout effect; no user gesture involved.
+[#194](https://github.com/mparanzales/fun-london/pull/194), 2026-07-31.
+
+Props: `stops` — the PERSISTED count, not the rendered one. A claim that lost
+a venue to catalogue churn still reports the stored count; the truthful kept
+number is on the `plan_restored_partial` that fires first in the same tick.
+
+🧨 **Do not filter this event by `auth_state` — it reads `anon` on the
+dominant path.** The claim emits in a layout effect; the module auth flag is
+set from a passive effect after an async Supabase callback, and the usual
+arrival is a full document load out of the OAuth redirect, so the layout
+effect wins deterministically. A dashboard filtered to
+`auth_state: "signed_in"` shows a flat line for an event that is firing fine.
+
+🧨 **A failed conversion emits NOTHING and destroys the anon night.** The
+claim clears every anon key first and checks freshness/liveness after: a stale
+night (12h TTL for "Right now" nights; up to 14 days for picked dates) or one
+whose venues all vanished lands the user on an empty setup form, silently. A
+drop in this event can mean "claims are failing the freshness gate", not
+"fewer people signing in".
+
+The denominator is `plan_preview_built` — the anon slot is written as soon as
+a preview renders, not on a save or sign-up tap. Total "anon night carried in"
+= this + the legacy `plan_stash_restored` (mutually exclusive by construction;
+the legacy leg is documented as removable, so expect it to trend to zero).
+Claims will exceed `anon_origin: true` saves by more than funnel drop-off: a
+reshuffle clears the anon-origin ref before the save.
+
+### `plan_restored_partial`
+A restored, claimed or reopened night lost at least one stop against today's
+plan catalogue, and at least one survived.
+[#194](https://github.com/mparanzales/fun-london/pull/194), 2026-07-31.
+
+Props: `dropped` (≥ 1), `kept` (≥ 1), `source` (`generated` | `saved` |
+`anon` — which door the night came through: refresh-restore, saved-list
+reopen, or anon claim).
+
+🧨 **The flat-line trap is inverted here: the catastrophic case is the silent
+one.** A night that lost EVERY stop emits nothing — the slot is cleared and
+the user sees an empty setup form. This event only ever reports partial
+survivors; zero events is not zero churn damage.
+
+🧨 What actually drops a stop is leaving the filtered plan catalogue:
+`hidden_at` set, row deleted, `google_place_id` nulled, or the photo lost /
+replaced with an Unsplash URL. A photo-pipeline regression therefore inflates
+this event with no venue hidden — check the Places/photo pipeline before
+assuming curation. A re-slug alone CANNOT drop a stop (hydration tries the
+uuid first, slug as fallback); pre-model saved rows have no slug fallback, so
+legacy rows drop at a structurally higher rate, all under `source: "saved"`.
+
+`auth_state` is a code-path indicator here, not a user fact: restore and claim
+fire pre-paint in a layout effect (reads `anon`), reopen fires on a tap (reads
+`signed_in`). The mount paths are latched once per owner; reopen is NOT —
+every reopen of a broken saved row re-emits, and because the first truncated
+reopen re-persists only the survivors, later taps on the same row ALSO raise
+`plan_reopen_conflict` for a night that was never at risk. One broken saved
+row inflates both events on repeat taps.
+
+The legacy stash path drops stops with no loss event at all
+(`plan_stash_restored` carries only the kept count) — a partial loss there is
+invisible.
 
 ### Unchanged plan events
 `plan_open_maps` (`stops` only, never the maps URL, which is two lines away and
@@ -308,3 +561,13 @@ Also from #187 and kept verbatim through the rebase:
 `sanitize_properties: stripRoomCodes` in `posthog.init`, which removes `room=` from
 every URL-bearing property before anything leaves the browser. Verified present in
 the deployed production bundle.
+
+## Known gaps: union members with no entry
+
+Listed so nobody mistakes this file for exhaustive. These predate the
+dictionary and still have no prose: `venue_save`, `venue_unsave`,
+`event_ticket_click`, `booking_self_logged` (mentioned above only for its
+missing plan attribution), `share`, `together_room_create`,
+`together_room_join`, `together_swipe`, `detail_wall_dismissed`. The union in
+`lib/analytics.ts` remains the source of truth for what exists; their prose is
+owed, not lost.
