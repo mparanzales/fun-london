@@ -156,6 +156,40 @@ export function EventDetail({
     </Link>
   );
 
+  // Map thumbnail, hoisted like the CTAs above rather than built inline.
+  // The IMAGE and the LINK are gated separately: directionsHref is null when
+  // the venue has no coords, no address, and a mapsUrl we rejected, and in
+  // that case the map still belongs on the page, just without somewhere to
+  // send the tap. Gating both on the href let "The venue" render as a header
+  // with nothing under it.
+  const mapFrame =
+    "relative block mt-4 h-28 lg:h-52 overflow-hidden rounded-2xl";
+  const mapThumb = !place ? null : place.mapUrl ? (
+    <Image
+      src={place.mapUrl}
+      alt={`Map of ${event.venueName}`}
+      fill
+      sizes="(max-width: 1023px) 100vw, 520px"
+      className="object-cover"
+    />
+  ) : (
+    <MapTilePlaceholder lat={place.lat} lng={place.lng} label={event.area} />
+  );
+  const mapBlock =
+    !place || !(place.mapUrl || directionsHref) ? null : directionsHref ? (
+      <a
+        href={directionsHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Open in Google Maps"
+        className={`${mapFrame} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
+      >
+        {mapThumb}
+      </a>
+    ) : (
+      <div className={mapFrame}>{mapThumb}</div>
+    );
+
   return (
     // Mobile: the max-w-md phone shell, unchanged. Desktop (lg+): the same
     // two-column editorial spread as /venue — sticky clamped hero left,
@@ -335,39 +369,7 @@ export function EventDetail({
                 rejected, and in that case the map still belongs on the page,
                 just without somewhere to send the tap. Gating both on the href
                 let "The venue" render as a header with nothing under it. */}
-            {(place.mapUrl || directionsHref) &&
-              (() => {
-                const thumb = place.mapUrl ? (
-                  <Image
-                    src={place.mapUrl}
-                    alt={`Map of ${event.venueName}`}
-                    fill
-                    sizes="(max-width: 1023px) 100vw, 520px"
-                    className="object-cover"
-                  />
-                ) : (
-                  <MapTilePlaceholder
-                    lat={place.lat}
-                    lng={place.lng}
-                    label={event.area}
-                  />
-                );
-                const frame =
-                  "relative block mt-4 h-28 lg:h-52 overflow-hidden rounded-2xl";
-                return directionsHref ? (
-                  <a
-                    href={directionsHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Open in Google Maps"
-                    className={`${frame} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
-                  >
-                    {thumb}
-                  </a>
-                ) : (
-                  <div className={frame}>{thumb}</div>
-                );
-              })()}
+            {mapBlock}
 
             {place.address && (
               <p className="text-sm font-semibold text-fg mt-3">

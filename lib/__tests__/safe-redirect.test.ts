@@ -92,6 +92,22 @@ describe("safeReturnPath", () => {
     }
   });
 
+  // 🧨 The normalisation that manufactures a leading "//" also promotes what
+  // follows it into an AUTHORITY, and an invalid authority makes the URL
+  // constructor throw rather than return a comparable origin. Uncaught that is
+  // a 500 on /sign-in and /auth/callback, both public and both reachable by
+  // URL alone: a hardening fix turning into a one-URL outage.
+  it.each([
+    "/a/..//[", // unterminated IPv6 literal
+    "/a/..//x:99999", // port out of range
+    "/a/..//a b", // forbidden host code point
+    "/a/..//%5B",
+    "/venue/../..//[",
+  ])("falls back rather than throwing on %j", (raw) => {
+    expect(() => safeReturnPath(raw)).not.toThrow();
+    expect(safeReturnPath(raw)).toBe("/explore");
+  });
+
   it("normalises an accepted path rather than echoing the raw string", () => {
     // Pins that the return value is the parsed form. Without this, mutating
     // the function to `return raw` leaves the rest of the file green.

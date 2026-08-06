@@ -200,8 +200,15 @@ describe("structure: no href names a catalogue URL field directly", () => {
         why: "reads hostname for a provider LABEL; returns null on a parse throw",
       },
       {
-        match: /applyAffiliate\("ticketmaster", event\.sourceUrl \?\? ""\)/,
-        why: "inner call; the result is wrapped by safeExternalHref at the sink",
+        // 🧨 The wrapper is IN the pattern on purpose. An exception matching
+        // only the inner applyAffiliate call would assert "it is wrapped at
+        // the sink" while checking nothing: delete the safeExternalHref( and
+        // the exception still matches, the href names no catalogue field so
+        // the scan above cannot see it, and the event ticket CTA is a live
+        // javascript: sink with the whole suite green.
+        match:
+          /safeExternalHref\(\s*applyAffiliate\("ticketmaster", event\.sourceUrl \?\? ""\)/,
+        why: "wrapped at the sink; the wrapper is part of this pattern",
       },
       {
         match: /new URL\(request\.url\)/,
@@ -232,10 +239,14 @@ describe("structure: no href names a catalogue URL field directly", () => {
     for (const file of files) {
       const src = readFileSync(file, "utf8");
       // Drop comments first, so prose mentioning venue.menuUrl is not a read.
+      // TRAILING comments count too: "const x = y; // unlike venue.menuUrl"
+      // would otherwise be a spurious offender. The negative lookbehind keeps
+      // "https://" and other "://" inside string literals from being eaten,
+      // which would corrupt the very lines being checked.
       const code = src
         .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
         .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^[ \t]*\/\/.*$/gm, "");
+        .replace(/(?<!:)\/\/.*$/gm, "");
       const lines = code.split("\n");
       READ.lastIndex = 0;
       let m: RegExpExecArray | null;
