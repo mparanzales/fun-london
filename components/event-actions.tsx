@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { CalendarPlus, Share2, Check } from "lucide-react";
 import { icsDataUrl } from "@/lib/ics";
+import { safeExternalHref } from "@/lib/safe-url";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
 import type { Event } from "@/lib/types";
@@ -14,13 +15,17 @@ import type { Event } from "@/lib/types";
 export function EventActions({ event }: { event: Event }) {
   const [copied, setCopied] = useState(false);
 
+  // The .ics itself is a data: URL we build, so this is not a browser sink --
+  // but calendar clients linkify the URL and DESCRIPTION fields, so the last
+  // unguarded read of source_url goes through the same allowlist as the hrefs.
+  const ticketUrl = safeExternalHref(event.sourceUrl);
   const ics = icsDataUrl({
     uid: event.id,
     title: event.name,
     startsAt: event.startsAt,
     location: `${event.venueName}, ${event.area}, London`,
-    description: event.sourceUrl ? `Tickets: ${event.sourceUrl}` : undefined,
-    url: event.sourceUrl ?? undefined,
+    description: ticketUrl ? `Tickets: ${ticketUrl}` : undefined,
+    url: ticketUrl ?? undefined,
   });
 
   const onShare = async () => {

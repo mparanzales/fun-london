@@ -70,11 +70,11 @@ export function EventDetail({
   // has had its turn: that helper parses with `new URL` and returns its input
   // untouched when parsing throws, and "javascript:alert(1)//" both parses and
   // survives its query-param rewrite intact. Guard the sink, not the source.
-  const ctaHref = safeExternalHref(
-    isPopup
-      ? event.sourceUrl
-      : applyAffiliate("ticketmaster", event.sourceUrl ?? ""),
-  );
+  // Each branch is wrapped where it is produced rather than once around the
+  // ternary, so the guard is visible on the line that builds the value.
+  const ctaHref = isPopup
+    ? safeExternalHref(event.sourceUrl)
+    : safeExternalHref(applyAffiliate("ticketmaster", event.sourceUrl ?? ""));
   // The old `isExternal` lived here as `sourceUrl.startsWith("http")`, gating
   // target/rel/the external-link icon. Every href we render is now http(s) by
   // construction, so inside the CTA below it was always true; the flag is gone
@@ -329,16 +329,15 @@ export function EventDetail({
             )}
 
             {/* Map thumbnail — mirrored keyless greyscale static map, same
-                treatment as the venue page. Tapping opens Google Maps. */}
-            {directionsHref && (
-              <a
-                href={directionsHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open in Google Maps"
-                className="relative block mt-4 h-28 lg:h-52 overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {place.mapUrl ? (
+                treatment as the venue page. Tapping opens Google Maps.
+                The IMAGE and the LINK are gated separately: directionsHref is
+                null when the venue has no coords, no address, and a mapsUrl we
+                rejected, and in that case the map still belongs on the page,
+                just without somewhere to send the tap. Gating both on the href
+                let "The venue" render as a header with nothing under it. */}
+            {(place.mapUrl || directionsHref) &&
+              (() => {
+                const thumb = place.mapUrl ? (
                   <Image
                     src={place.mapUrl}
                     alt={`Map of ${event.venueName}`}
@@ -352,9 +351,23 @@ export function EventDetail({
                     lng={place.lng}
                     label={event.area}
                   />
-                )}
-              </a>
-            )}
+                );
+                const frame =
+                  "relative block mt-4 h-28 lg:h-52 overflow-hidden rounded-2xl";
+                return directionsHref ? (
+                  <a
+                    href={directionsHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Open in Google Maps"
+                    className={`${frame} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
+                  >
+                    {thumb}
+                  </a>
+                ) : (
+                  <div className={frame}>{thumb}</div>
+                );
+              })()}
 
             {place.address && (
               <p className="text-sm font-semibold text-fg mt-3">

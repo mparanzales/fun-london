@@ -184,4 +184,76 @@ describe("structure: no href names a catalogue URL field directly", () => {
     expect(scanned).toBeGreaterThan(20);
     expect(offenders).toEqual([]);
   });
+
+  // 🧨 The scan above only reads what is INSIDE href={...}. On its own it is
+  // defeated by one rename: change `const menuHref = safeExternalHref(
+  // venue.menuUrl)` to `const menuHref = venue.menuUrl` and every href still
+  // names a local, so the whole suite stays green while the sink is live
+  // again. (code-reviewer found exactly that hole.) So also require the other
+  // direction: wherever a catalogue URL field is READ in app/ or components/,
+  // it must be an argument to the helper, or a listed exception.
+  it("every read of a catalogue URL field is wrapped or explicitly excepted", () => {
+    // Reads that legitimately do not produce an href. Each needs a reason.
+    const EXCEPTIONS: { match: RegExp; why: string }[] = [
+      {
+        match: /providerFromUrl\(event\.sourceUrl\)/,
+        why: "reads hostname for a provider LABEL; returns null on a parse throw",
+      },
+      {
+        match: /applyAffiliate\("ticketmaster", event\.sourceUrl \?\? ""\)/,
+        why: "inner call; the result is wrapped by safeExternalHref at the sink",
+      },
+      {
+        match: /new URL\(request\.url\)/,
+        why: "Next's Request.url, not catalogue data",
+      },
+      {
+        match: /redactRoomCodesInString\(e\.url\)/,
+        why: "PostHog event property, not catalogue data",
+      },
+      {
+        match: /\{fr\.website\}|\{p\.source_url\}|\$\{s\.url\}/,
+        why: "rendered as TEXT so a reviewer can see the rejected value",
+      },
+      {
+        match:
+          /\{!sourceHref && p\.source_url \?|\) : fr\.website \?|s\.url \? `/,
+        why: "presence test gating the rejected-value text above",
+      },
+    ];
+
+    const files: string[] = [];
+    for (const root of ["app", "components"]) walk(join(REPO, root), files);
+
+    const READ = new RegExp(`\\.(${CATALOGUE_URL_FIELDS.join("|")})\\b`, "g");
+    const offenders: string[] = [];
+    let reads = 0;
+
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      // Drop comments first, so prose mentioning venue.menuUrl is not a read.
+      const code = src
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^[ \t]*\/\/.*$/gm, "");
+      const lines = code.split("\n");
+      READ.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = READ.exec(code))) {
+        const lineNo = code.slice(0, m.index).split("\n").length;
+        const text = lines[lineNo - 1] ?? "";
+        reads++;
+        const wrapped =
+          /(safeExternalHref|parseExternalUrl)\(\s*[A-Za-z0-9_$?.[\]]*$/.test(
+            code.slice(Math.max(0, m.index - 120), m.index),
+          );
+        if (wrapped) continue;
+        if (EXCEPTIONS.some((e) => e.match.test(text))) continue;
+        offenders.push(`${file.replace(REPO, "")}:${lineNo}  ${text.trim()}`);
+      }
+    }
+
+    expect(reads).toBeGreaterThan(15);
+    expect(offenders).toEqual([]);
+  });
 });

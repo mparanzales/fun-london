@@ -59,14 +59,38 @@ describe("structure: no page serialises JSON-LD with raw JSON.stringify", () => 
         else if (/\.tsx?$/.test(p)) files.push(p);
       }
     };
-    walk(join(REPO, "app"));
+    // components/ too: a JSON-LD block that moves out of app/ must not become
+    // invisible to this check.
+    for (const root of ["app", "components"]) walk(join(REPO, root));
     expect(files.length).toBeGreaterThan(50);
 
-    const offenders = files.filter((f) =>
-      /dangerouslySetInnerHTML=\{\{\s*__html:\s*JSON\.stringify\(/.test(
-        readFileSync(f, "utf8"),
-      ),
-    );
-    expect(offenders.map((f) => f.replace(REPO, ""))).toEqual([]);
+    // Anchor on the ld+json script element, then read whatever that element
+    // feeds to __html. Matching only the literal "__html: JSON.stringify("
+    // missed `const ld = JSON.stringify(x); ... __html: ld` and every other
+    // serialiser; anchoring on __html alone is too wide, because layout.tsx
+    // legitimately inlines the anti-flash theme script and the room-invite
+    // script, neither of which is JSON-LD.
+    const offenders: string[] = [];
+    let blocks = 0;
+    for (const f of files) {
+      const src = readFileSync(f, "utf8");
+      const re = /application\/ld\+json/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(src))) {
+        blocks++;
+        // The __html for this element sits within the next few lines.
+        const after = src.slice(m.index, m.index + 400);
+        const html = after.match(/__html:\s*([^}]+)\}/);
+        const expr = html ? html[1].trim() : "(no __html found)";
+        if (html && expr.includes("jsonLdHtml(")) continue;
+        offenders.push(
+          `${f.replace(REPO, "")}  ld+json __html: ${expr.replace(/\s+/g, " ").slice(0, 60)}`,
+        );
+      }
+    }
+    // Every known JSON-LD block must be seen; a regex that matched nothing
+    // would pass this test while checking nothing.
+    expect(blocks).toBeGreaterThanOrEqual(3);
+    expect(offenders).toEqual([]);
   });
 });

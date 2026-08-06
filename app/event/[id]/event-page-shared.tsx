@@ -12,6 +12,7 @@ import { fetchAnonEventTeaser } from "@/lib/event-teaser";
 import { DetailAuthWall } from "@/components/detail-auth-wall";
 import { DesktopNav } from "@/components/desktop-nav";
 import { jsonLdHtml } from "@/lib/json-ld";
+import { safeExternalHref } from "@/lib/safe-url";
 
 // Shared implementation behind TWO routes (same split as the venue page):
 //   /event/[id]       — dynamic (force-dynamic), auth-aware
@@ -73,6 +74,11 @@ export async function EventPageBody({
   // object instead. Cookie-free so the /anon event twin stays ISR.
   const anonTeaser = signedIn ? null : (await fetchAnonEventTeaser(id)).teaser;
 
+  // Not an XSS sink (jsonLdHtml handles that), but schema.org "url" has to be
+  // a real URL: a bare-host or non-http source_url makes Google drop the whole
+  // Event rich result, not just the offer. Same allowlist as the hrefs.
+  const offerUrl = safeExternalHref(event.sourceUrl);
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Event",
@@ -92,11 +98,11 @@ export async function EventPageBody({
         addressCountry: "GB",
       },
     },
-    ...(event.sourceUrl
+    ...(offerUrl
       ? {
           offers: {
             "@type": "Offer",
-            url: event.sourceUrl,
+            url: offerUrl,
             availability: "https://schema.org/InStock",
           },
         }

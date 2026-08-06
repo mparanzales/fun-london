@@ -459,8 +459,10 @@ function ReviewCard({ it }: { it: ReviewItem }) {
         ) : fr.website ? (
           // Show what was actually stored, unlinked. A reviewer deciding on
           // this candidate needs to SEE a rejected URL, not have it vanish.
+          // The flag leads, because the URL wraps over several lines and a
+          // trailing parenthetical gets skimmed past.
           <span className="text-xs text-muted-fg break-all">
-            {fr.website} (not a usable web link)
+            Unusable link (not http or https): {fr.website}
           </span>
         ) : null}
       </div>
@@ -550,7 +552,13 @@ function CandidateCard({ c }: { c: Candidate }) {
                         {s.title}
                       </a>
                     ) : (
-                      <span>{s.title}</span>
+                      // Same rule as the needs-review card above: a reviewer
+                      // sees the rejected URL rather than a title that
+                      // silently stopped being a link.
+                      <span>
+                        {s.title}
+                        {s.url ? ` (unusable link: ${s.url})` : null}
+                      </span>
                     )}{" "}
                     <span className="text-muted-fg/60">({s.date})</span>
                   </>

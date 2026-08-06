@@ -198,15 +198,6 @@ export function VenueDetail({
 
   const isReservable = RESERVABLE_TYPES.includes(venue.type);
 
-  // Top-priority booking link if we have one. The agent thesis V1:
-  // Reserve button deep-links to the venue's best-known booking URL
-  // (lowest `priority` number wins). If absent, falls through to the
-  // legacy in-app confirmation stub.
-  const topBookingLink =
-    venue.bookingLinks && venue.bookingLinks.length > 0
-      ? [...venue.bookingLinks].sort((a, b) => a.priority - b.priority)[0]
-      : null;
-
   // Every outbound URL on this page is catalogue data (ingestion crons, bulk
   // import), so it goes through safeExternalHref before it can reach an href.
   // See lib/safe-url.ts. Null means "render no link", never "fall back to the
@@ -219,18 +210,32 @@ export function VenueDetail({
   const websiteHref = safeExternalHref(venue.websiteUrl);
   const siteHref = menuHref ?? websiteHref;
 
-  // Where "Reserve" sends them: the best booking platform if we have one,
-  // else the venue's own site. The picker sheet pre-fills date/time/party
-  // into this before opening it. buildReserveUrl re-checks the scheme at the
-  // href itself; validating here too means an unusable URL never even offers
-  // a Reserve button that would open a sheet with no way out.
-  const bookingHref = safeExternalHref(topBookingLink?.url);
+  // Best-known booking link. The agent thesis V1: Reserve deep-links to the
+  // venue's booking URL, lowest `priority` number first.
+  //
+  // The scheme check is part of the CHOICE, not a filter after it. Picking the
+  // top-priority link and then rejecting it would make one bad row discard
+  // every good row beneath it: a venue with a broken priority-1 TheFork link
+  // and a fine priority-2 OpenTable link would fall all the way through to
+  // "their site", losing the deep-link, its date/time/party pre-fill and its
+  // affiliate attribution.
+  const topBookingLink: ReserveTarget | null =
+    [...(venue.bookingLinks ?? [])]
+      .sort((a, b) => a.priority - b.priority)
+      .map((link) => {
+        const href = safeExternalHref(link.url);
+        return href ? { platform: link.platform, url: href } : null;
+      })
+      .find((v): v is ReserveTarget => v !== null) ?? null;
+
+  // Where "Reserve" sends them: the best usable booking platform, else the
+  // venue's own site. The picker sheet pre-fills date/time/party into this
+  // before opening it. buildReserveUrl re-checks the scheme at the href
+  // itself; validating here too means an unusable URL never offers a Reserve
+  // button that opens a sheet with no way out of it.
   const reserveTarget: ReserveTarget | null =
-    topBookingLink && bookingHref
-      ? { platform: topBookingLink.platform, url: bookingHref }
-      : websiteHref
-        ? { platform: "website", url: websiteHref }
-        : null;
+    topBookingLink ??
+    (websiteHref ? { platform: "website", url: websiteHref } : null);
 
   const hasRealTalk = !!venue.criticalFlags && venue.criticalFlags.length > 0;
   // Only VERIFIED provenance is surfaced. The AI-discovered editorial_sources

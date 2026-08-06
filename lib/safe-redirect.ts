@@ -37,5 +37,15 @@ export function safeReturnPath(
   // Hand back the NORMALISED path, so what we validated is what the caller
   // redirects to. Callers include a bare next/navigation redirect(), where the
   // raw string would reach a Location header with its control chars intact.
-  return u.pathname + u.search + u.hash;
+  const path = u.pathname + u.search + u.hash;
+  // 🧨 Then re-check the value we are about to RETURN, resolved the way a
+  // browser resolves an href rather than concatenated onto our origin.
+  // Normalisation can turn a same-origin input into a protocol-relative one:
+  // "/venue/..//evil.com" pops "venue", keeps the empty segment, and
+  // serialises to "//evil.com" -- while u.origin is still the probe origin,
+  // because a path-relative resolve can never change the host. So the check
+  // above cannot see it. Verified; "/%2e%2e//evil.com" and "/a/../\/evil.com"
+  // do the same thing.
+  if (new URL(path, PROBE_ORIGIN).origin !== PROBE_ORIGIN) return fallback;
+  return path;
 }

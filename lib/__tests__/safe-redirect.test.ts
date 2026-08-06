@@ -48,9 +48,27 @@ describe("safeReturnPath", () => {
     expect(safeReturnPath(raw)).toBe("/explore");
   });
 
-  it("never returns anything that resolves off-origin", () => {
-    // The invariant stated end to end: whatever comes back, pasted after our
-    // origin, must still be our origin.
+  // Dot segments. The path normaliser can manufacture a leading "//" out of an
+  // input that never contained one, and the host cannot change during a
+  // path-relative resolve, so an origin check on the PARSED input sees nothing
+  // wrong. These are the cases that make returning the normalised path more
+  // dangerous than returning the raw string.
+  it.each([
+    "/venue/..//evil.com",
+    "/venue/../..//evil.com",
+    "/%2e%2e//evil.com",
+    "/a/../\\/evil.com",
+    "/./..//evil.com",
+  ])("rejects the dot-segment spelling %j", (raw) => {
+    expect(safeReturnPath(raw)).toBe("/explore");
+  });
+
+  it("never returns anything that RESOLVES off-origin", () => {
+    // 🧨 Resolve, do not concatenate. `new URL(ORIGIN + out)` is the wrong
+    // model and it is why an earlier version of this test passed while
+    // safeReturnPath was handing back "//evil.com": pasted after the origin
+    // that string reads as a path, but every real consumer (a Location header,
+    // an <a href>, redirect()) RESOLVES it, and resolved it is another site.
     const ORIGIN = "https://funldn.com";
     const inputs = [
       "/explore",
@@ -62,10 +80,22 @@ describe("safeReturnPath", () => {
       "/\r/evil.com",
       "https://evil.com",
       "/\t\t//evil.com",
+      "/venue/..//evil.com",
+      "/%2e%2e//evil.com",
+      "/a/../\\/evil.com",
     ];
     for (const raw of inputs) {
       const out = safeReturnPath(raw);
-      expect(new URL(ORIGIN + out).origin).toBe(ORIGIN);
+      expect(new URL(out, ORIGIN).origin, `input ${JSON.stringify(raw)}`).toBe(
+        ORIGIN,
+      );
     }
+  });
+
+  it("normalises an accepted path rather than echoing the raw string", () => {
+    // Pins that the return value is the parsed form. Without this, mutating
+    // the function to `return raw` leaves the rest of the file green.
+    expect(safeReturnPath("/venue/./x")).toBe("/venue/x");
+    expect(safeReturnPath("/venue/a/../x")).toBe("/venue/x");
   });
 });

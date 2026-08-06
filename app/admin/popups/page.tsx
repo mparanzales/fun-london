@@ -183,6 +183,14 @@ function PopupCard({ p }: { p: PopupRow }) {
         </p>
       ) : null}
 
+      {!sourceHref && p.source_url ? (
+        // The official page is a reviewer's ONLY way to check a pop-up before
+        // deciding, so a rejected URL is shown rather than silently dropped:
+        // without it the only remaining action on the card is Hide.
+        <p className="text-[11px] text-muted-fg mt-2 break-all">
+          Source link unusable (not http or https): {p.source_url}
+        </p>
+      ) : null}
       {sourceHref ? (
         <a
           href={sourceHref}

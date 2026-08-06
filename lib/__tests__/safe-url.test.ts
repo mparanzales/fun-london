@@ -92,6 +92,22 @@ describe("safeExternalHref", () => {
     );
   });
 
+  it("strips userinfo, which is a disguise not a destination", () => {
+    // "https://ticketmaster.com@evil.com/x" is a perfectly valid https URL
+    // pointing at evil.com that READS as ticketmaster.com. The allowlist
+    // cannot reject it (the scheme is fine), so the credentials come off.
+    expect(safeExternalHref("https://ticketmaster.com@evil.com/x")).toBe(
+      "https://evil.com/x",
+    );
+    expect(safeExternalHref("https://user:pw@evil.com/")).toBe(
+      "https://evil.com/",
+    );
+    // A normal URL is untouched.
+    expect(safeExternalHref("https://opentable.co.uk/r/x")).toBe(
+      "https://opentable.co.uk/r/x",
+    );
+  });
+
   it("no output ever begins with a non-web scheme", () => {
     // The invariant stated directly, over the whole corpus.
     for (const raw of [...HOSTILE, ...SAFE]) {

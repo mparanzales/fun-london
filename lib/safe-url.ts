@@ -35,7 +35,16 @@ export function parseExternalUrl(raw: string | null | undefined): URL | null {
     // anyway, since the browser resolves it against funldn.com.
     return null;
   }
-  return WEB_SCHEMES.has(u.protocol) ? u : null;
+  if (!WEB_SCHEMES.has(u.protocol)) return null;
+  // Strip any userinfo. "https://ticketmaster.com@evil.com/x" is a valid https
+  // URL to evil.com that READS as ticketmaster.com to a person glancing at the
+  // status bar, which is the whole phishing trick. No legitimate catalogue URL
+  // carries credentials, so dropping them costs nothing and removes the
+  // disguise. (providerFromUrl already reads `hostname`, so it correctly
+  // refuses to label such a link, but that is one consumer, not a guarantee.)
+  u.username = "";
+  u.password = "";
+  return u;
 }
 
 // Sink guard: the value to put in an href, or null to render no link at all.
