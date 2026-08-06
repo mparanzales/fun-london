@@ -160,7 +160,7 @@ function mapVenue(r: VenueRow): Venue {
     vibe: tidyDashes(r.vibe),
     longDescription: tidyDashes(r.long_description),
     neighbourhood: tidyName(r.neighbourhood),
-    address: r.address,
+    address: tidyName(r.address),
     lat: r.lat,
     lng: r.lng,
     price: r.price as PriceTier,

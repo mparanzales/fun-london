@@ -44,15 +44,31 @@ const QUERIES = join(
 // because moving it changes live rendered copy (one current event title,
 // "Summer Residency <en dash> Week 1"), which is Maria's call to make and not a
 // side effect of a security fix. Pinned so the question cannot be lost.
-const EXPECTED: Record<string, Record<string, string>> = {
-  mapVenue: { name: "tidyName", neighbourhood: "tidyName" },
-  mapVenuePlan: { name: "tidyName", neighbourhood: "tidyName" },
-  mapVenuePreview: { name: "tidyName", neighbourhood: "tidyName" },
-  mapEvent: { name: "tidyDashes", venueName: "tidyName", area: "tidyName" },
+// [wrapper, source column]. The column is pinned too: checking only the
+// helper let `name: tidyName(r.slug)` and a venueName/area swap pass.
+const EXPECTED: Record<string, Record<string, [string, string]>> = {
+  mapVenue: {
+    name: ["tidyName", "r.name"],
+    neighbourhood: ["tidyName", "r.neighbourhood"],
+    address: ["tidyName", "r.address"],
+  },
+  mapVenuePlan: {
+    name: ["tidyName", "r.name"],
+    neighbourhood: ["tidyName", "r.neighbourhood"],
+  },
+  mapVenuePreview: {
+    name: ["tidyName", "r.name"],
+    neighbourhood: ["tidyName", "r.neighbourhood"],
+  },
+  mapEvent: {
+    name: ["tidyDashes", "r.name"],
+    venueName: ["tidyName", "r.venue_name"],
+    area: ["tidyName", "r.area"],
+  },
   mapEventPreview: {
-    name: "tidyDashes",
-    venueName: "tidyName",
-    area: "tidyName",
+    name: ["tidyDashes", "r.name"],
+    venueName: ["tidyName", "r.venue_name"],
+    area: ["tidyName", "r.area"],
   },
 };
 
@@ -71,8 +87,8 @@ function bodyOf(fn: string): string {
 
 describe("structure: every mapper sanitises with the right helper", () => {
   for (const [fn, fields] of Object.entries(EXPECTED)) {
-    for (const [prop, wrapper] of Object.entries(fields)) {
-      it(`${fn} wraps ${prop} in ${wrapper}`, () => {
+    for (const [prop, [wrapper, column]] of Object.entries(fields)) {
+      it(`${fn} wraps ${prop} in ${wrapper}(${column})`, () => {
         const found = bodyOf(fn).match(
           new RegExp(`^\\s*${prop}:\\s*(.+),$`, "m"),
         );
@@ -81,8 +97,8 @@ describe("structure: every mapper sanitises with the right helper", () => {
         expect(found, `${fn} does not assign ${prop} at all`).not.toBeNull();
         expect(
           found![1],
-          `${fn}.${prop} must be wrapped in ${wrapper}(...)`,
-        ).toMatch(new RegExp(`^${wrapper}\\(r\\.[a-z_]+\\)$`));
+          `${fn}.${prop} must be exactly ${wrapper}(${column})`,
+        ).toBe(`${wrapper}(${column})`);
       });
     }
   }
@@ -90,8 +106,12 @@ describe("structure: every mapper sanitises with the right helper", () => {
   it("covers every mapper the file defines", () => {
     // A sixth mapper added later has to be added to EXPECTED, rather than being
     // silently exempt from it.
+    // Arrow and const forms count too: matching only `function map...(`
+    // leaves `export const mapVenueLite = (r) => ({...})` silently exempt,
+    // which is the same hole as the ">= 10 floor" this replaced.
     const declared = [
-      ...SRC.matchAll(/^(?:export )?function (map\w+)\(/gm),
+      ...SRC.matchAll(/^(?:export )?(?:async )?function (map\w+)\s*[(<]/gm),
+      ...SRC.matchAll(/^(?:export )?const (map\w+)\s*[=:]/gm),
     ].map((m) => m[1]);
     expect(declared.sort()).toEqual(Object.keys(EXPECTED).sort());
   });
@@ -144,6 +164,44 @@ describe("behaviour: a real mapper, not just the helper", () => {
   it("does NOT rewrite a street-number range", () => {
     const NAME = "The Photographers' Gallery, 16\u201318 Ramillies Street";
     expect(mapVenuePreview(row(NAME, "Soho")).name).toBe(NAME);
+  });
+});
+
+// 🧨 The MIRROR mutant. Everything above pins tidyName; nothing pinned
+// tidyDashes, so `const tidyDashes = repairMojibake` left every call site
+// intact, satisfied the whole structural table, and silently killed the
+// no-dashes brand rule on every editorial surface. A guard that only checks
+// one direction of a two-way alias is half a guard.
+describe("behaviour: the editorial helper is still the editorial one", () => {
+  const row = (vibe: string) =>
+    ({
+      id: "v1",
+      slug: "s",
+      name: "Bar",
+      type: "restaurant",
+      vibe,
+      neighbourhood: "Soho",
+      price: "££",
+      time_of_day: "evening",
+      rating: 4.5,
+      review_count: 10,
+      img_url: "https://example.com/p.jpg",
+      lat: 51.5,
+      lng: -0.1,
+      curation_tier: "curated",
+      created_at: "2026-01-01T00:00:00Z",
+    }) as unknown as Parameters<typeof mapVenuePreview>[0];
+
+  it("still applies the no-dashes rule to a vibe line", () => {
+    expect(mapVenuePreview(row("Cosy \u2014 and loud")).vibe).toBe(
+      "Cosy, and loud",
+    );
+  });
+
+  it("still repairs mojibake in a vibe line", () => {
+    expect(mapVenuePreview(row("Stars \u00C2\u0080\u0093 Voyager")).vibe).toBe(
+      "Stars, Voyager",
+    );
   });
 });
 

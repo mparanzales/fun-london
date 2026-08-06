@@ -4,10 +4,9 @@
 // (.ics download) and a real "Share" (Web Share API with clipboard
 // fallback). Both were dead visual stubs before.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { CalendarPlus, Share2, Check } from "lucide-react";
-import { icsDataUrl } from "@/lib/ics";
-import { safeExternalHref } from "@/lib/safe-url";
+import { icsDataUrl, icsUri } from "@/lib/ics";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
 import type { Event } from "@/lib/types";
@@ -18,7 +17,13 @@ export function EventActions({ event }: { event: Event }) {
   // The .ics itself is a data: URL we build, so this is not a browser sink --
   // but calendar clients linkify the URL and DESCRIPTION fields, so the last
   // unguarded read of source_url goes through the same allowlist as the hrefs.
-  const ticketUrl = safeExternalHref(event.sourceUrl);
+  //
+  // 🧨 icsUri, NOT safeExternalHref. They differ in the one way that matters:
+  // safeExternalHref parses first, and the WHATWG parser DELETES a carriage
+  // return rather than rejecting it, so a corrupt source_url would arrive here
+  // already "repaired" into a valid link to a host we were never given. icsUri
+  // inspects the raw value before parsing and refuses it outright.
+  const ticketUrl = icsUri(event.sourceUrl);
   const ics = icsDataUrl({
     uid: event.id,
     title: event.name,
@@ -30,17 +35,19 @@ export function EventActions({ event }: { event: Event }) {
 
   // 🧨 The unrenderable-date path is now SILENT, and silence is how broken data
   // survives: before this change a bad starts_at threw, which at least made
-  // itself known. This warn is the only thing that will ever say a row cannot
-  // produce a calendar entry, so it stays even though nothing reads it today.
-  // In an effect, not in render: render runs twice under StrictMode and again
-  // on every re-render, and a log that cries wolf gets ignored.
-  useEffect(() => {
-    if (ics === null) {
-      console.warn(
-        `[ics] event ${event.id} has an unusable starts_at (${event.startsAt}); calendar download hidden`,
-      );
-    }
-  }, [ics, event.id, event.startsAt]);
+  // itself known. This is the only thing that will ever say a row cannot
+  // produce a calendar entry.
+  //
+  // Deliberately in the render body rather than an effect: an effect never runs
+  // during SSR/ISR generation, which is precisely where a bad row is first seen
+  // and the only place anyone could act on it. A duplicate line in a dev
+  // double-render is a cheaper price than a detector that cannot fire on the
+  // server at all.
+  if (ics === null) {
+    console.warn(
+      `[ics] event ${event.id} has an unusable starts_at (${event.startsAt}); calendar download hidden`,
+    );
+  }
 
   const onShare = async () => {
     track("share", { kind: "event", id: event.id });

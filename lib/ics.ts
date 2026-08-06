@@ -112,10 +112,9 @@ function esc(s: string): string {
 // stronger one. It now runs the same allowlist the hrefs use, so there is ONE
 // definition of "a URL we are willing to hand to a user".
 //
-// In practice this never rejects our own data: components/event-actions.tsx
-// already passes the output of safeExternalHref. It fires only for a future
-// caller that forgets, which is exactly who it is for. IcsInput.url is typed
-// `string`, so the type system will not catch them.
+// This is NOT a guard that only future callers need: the production caller
+// hands it the raw catalogue value, so every rejection branch below is
+// reachable today. See icsUri.
 
 // Non-global twins of the two guards, derived from the SAME sources so they can
 // never drift apart. Non-global matters: .test() on a /g regex advances
@@ -124,6 +123,19 @@ function esc(s: string): string {
 // thing to keep in sync.
 const LINE_BREAK_ONCE = new RegExp(LINE_BREAK.source);
 const OTHER_CONTROL_ONCE = new RegExp(OTHER_CONTROL.source);
+
+// 🧨 EXPORTED, and callers must use THIS rather than safeExternalHref directly.
+//
+// The first version of this PR had the component call safeExternalHref and pass
+// the result in. That silently defeated the whole guard: the WHATWG parser had
+// already DELETED the carriage return, so escUri received a clean string and
+// happily emitted a destination the catalogue never contained. The unit test
+// asserting that cannot happen stayed green, because it called buildIcs
+// directly and never modelled the real caller. Same failure as
+// [[mutation-test-models-the-consumer]]. Give this the RAW value.
+export function icsUri(s: string | null | undefined): string | null {
+  return typeof s === "string" ? escUri(s) : null;
+}
 
 function escUri(s: string): string | null {
   // 🧨 ORDER IS THE WHOLE POINT, and it is counter-intuitive: the character
@@ -173,7 +185,10 @@ function utcPair(
   // on its own, so it is validated by the same rule as the start.
   const mins = Number.isFinite(durationMins) ? (durationMins as number) : 120;
   const endMs = startMs + mins * 60_000;
-  if (!Number.isFinite(endMs)) return null;
+  // Strictly greater, which also covers non-finite: RFC 5545 3.6.1 forbids
+  // DTEND <= DTSTART, and durationMins is public and typed `number`, so a 0 or
+  // a negative would otherwise emit an event that ends before it starts.
+  if (!(endMs > startMs)) return null;
 
   const start = toIcsUtc(new Date(startMs));
   const end = toIcsUtc(new Date(endMs));

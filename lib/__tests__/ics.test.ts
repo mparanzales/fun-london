@@ -11,7 +11,10 @@
 // into the calendar of whoever tapped "Add to calendar".
 
 import { describe, it, expect } from "vitest";
-import { buildIcs, icsDataUrl } from "@/lib/ics";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { buildIcs, icsDataUrl, icsUri } from "@/lib/ics";
 
 // Deliberately re-declared here instead of imported from lib/ics: a test that
 // borrows the guard's own definition of "line break" moves whenever the guard
@@ -451,9 +454,135 @@ describe("unrepresentable dates fail safe", () => {
     expect(buildIcs({ ...BASE, durationMins: 1e15 })).toBeNull();
   });
 
+  // RFC 5545 3.6.1 forbids DTEND <= DTSTART. durationMins is public and typed
+  // `number`, so this is reachable by any caller, and a finiteness check alone
+  // lets it straight through.
+  it.each([
+    ["zero", 0],
+    ["negative", -30],
+  ])(
+    "returns null for a %s duration rather than ending before it starts",
+    (_label, mins) => {
+      expect(() => buildIcs({ ...BASE, durationMins: mins })).not.toThrow();
+      expect(buildIcs({ ...BASE, durationMins: mins })).toBeNull();
+    },
+  );
+
   it("still builds normally for a representable date", () => {
     const ics = buildOk(BASE);
     expect(valueOf(ics, "DTSTART")).toBe("DTSTART:20260912T193000Z");
     assertNoInjection(ics, "valid date");
+  });
+});
+
+// ── Composition: the expression components/event-actions.tsx actually builds ──
+//
+// 🧨 THIS BLOCK EXISTS BECAUSE EVERY TEST ABOVE MISSED A LIVE BUG. They all
+// call buildIcs/icsDataUrl directly, so they proved the helper's contract and
+// said nothing about the caller. The caller was passing
+// safeExternalHref(event.sourceUrl) -- already WHATWG-parsed, which DELETES a
+// carriage return rather than rejecting it -- so a corrupt source_url arrived
+// pre-"repaired" and the fail-closed branch could never fire in production.
+// "never rewrites a broken URI into a different working destination" was green
+// and false at the same time. Model the consumer, not just the unit.
+describe("composition: the pipeline the event page really runs", () => {
+  // Exactly what components/event-actions.tsx does with a row.
+  const asEventPageDoes = (sourceUrl: string | null) => {
+    const ticketUrl = icsUri(sourceUrl);
+    return {
+      ticketUrl,
+      ics: buildIcs({
+        uid: BASE.uid,
+        title: BASE.title,
+        startsAt: BASE.startsAt,
+        location: BASE.location,
+        description: ticketUrl ? `Tickets: ${ticketUrl}` : undefined,
+        url: ticketUrl ?? undefined,
+      }),
+    };
+  };
+
+  it("refuses a source_url whose break the URL parser would have deleted", () => {
+    const { ticketUrl, ics } = asEventPageDoes("https://exa\rmple.com/tickets");
+    expect(ticketUrl).toBeNull();
+    expect(ics).not.toBeNull();
+    // The repaired host must appear NOWHERE: not in URL, not in DESCRIPTION.
+    expect(ics!).not.toContain("example.com/tickets");
+    expect(valueOf(ics!, "URL")).toBeUndefined();
+    expect(valueOf(ics!, "DESCRIPTION")).toBeUndefined();
+    assertNoInjection(ics!, "composition: broken source_url");
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "not-a-url",
+    "",
+  ])("refuses the unusable source_url %j end to end", (raw) => {
+    const { ticketUrl, ics } = asEventPageDoes(raw);
+    expect(ticketUrl).toBeNull();
+    expect(valueOf(ics!, "URL")).toBeUndefined();
+    expect(valueOf(ics!, "DESCRIPTION")).toBeUndefined();
+    assertNoInjection(ics!, `composition: ${raw}`);
+  });
+
+  it("passes a real ticket link through untouched, commas and all", () => {
+    const REAL = "https://tickets.example.net/e/rooftop,soho?ll=51.5,-0.13";
+    const { ticketUrl, ics } = asEventPageDoes(REAL);
+    expect(ticketUrl).toBe(REAL);
+    expect(valueOf(ics!, "URL")).toBe(`URL:${REAL}`);
+    // DESCRIPTION is TEXT, so the same URL IS escaped there. Both at once.
+    expect(valueOf(ics!, "DESCRIPTION")).toBe(
+      "DESCRIPTION:Tickets: https://tickets.example.net/e/rooftop\\,soho?ll=51.5\\,-0.13",
+    );
+    assertNoInjection(ics!, "composition: real ticket link");
+  });
+
+  it("handles a null source_url the way the row does", () => {
+    const { ticketUrl, ics } = asEventPageDoes(null);
+    expect(ticketUrl).toBeNull();
+    expect(valueOf(ics!, "URL")).toBeUndefined();
+    assertNoInjection(ics!, "composition: null source_url");
+  });
+});
+
+// ---- Structure: the component is WIRED to icsUri ---------------------------
+//
+// The composition block above runs the right pipeline, but it builds that
+// pipeline itself, so it proves what event-actions.tsx SHOULD do and not what
+// it DOES. Swapping the component back to safeExternalHref left all of it
+// green. This is the tripwire for that exact regression; it is a source scan,
+// so it shows the wiring, not a runtime fact.
+describe("structure: event-actions.tsx uses icsUri, not safeExternalHref", () => {
+  const SRC = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "components",
+      "event-actions.tsx",
+    ),
+    "utf8",
+  );
+
+  it("reads event.sourceUrl exactly once, through icsUri", () => {
+    const reads = [...SRC.matchAll(/([A-Za-z]+)\(\s*event\.sourceUrl/g)].map(
+      (m) => m[1],
+    );
+    // Guard against the guard going inert if the field is ever renamed.
+    expect(reads.length, "no read of event.sourceUrl found at all").toBe(1);
+    expect(reads[0]).toBe("icsUri");
+  });
+
+  it("does not reach for safeExternalHref here", () => {
+    // safeExternalHref parses before it validates, which deletes a carriage
+    // return instead of refusing it. Correct for an href, wrong for this file.
+    //
+    // Comments are stripped first: the file explains at length WHY it does not
+    // use that helper, and naming it in prose is not a call to it.
+    const code = SRC.split("\n")
+      .filter((l) => !l.trim().startsWith("//"))
+      .join("\n");
+    expect(code).not.toContain("safeExternalHref");
   });
 });

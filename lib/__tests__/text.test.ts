@@ -213,3 +213,64 @@ describe("bidi and invisible controls", () => {
     ).toBe("The Photographers' Gallery, 16, 18 Ramillies Street");
   });
 });
+
+// ---- The cases that force \p{Cf} and the u flag to stay --------------------
+//
+// Every character pinned elsewhere in this file sits in BOTH the old
+// hand-written range and the new category, so rewriting the set back to a
+// narrow BMP literal was a fully GREEN mutation. These are the members only
+// the category catches.
+describe("the invisible set is a category, not a range", () => {
+  const cp = (code: number) => String.fromCodePoint(code);
+
+  it.each([
+    ["ALM U+061C", 0x061c],
+    ["word joiner U+2060", 0x2060],
+    ["invisible times U+2062", 0x2062],
+    ["invisible plus U+2064", 0x2064],
+    ["interlinear anchor U+FFF9", 0xfff9],
+    ["soft hyphen U+00AD", 0x00ad],
+  ])("strips %s, which the old BMP range missed", (_label, code) => {
+    expect(repairMojibake(`Roof${cp(code as number)}top`)).toBe("Rooftop");
+  });
+
+  // Astral, which ALSO forces the `u` flag: without it the regex sees two
+  // surrogate halves rather than one code point. Tag characters are the
+  // current invisible-smuggling vector.
+  it("strips an astral TAG character (U+E0041)", () => {
+    expect(repairMojibake(`Roof${cp(0xe0041)}top`)).toBe("Rooftop");
+  });
+});
+
+// ---- What the mojibake repair can MANUFACTURE ------------------------------
+//
+// PUNCT_RUN maps a tail byte to U+2000 + (tail - 0x80), so the repair itself
+// produces characters no input contained. Two of those ranges are load-bearing
+// and neither had a fixture: tails 0xA8/0xA9 produce U+2028/U+2029, the exact
+// line-separator class lib/ics.ts exists to stop, and tails 0x80-0x8A produce
+// the fixed-width spaces that RECOVERED_SPACES collapses.
+describe("recovery cannot manufacture a separator", () => {
+  // The full three-byte mojibake run: lead U+00C2, middle U+0080, then a tail.
+  // Built from codes so no C1 byte is ever typed into this source file.
+  const moji = (tail: number) =>
+    "a" + String.fromCharCode(0xc2, 0x80, tail) + "b";
+
+  it("a 0xA8 tail does not leave a U+2028 LINE SEPARATOR behind", () => {
+    const out = repairMojibake(moji(0xa8));
+    expect(out).not.toContain(String.fromCharCode(0x2028));
+    expect(out).toBe("ab");
+  });
+
+  it("a 0xA9 tail does not leave a U+2029 PARAGRAPH SEPARATOR behind", () => {
+    const out = repairMojibake(moji(0xa9));
+    expect(out).not.toContain(String.fromCharCode(0x2029));
+    expect(out).toBe("ab");
+  });
+
+  // RECOVERED_SPACES had no fixture at all: deleting it left an em quad sitting
+  // in a title while the whole suite stayed green.
+  it("collapses a manufactured fixed-width space to a normal one", () => {
+    expect(repairMojibake(moji(0x81))).toBe("a b");
+    expect(repairMojibake(moji(0x83))).toBe("a b");
+  });
+});

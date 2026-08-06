@@ -254,8 +254,14 @@ describe("structure: no href names a catalogue URL field directly", () => {
         const lineNo = code.slice(0, m.index).split("\n").length;
         const text = lines[lineNo - 1] ?? "";
         reads++;
+        // icsUri is on this list because it is STRICTLY STRONGER than
+        // safeExternalHref, not an alternative to it: it rejects raw control
+        // characters and line breaks BEFORE delegating to safeExternalHref for
+        // the scheme allowlist. The .ics path needs that order, because the URL
+        // parser deletes a carriage return rather than refusing it, which would
+        // hand a calendar a link to a host the catalogue never contained.
         const wrapped =
-          /(safeExternalHref|parseExternalUrl)\(\s*[A-Za-z0-9_$?.[\]]*$/.test(
+          /(safeExternalHref|parseExternalUrl|icsUri)\(\s*[A-Za-z0-9_$?.[\]]*$/.test(
             code.slice(Math.max(0, m.index - 120), m.index),
           );
         if (wrapped) continue;
