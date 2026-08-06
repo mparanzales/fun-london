@@ -11,6 +11,7 @@ import { EventDetail } from "./event-detail";
 import { fetchAnonEventTeaser } from "@/lib/event-teaser";
 import { DetailAuthWall } from "@/components/detail-auth-wall";
 import { DesktopNav } from "@/components/desktop-nav";
+import { jsonLdHtml } from "@/lib/json-ld";
 
 // Shared implementation behind TWO routes (same split as the venue page):
 //   /event/[id]       — dynamic (force-dynamic), auth-aware
@@ -106,7 +107,7 @@ export async function EventPageBody({
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml(jsonLd) }}
       />
       {/* Desktop-only top nav (hidden lg:block) — same treatment as the
           venue route: laptop landers need a way into the app. */}
