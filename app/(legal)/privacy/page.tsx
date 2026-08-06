@@ -61,8 +61,8 @@ export default function PrivacyPage() {
         authentication and hosting, EU/London region), Vercel (application
         hosting and cookieless analytics), and ticketing/booking partners (e.g.
         Ticketmaster, OpenTable) only when you choose to click out to them.
-        Venue information comes from Google Places and public editorial sources
-        and is not personal data about you.
+        Venue information comes from Google Places and is not personal data
+        about you.
       </p>
 
       <h2>How long we keep it</h2>

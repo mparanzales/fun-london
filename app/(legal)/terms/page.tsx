@@ -12,7 +12,7 @@ export default function TermsPage() {
   return (
     <>
       <h1>Terms of Use</h1>
-      <p className="text-muted-fg">Last updated: 2 June 2026</p>
+      <p className="text-muted-fg">Last updated: 6 August 2026</p>
 
       <p>
         By using funldn.com you agree to these terms. If you do not agree,

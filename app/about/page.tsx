@@ -7,7 +7,11 @@ import { NIGHT_LINE } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: "About",
-  description: NIGHT_LINE,
+  // NOT NIGHT_LINE: /about is the page partnerships and press type in before
+  // replying to an email, so it earns its own snippet rather than repeating
+  // the site default. This sentence is the page's own approved copy.
+  description:
+    "Diners arrive decided. Fun London plans the night, then hands them to the platform the venue already uses.",
   alternates: { canonical: "/about" },
 };
 
@@ -152,14 +156,17 @@ export default async function AboutPage() {
             </ol>
 
             <p className="mt-10 max-w-[36rem] text-[14px] leading-relaxed text-muted-fg">
-              Three real stops, live in the app right now, minutes apart on
-              foot. Chosen from{" "}
+              {/* The three stops above are a hardcoded const, so the "live"
+                  claim belongs on the count (which IS live-fetched), not on
+                  them. "real" + "live right now" was two hedges over stale
+                  data; the blurbs themselves are the evidence. */}
+              Three stops, in the order you&rsquo;d walk them. Chosen from{" "}
               {venueCount !== null ? (
                 <>
                   <strong className="font-bold text-fg">
                     {venueCount.toLocaleString("en-GB")}
                   </strong>{" "}
-                  venues across London
+                  venues in the live catalogue
                 </>
               ) : (
                 <>the live catalogue</>

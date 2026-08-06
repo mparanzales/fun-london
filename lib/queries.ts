@@ -812,7 +812,13 @@ export async function fetchVenueCount(): Promise<number | null> {
       .not("img_url", "ilike", "%unsplash%")
       .neq("img_url", "");
     if (error) return null;
-    return count ?? null;
+    // `||` not `??`, deliberately: a zero count must degrade to the prose
+    // fallback, not render "Chosen from 0 venues across London". A build
+    // against an empty or filtered-out catalogue is not hypothetical -- Vercel
+    // PR previews point at the stale dev Supabase, and /about is ISR-cached,
+    // so a zero would be baked into the page a partner opens from a preview
+    // link. Zero venues is "unavailable", not a fact worth printing.
+    return count || null;
   } catch {
     return null;
   }
