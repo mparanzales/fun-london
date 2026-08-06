@@ -90,10 +90,34 @@ describe("🧨 the booked-stop marker renders on healthy stops", () => {
     );
     expect(standDown, "standDown not found").not.toBeNull();
     expect(standDown![1]).toContain("setBookedStop(null)");
-    // activate: the clear must sit immediately ahead of the night switch.
+    // activate: the clear must sit immediately ahead of ITS night switch —
+    // anchored to activate's own unique content (droppedRef), so another
+    // clear/setActive pair elsewhere cannot satisfy this by accident.
     expect(
-      /setBookedStop\(null\);[\s\S]{0,700}setActive\(\{/.test(src),
+      /droppedRef\.current = dropped;[\s\S]{0,900}setBookedStop\(null\);[\s\S]{0,400}setActive\(\{/.test(
+        src,
+      ),
       "activate() no longer clears the marker before switching nights",
+    ).toBe(true);
+    // The legacy-stash claim is a night switch too, declared AFTER the
+    // consumption effect — without its own clear it can carry a marker onto
+    // a different night when a slug collides. Anchored to its own event.
+    expect(
+      /setBookedStop\(null\);[\s\S]{0,900}plan_stash_restored/.test(src),
+      "the legacy-stash claim no longer clears the marker",
+    ).toBe(true);
+  });
+
+  it("the restore stays a LAYOUT effect while consumption stays passive", () => {
+    // 🧨 The restored night keeps its marker ONLY because the restore's
+    // activate() (and its clear) runs in the mount's layout phase, before
+    // the passive consumption effect sets the marker. Converting the restore
+    // to a plain useEffect re-orders the two and resurrects the 1a518a1
+    // symptom — marker cleared right after it is set, never rendered — with
+    // the whole suite green. Pin the scheduling itself.
+    expect(
+      /useIsomorphicLayoutEffect\([\s\S]{0,1200}?restoredForRef/.test(src),
+      "the restore effect is no longer a layout effect",
     ).toBe(true);
   });
 
@@ -101,10 +125,10 @@ describe("🧨 the booked-stop marker renders on healthy stops", () => {
     // The consumption-time event fired even when the marked stop had been
     // replaced while the user was away and nothing rendered — 100% of events
     // described an invisible return. The event now carries marker_shown,
-    // decided at the render, where the ref tells the truth.
-    expect(/plan_book_return", \{[\s\S]{0,200}marker_shown/.test(src)).toBe(
-      true,
-    );
+    // decided at the render, where the ref tells the truth. The EXPRESSION
+    // is pinned, not just the key: a hardcoded `marker_shown: true` is the
+    // constant-property failure this repo has shipped before.
+    expect(src).toContain("marker_shown: bookedStopRef.current !== null");
   });
 });
 
@@ -140,14 +164,26 @@ describe("the write sites only record what actually happened", () => {
     // user-gesture anchor is not popup-blocked and degrades to an in-place
     // navigation in webviews, so the site is REACHED either way and the
     // marker written on the click stays honest.
-    expect(sheet).not.toContain("window.open(");
-    expect(sheet).toContain('target="_blank"');
-    expect(sheet).toContain('rel="noopener noreferrer"');
-    expect(sheet).toContain("href={reserveUrl}");
+    // Comment-stripped for the denylist, so a comment QUOTING window.open(
+    // cannot turn this red spuriously.
+    const sheetCode = sheet
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(sheetCode).not.toContain("window.open(");
+    // One regex over ONE element: href, target, rel and the handler must all
+    // sit on the same anchor — three independent toContains proved nothing
+    // about co-location.
+    expect(
+      /<a\s+href=\{reserveUrl\}\s+target="_blank"\s+rel="noopener noreferrer"\s+onClick=\{onContinue\}/.test(
+        sheetCode,
+      ),
+      "the handoff anchor lost one of href/target/rel/onClick",
+    ).toBe(true);
     // The write is gated on plan provenance only — no open-detection clause.
     expect(
       /if \(fromPlan && stopIndex !== null\) \{\s*writeBookingReturn\(venue\.slug, stopIndex\);/.test(
-        sheet,
+        sheetCode,
       ),
     ).toBe(true);
   });

@@ -160,6 +160,10 @@ export function DidYouBook({
             {fromNight && (
               <Link
                 href="/plan"
+                // replace: /plan consumes the one-shot marker on arrival, so
+                // back-gesturing into this screen would show a door that no
+                // longer works. Leave no history entry to come back to.
+                replace
                 className="w-full h-12 rounded-2xl text-primary font-semibold text-sm flex items-center justify-center"
               >
                 Back to your night
@@ -188,6 +192,8 @@ export function DidYouBook({
               <>
                 <Link
                   href="/plan"
+                  // replace, for the same one-shot reason as the quiet door.
+                  replace
                   className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px] flex items-center justify-center"
                 >
                   Back to your night

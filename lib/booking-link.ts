@@ -18,13 +18,20 @@ export type ReserveSlot = { date: string; time: string; party: number }; // date
 export function buildReserveUrl(
   target: ReserveTarget,
   slot: ReserveSlot,
-): string {
+): string | null {
+  // 🧨 http(s) or nothing. This value is rendered as an anchor HREF on
+  // funldn.com, and target.url comes from ingestion crons and bulk import —
+  // catalogue data, not code. A javascript: value here would execute in our
+  // origin on the user's own tap; the old fallback returned the raw string
+  // verbatim whenever new URL threw. Null drops the CTA instead: no booking
+  // link beats a live sink.
   let u: URL;
   try {
     u = new URL(target.url);
   } catch {
-    return target.url;
+    return null;
   }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
   const { date, time, party } = slot;
   switch (target.platform) {
     case "opentable":

@@ -1844,6 +1844,10 @@ export function PlanFlow({
         0,
       );
       const daypart = stash.daypart === "day" ? "day" : "evening";
+      // A night switch like any other: a claimed stash is a DIFFERENT night,
+      // and a marker surviving onto it would pin "Booking opened here" to a
+      // slug-colliding stop no booking came out of. Same rule as activate().
+      setBookedStop(null);
       setActive({
         plan: null,
         startsAt: undefined,

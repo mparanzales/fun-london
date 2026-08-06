@@ -230,19 +230,23 @@ export function ReserveSheet({
           </div>
         </div>
 
-        <a
-          href={reserveUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={onContinue}
-          className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px] flex items-center justify-center"
-        >
-          Continue to {label} →
-        </a>
-        <p className="text-[11px] text-muted-fg text-center mt-2.5 leading-relaxed">
-          Opens {label} with your details, confirm the table there, then tell us
-          if you booked.
-        </p>
+        {reserveUrl !== null && (
+          <>
+            <a
+              href={reserveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={onContinue}
+              className="w-full h-[52px] rounded-2xl bg-primary text-white font-extrabold text-[15px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+            >
+              Continue to {label} →
+            </a>
+            <p className="text-[11px] text-muted-fg text-center mt-2.5 leading-relaxed">
+              Opens {label} with your details, confirm the table there, then
+              tell us if you booked.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

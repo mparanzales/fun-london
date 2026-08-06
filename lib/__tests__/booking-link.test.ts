@@ -9,7 +9,7 @@ describe("buildReserveUrl", () => {
       { platform: "opentable", url: "https://www.opentable.co.uk/r/padella" },
       slot,
     );
-    const decoded = decodeURIComponent(url);
+    const decoded = decodeURIComponent(url!);
     expect(decoded).toContain("dateTime=2026-06-10T20:00");
     expect(decoded).toContain("partySize=2");
   });
@@ -19,7 +19,7 @@ describe("buildReserveUrl", () => {
       { platform: "resy", url: "https://resy.com/cities/ldn/venue" },
       slot,
     );
-    const decoded = decodeURIComponent(url);
+    const decoded = decodeURIComponent(url!);
     expect(decoded).toContain("date=2026-06-10");
     expect(decoded).toContain("seats=2");
   });
@@ -32,7 +32,7 @@ describe("buildReserveUrl", () => {
       },
       slot,
     );
-    expect(decodeURIComponent(url)).toContain("party_size=2");
+    expect(decodeURIComponent(url!)).toContain("party_size=2");
   });
 
   it("leaves a plain website link's path intact", () => {
@@ -43,9 +43,40 @@ describe("buildReserveUrl", () => {
     expect(url).toContain("https://venue.example/book");
   });
 
-  it("returns the original string unchanged when the URL is invalid", () => {
-    const bad = "not-a-valid-url";
-    expect(buildReserveUrl({ platform: "website", url: bad }, slot)).toBe(bad);
+  // 🧨 http(s) or nothing: the result is rendered as an anchor HREF in the
+  // ReserveSheet, and target.url is CATALOGUE data (ingestion crons, bulk
+  // import). The old fallback returned the raw string verbatim, which turned
+  // a poisoned row into script running in funldn.com's origin on the user's
+  // own tap. Null drops the CTA instead.
+  it("returns null for a value that does not parse as a URL", () => {
+    expect(
+      buildReserveUrl({ platform: "website", url: "not-a-valid-url" }, slot),
+    ).toBeNull();
+  });
+
+  it("returns null for any non-http(s) scheme", () => {
+    for (const url of [
+      // eslint-disable-next-line no-script-url
+      "javascript:alert(document.domain)",
+      "data:text/html,<script>1</script>",
+      "file:///etc/passwd",
+      "vbscript:x",
+    ]) {
+      expect(buildReserveUrl({ platform: "website", url }, slot)).toBeNull();
+    }
+    // Positive control: both real web schemes survive.
+    expect(
+      buildReserveUrl(
+        { platform: "website", url: "http://venue.example" },
+        slot,
+      ),
+    ).not.toBeNull();
+    expect(
+      buildReserveUrl(
+        { platform: "website", url: "https://venue.example" },
+        slot,
+      ),
+    ).not.toBeNull();
   });
 });
 
