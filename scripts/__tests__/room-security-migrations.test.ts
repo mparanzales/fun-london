@@ -50,6 +50,10 @@ describe("migration sequence", () => {
       // 0006: saved-night timing + the plans self-update policy. Additive,
       // idempotent, backfills updated_at from created_at.
       "0006_saved_plan_timing.sql",
+      // 0007: nulls the non-URL sentinels in events.source_url ("N/A" x5,
+      // "Not available" x1). Data only, no DDL, no owner-level rights, so it
+      // belongs in the runner's chain. Idempotent: re-running matches nothing.
+      "0007_event_source_url_hygiene.sql",
     ]);
     for (const f of inChain) {
       const sql = readFileSync(join(DIR, f), "utf8")
