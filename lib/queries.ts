@@ -18,7 +18,7 @@
 import { requestMemo as reactCache } from "@/lib/request-memo";
 import { createClient } from "@/lib/supabase/server";
 import { createStaticAnonClient } from "@/lib/supabase/static";
-import { tidyText } from "@/lib/text";
+import { tidyText, repairMojibake } from "@/lib/text";
 import { haversineKm } from "@/lib/geo";
 import { rankRowsByTaste } from "@/lib/taste-feed";
 import { createServiceClient } from "@/lib/supabase/admin";
@@ -128,16 +128,39 @@ type EventRow = {
 // Kept as a local alias so the call sites below read unchanged.
 const tidyDashes = tidyText;
 
+// PROPER NOUNS get repairMojibake, NOT tidyText, and the difference is
+// deliberate.
+//
+// Both strip what can never be legitimate: C0/C1 controls, BOM, the
+// zero-widths, and the bidi controls that silently reverse everything after
+// them (a venue name carrying U+202E flips the rest of a calendar entry, a
+// card, and an OG title). Names need that as much as editorial copy does, and
+// they were not getting it: only `name` was tidied, while `venue_name`, `area`,
+// and the venue's own `name`/`neighbourhood` went through raw.
+//
+// What names must NOT get is the editorial half. tidyText also rewrites em and
+// en dashes to ", " to enforce the brand's no-dashes rule, which is right for a
+// vibe line and wrong for a title. This is not hypothetical: the live catalogue
+// contains "Hermanos Colombian Coffee Roasters – Angel Lane", and tidyText
+// would silently rename it to "Hermanos Colombian Coffee Roasters, Angel Lane"
+// on every surface. Editorial rules may reword copy; they may not reword the
+// name of a business.
+//
+// Read-side on purpose, like the dash rule above: it fixes all 2,233 existing
+// rows with no migration, and unlike a write-side fix no ingestion cron can
+// undo it.
+const tidyName = repairMojibake;
+
 function mapVenue(r: VenueRow): Venue {
   return {
     id: r.id,
     slug: r.slug,
-    name: r.name,
+    name: tidyName(r.name),
     type: r.type as VenueType,
     vibe: tidyDashes(r.vibe),
     longDescription: tidyDashes(r.long_description),
-    neighbourhood: r.neighbourhood,
-    address: r.address,
+    neighbourhood: tidyName(r.neighbourhood),
+    address: tidyName(r.address),
     lat: r.lat,
     lng: r.lng,
     price: r.price as PriceTier,
@@ -177,9 +200,9 @@ function mapEvent(r: EventRow): Event {
   return {
     id: r.id,
     name: tidyDashes(r.name),
-    venueName: r.venue_name,
+    venueName: tidyName(r.venue_name),
     venueId: r.venue_id,
-    area: r.area,
+    area: tidyName(r.area),
     dateLabel: r.date_label as DateLabel,
     timeLabel: r.time_label,
     startsAt: r.starts_at,
@@ -249,11 +272,11 @@ export function mapVenuePlan(r: VenuePlanRow): Venue {
   return {
     id: r.id,
     slug: r.slug,
-    name: r.name,
+    name: tidyName(r.name),
     type: r.type as VenueType,
     vibe: tidyDashes(r.vibe),
     longDescription: "",
-    neighbourhood: r.neighbourhood,
+    neighbourhood: tidyName(r.neighbourhood),
     address: "",
     lat: r.lat,
     lng: r.lng,
@@ -357,11 +380,11 @@ export function mapVenuePreview(r: VenueCardRow): Venue {
   return {
     id: r.id,
     slug: r.slug,
-    name: r.name,
+    name: tidyName(r.name),
     type: r.type as VenueType,
     vibe: tidyDashes(r.vibe),
     longDescription: "",
-    neighbourhood: r.neighbourhood,
+    neighbourhood: tidyName(r.neighbourhood),
     address: "",
     lat: r.lat,
     lng: r.lng,
@@ -1010,9 +1033,9 @@ function mapEventPreview(r: EventCardRow): Event {
   return {
     id: r.id,
     name: tidyDashes(r.name),
-    venueName: r.venue_name,
+    venueName: tidyName(r.venue_name),
     venueId: r.venue_id,
-    area: r.area,
+    area: tidyName(r.area),
     dateLabel: r.date_label as DateLabel,
     timeLabel: r.time_label,
     startsAt: r.starts_at,
@@ -1192,7 +1215,14 @@ export async function fetchNeighbourhoods(): Promise<string[]> {
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`fetchNeighbourhoods: ${error.message}`);
     const page = (data as { neighbourhood: string }[]) ?? [];
-    for (const r of page) if (r.neighbourhood) names.add(r.neighbourhood);
+    // Sanitised with the SAME helper the mappers use. These strings are
+    // compared by exact equality (lib/regions.ts, lib/plan-engine.ts), so a
+    // filter label built from the raw column would stop matching the tidied
+    // value the cards now carry, and the option would silently select nothing.
+    for (const r of page) {
+      const n = tidyName(r.neighbourhood);
+      if (n) names.add(n);
+    }
     if (page.length < PAGE) break;
   }
   return Array.from(names).sort();

@@ -141,3 +141,136 @@ describe("ingest keeps provider fidelity, read applies the brand rule", () => {
     }
   });
 });
+
+// ── Bidi controls: BOTH blocks, not just the older one ──────────────────────
+//
+// A direction-override character reverses everything rendered after it, so a
+// venue name carrying one flips the rest of a card, an OG title and the
+// LOCATION of a downloaded calendar entry. The set used to stop at U+202E,
+// which LOOKS complete: U+2066-U+2069 are the Unicode 6.3 isolates (LRI, RLI,
+// FSI, PDI), they do the same job, and they live in a separate block.
+describe("bidi and invisible controls", () => {
+  // Built from codepoints, never pasted: this file's own header explains why
+  // a literal unprintable in source is silently rewritten by editors and git
+  // filters, which would leave the test passing against the wrong input.
+  const ch = (code: number) => String.fromCharCode(code);
+  const OLD_EMBEDDINGS: [string, string][] = [
+    ["LRE U+202A", ch(0x202a)],
+    ["RLE U+202B", ch(0x202b)],
+    ["PDF U+202C", ch(0x202c)],
+    ["LRO U+202D", ch(0x202d)],
+    ["RLO U+202E", ch(0x202e)],
+  ];
+  const ISOLATES: [string, string][] = [
+    ["LRI U+2066", ch(0x2066)],
+    ["RLI U+2067", ch(0x2067)],
+    ["FSI U+2068", ch(0x2068)],
+    ["PDI U+2069", ch(0x2069)],
+  ];
+
+  it.each([...OLD_EMBEDDINGS, ...ISOLATES])(
+    "repairMojibake strips %s out of a venue name",
+    (_label, ch) => {
+      expect(repairMojibake(`Rooftop${ch} Bar`)).toBe("Rooftop Bar");
+    },
+  );
+
+  it.each([...OLD_EMBEDDINGS, ...ISOLATES])(
+    "tidyText strips %s too, so editorial copy is covered as well",
+    (_label, ch) => {
+      expect(tidyText(`Rooftop${ch} Bar`)).toBe("Rooftop Bar");
+    },
+  );
+
+  it("strips the zero-widths and the BOM", () => {
+    expect(repairMojibake(`Roof${ch(0x200b)}top${ch(0xfeff)} Bar`)).toBe(
+      "Rooftop Bar",
+    );
+  });
+
+  // The other half of the contract: it must not become a blunt instrument.
+  // "Never delete a printable character" is the rule this file already carries.
+  it("leaves every printable character exactly where it was", () => {
+    for (const s of [
+      "The Photographers' Gallery, 16\u201318 Ramillies Street",
+      "Hermanos Colombian Coffee Roasters \u2013 Angel Lane",
+      "Knightsbridge / Belgravia",
+      "Bar Américain",
+      "Élysée",
+    ]) {
+      expect(repairMojibake(s)).toBe(s);
+    }
+  });
+
+  // 🧨 The exact reason venue names do NOT go through tidyText. This is not a
+  // style preference: both strings below are live catalogue values.
+  it("tidyText WOULD rewrite proper nouns, which is why names use repairMojibake", () => {
+    expect(
+      tidyText("Hermanos Colombian Coffee Roasters \u2013 Angel Lane"),
+    ).toBe("Hermanos Colombian Coffee Roasters, Angel Lane");
+    expect(
+      tidyText("The Photographers' Gallery, 16\u201318 Ramillies Street"),
+    ).toBe("The Photographers' Gallery, 16, 18 Ramillies Street");
+  });
+});
+
+// ---- The cases that force \p{Cf} and the u flag to stay --------------------
+//
+// Every character pinned elsewhere in this file sits in BOTH the old
+// hand-written range and the new category, so rewriting the set back to a
+// narrow BMP literal was a fully GREEN mutation. These are the members only
+// the category catches.
+describe("the invisible set is a category, not a range", () => {
+  const cp = (code: number) => String.fromCodePoint(code);
+
+  it.each([
+    ["ALM U+061C", 0x061c],
+    ["word joiner U+2060", 0x2060],
+    ["invisible times U+2062", 0x2062],
+    ["invisible plus U+2064", 0x2064],
+    ["interlinear anchor U+FFF9", 0xfff9],
+    ["soft hyphen U+00AD", 0x00ad],
+  ])("strips %s, which the old BMP range missed", (_label, code) => {
+    expect(repairMojibake(`Roof${cp(code as number)}top`)).toBe("Rooftop");
+  });
+
+  // Astral, which ALSO forces the `u` flag: without it the regex sees two
+  // surrogate halves rather than one code point. Tag characters are the
+  // current invisible-smuggling vector.
+  it("strips an astral TAG character (U+E0041)", () => {
+    expect(repairMojibake(`Roof${cp(0xe0041)}top`)).toBe("Rooftop");
+  });
+});
+
+// ---- What the mojibake repair can MANUFACTURE ------------------------------
+//
+// PUNCT_RUN maps a tail byte to U+2000 + (tail - 0x80), so the repair itself
+// produces characters no input contained. Two of those ranges are load-bearing
+// and neither had a fixture: tails 0xA8/0xA9 produce U+2028/U+2029, the exact
+// line-separator class lib/ics.ts exists to stop, and tails 0x80-0x8A produce
+// the fixed-width spaces that RECOVERED_SPACES collapses.
+describe("recovery cannot manufacture a separator", () => {
+  // The full three-byte mojibake run: lead U+00C2, middle U+0080, then a tail.
+  // Built from codes so no C1 byte is ever typed into this source file.
+  const moji = (tail: number) =>
+    "a" + String.fromCharCode(0xc2, 0x80, tail) + "b";
+
+  it("a 0xA8 tail does not leave a U+2028 LINE SEPARATOR behind", () => {
+    const out = repairMojibake(moji(0xa8));
+    expect(out).not.toContain(String.fromCharCode(0x2028));
+    expect(out).toBe("ab");
+  });
+
+  it("a 0xA9 tail does not leave a U+2029 PARAGRAPH SEPARATOR behind", () => {
+    const out = repairMojibake(moji(0xa9));
+    expect(out).not.toContain(String.fromCharCode(0x2029));
+    expect(out).toBe("ab");
+  });
+
+  // RECOVERED_SPACES had no fixture at all: deleting it left an em quad sitting
+  // in a title while the whole suite stayed green.
+  it("collapses a manufactured fixed-width space to a normal one", () => {
+    expect(repairMojibake(moji(0x81))).toBe("a b");
+    expect(repairMojibake(moji(0x83))).toBe("a b");
+  });
+});
