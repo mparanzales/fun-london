@@ -56,6 +56,25 @@
 --     where source_url is null
 --       and id = 'ec19b153-3794-4ab0-81c4-a417a059d7cc'; -- England World Cup Pop-Up Shop
 
+-- STATE AT AUTHORING, measured 2026-08-07 against production. Re-run the dry
+-- run immediately before applying; do NOT trust these numbers on the day.
+--
+--   total events 71 | already NULL 4 | this migration nulls 6 | untouched 61
+--   0 valid URLs match the predicate
+--   61/61 survivors pass storedUrlOrNull byte-for-byte
+--
+-- THE COUNT MAY LEGITIMATELY BE LOWER THAN 6 BY APPLY TIME, AND THAT IS NOT A
+-- FAULT. All six rows are source='popup' with curated_at and cancelled_at
+-- NULL, and all six are already EXPIRED (latest ends_at 2026-08-01). That is
+-- exactly the delete predicate of scripts/prune-expired-events.ts, which the
+-- daily maintenance job runs. If the prune reaches them first this migration
+-- becomes a no-op, the rollback ids below dangle harmlessly, and nothing is
+-- wrong. A count HIGHER than 6 is the one that means stop: it implies a
+-- writer nobody has audited.
+--
+-- NOT YET APPLIED TO PRODUCTION as of 2026-08-07. It sits in the runner chain,
+-- so a fresh bootstrap or `db push` WILL apply it; production is by hand.
+
 begin;
 
 update public.events
@@ -67,10 +86,22 @@ update public.events
         source_url !~* '^https?://'
         -- Or shaped like one but carrying a control character. The URL parser
         -- DELETES CR/LF/TAB rather than rejecting them, so such a row stores a
-        -- value no consumer resolves to. storedUrlOrNull refuses the same
-        -- input on the write side (and also refuses padding and userinfo,
-        -- which this predicate cannot express). Currently 0 rows.
-        or source_url ~ '[[:cntrl:]]'
+        -- value no consumer resolves to.
+        --
+        -- An explicit range, NOT [[:cntrl:]]. That class is locale-dependent,
+        -- and this file also runs against local, staging and branch databases
+        -- via `supabase db push`, not only the one that was measured. A bracket
+        -- range matches by character code under every collation, and a human
+        -- can diff it against CONTROL_CHARS in lib/safe-url.ts by eye. It
+        -- starts at 0001 because Postgres text cannot hold a NUL.
+        -- (Measured 2026-08-07 on production, datctype en_US.UTF-8:
+        --  [[:cntrl:]] there matched exactly C0+DEL+C1 -- this same set.)
+        --
+        -- storedUrlOrNull additionally refuses padding and userinfo. This
+        -- predicate does NOT express those, deliberately: the helper owns that
+        -- layer, and a floor that under-cleans is safe where one that
+        -- over-cleans is not. Currently 0 rows.
+        or source_url ~ '[\u0001-\u001F\u007F-\u009F]'
        )
 returning id, name, source;
 

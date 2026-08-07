@@ -92,7 +92,15 @@ describe("structure: every source_url write goes through the normaliser", () => 
     "scripts",
     "ingest-events.ts",
   );
-  const SRC = readFileSync(SCRIPT, "utf8");
+  // 🧨 Line comments are stripped FIRST. The regex below anchors on the comma
+  // at end of line, so `source_url: e.url, // skiddle has no normaliser yet`
+  // was invisible to it: found.length stayed at 4 and "wraps every one of
+  // them" never saw the new site. A trailing comment is exactly how someone
+  // writes a new provider block, so the guard has to see through one.
+  const SRC = readFileSync(SCRIPT, "utf8")
+    .split("\n")
+    .map((l) => l.replace(/\s*\/\/.*$/, ""))
+    .join("\n");
 
   // Assignments only: `source_url: <something>,`. The type declaration
   // (`source_url: string | null;`) ends in a semicolon and is excluded.
@@ -130,9 +138,11 @@ describe("structure: every source_url write goes through the normaliser", () => 
     expect(SRC).toMatch(/source_url:\s*string \| null;/);
   });
 
-  it('has no `?? ""` fallback left on a url', () => {
-    expect(SRC).not.toMatch(/source_url:\s*[A-Za-z0-9_.?]+\s*\?\?\s*""/);
-  });
+  // Deliberately no separate `?? ""` regex here. The earlier one used a
+  // character class that could not contain "(", so it could never match
+  // `storedUrlOrNull(e.url) ?? ""` -- the exact expression it was meant to
+  // catch. The whole-RHS assertion above is what actually catches it; a test
+  // pinning something unreachable is worse than no test.
 });
 
 // Control characters, checked on the RAW string before parsing.
@@ -236,39 +246,72 @@ describe("migration 0007 stays a shape test, not a list of spellings", () => {
   // Only what actually runs: the house convention for reading a migration.
   const executable = SQL.split("\n")
     .filter((l) => !l.trimStart().startsWith("--"))
-    .join("\n");
+    .join("\n")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  it("tests the SHAPE of the value", () => {
-    expect(executable).toMatch(/source_url\s*!~\*\s*'\^https\?:\/\/'/);
-  });
-
-  it("also catches a control character inside a URL-shaped value", () => {
-    expect(executable).toContain("[[:cntrl:]]");
-  });
-
-  it("never matches on a specific spelling", () => {
-    // `= 'N/A'` or `in ('N/A', 'Not available')` is the denylist this rejects.
+  it("tests the SHAPE of the value, never a specific spelling", () => {
+    // Tolerant of a TIGHTER predicate: what matters is that it is a regex
+    // shape test on source_url, not which exact pattern. Pinning the exact
+    // string would turn an improvement red.
+    expect(executable).toMatch(/source_url\s*!~\*\s*'\^https\?:\/\//);
+    // `= 'N/A'` / `in ('N/A', ...)` is the denylist this rejects.
     expect(executable).not.toMatch(/source_url\s*(=|in)\s*\(?\s*'/i);
   });
 
-  it("only ever writes NULL, and only to source_url", () => {
-    expect(executable).toMatch(/set\s+source_url\s*=\s*null/i);
-    expect(executable.match(/\bupdate\s+public\.\w+/gi)).toEqual([
-      "update public.events",
-    ]);
-    // No DDL in a data migration.
-    for (const ddl of [
-      "alter table",
-      "drop ",
-      "create ",
-      "grant ",
-      "revoke ",
-    ]) {
-      expect(executable.toLowerCase()).not.toContain(ddl);
-    }
+  // 🧨 STRUCTURE, not token presence. Flipping this `or` to `and` makes the
+  // predicate require a value to be BOTH non-http AND control-carrying, which
+  // matches zero rows -- the six sentinels survive and every token-presence
+  // test stays green.
+  it("combines its two branches with OR, so either alone matches", () => {
+    // Structure, not spelling: either branch alone must be able to match.
+    // Pinning the exact control-character pattern would turn a TIGHTENING of
+    // the predicate red, which is the trap the sibling test above avoids.
+    expect(executable).toMatch(
+      /where source_url is not null and \( source_url !~\* '[^']+' or source_url ~ '\[[^']+\]' \)/i,
+    );
+    expect(executable).not.toMatch(/!~\* '[^']+' and source_url ~/i);
   });
 
-  it("records what it destroyed", () => {
-    expect(executable).toMatch(/returning\s+id/i);
+  // 🧨 An ALLOWLIST of statement verbs. The previous version denylisted five
+  // DDL strings, which let `delete from public.events where ...` through --
+  // in a PR whose whole thesis is that denylists are one spelling away from
+  // being wrong.
+  it("its second branch is a CONTROL-character test, whatever the spelling", () => {
+    // Either the locale-independent explicit range (preferred) or the
+    // [[:cntrl:]] class. Not an unrelated class: swapping this branch to
+    // [[:space:]] would quietly stop catching the thing it exists for.
+    const CONTROL_BRANCH = new RegExp(
+      "source_url ~ '\\[(\\[:cntrl:\\]|" +
+        "\\\\u0001-\\\\u001F\\\\u007F-\\\\u009F)\\]'",
+      "i",
+    );
+    expect(executable).toMatch(CONTROL_BRANCH);
+  });
+
+  it("runs only begin / one update / commit", () => {
+    const verbs = (
+      executable.match(
+        /\b(begin|commit|rollback|update|insert|delete|truncate|alter|create|drop|grant|revoke|copy|merge)\b/gi,
+      ) ?? []
+    ).map((v) => v.toLowerCase());
+    expect(verbs).toEqual(["begin", "update", "commit"]);
+  });
+
+  it("only ever writes NULL, and only to public.events", () => {
+    expect(executable).toMatch(/set source_url = null/i);
+    expect(executable.match(/update public\.\w+/gi)).toEqual([
+      "update public.events",
+    ]);
+  });
+
+  // Named for what it actually pins. The RETURNING rows are DISCARDED on every
+  // apply path this repo documents (Supabase MCP apply_migration, `db push`,
+  // and the dashboard editor, which shows only the last statement's result --
+  // here, `commit`). Only `psql -f` prints them. The durable record of what was
+  // destroyed is the hardcoded rollback id list in the header, plus the
+  // operator's own pre-apply snapshot.
+  it("asks for its rows back, for whoever runs the statement standalone", () => {
+    expect(executable).toMatch(/returning id/i);
   });
 });

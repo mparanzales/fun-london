@@ -81,9 +81,14 @@ export function parseExternalUrl(raw: string | null | undefined): URL | null {
 // Neither is acceptable, so it is refused. Verified against production: 0 of
 // the 67 rows with a source_url carry a control character, so this closes the
 // door rather than changing any live value.
-// C0, DEL and C1. C1 is included because Postgres's [[:cntrl:]] matches it in a
-// UTF-8 locale, and the migration's predicate must not be able to null a row
-// the write path would have kept. Ticketmaster has already served this repo raw
+// C0, DEL and C1 -- exactly what Postgres's [[:cntrl:]] matches, so the
+// migration's predicate cannot null a row this helper would have kept.
+//
+// MEASURED, not assumed, against the production database (datctype
+// en_US.UTF-8): [[:cntrl:]] matched TAB, U+001F, DEL, U+0080 and U+009F, and
+// did NOT match NBSP, U+2028, U+2029, U+200B, U+FEFF, U+202E or U+3000. The
+// class is therefore identical to the range below. Re-measure if the database
+// collation ever changes. Ticketmaster has already served this repo raw
 // U+0080/U+0093 (see lib/text.ts), so C1 in a provider field is not academic.
 const CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/;
 
@@ -98,15 +103,27 @@ const HAS_USERINFO = /^https?:\/\/[^/?#]*@/i;
 export function storedUrlOrNull(raw: string | null | undefined): string | null {
   if (typeof raw !== "string") return null;
 
-  // 🧨 Everything below rejects an input whose PARSE IS NOT FAITHFUL to its
-  // bytes, and that is the whole design. Returning the original string is only
-  // safe where parsing would not have changed it; anywhere the parser silently
-  // repairs, storing the original persists a value no consumer resolves to,
-  // while storing the parsed form persists something the provider never sent.
-  // Refuse instead of choosing. Same reasoning as lib/ics.ts (PR #231).
+  // 🧨 The checks below refuse the inputs where the parser would silently
+  // REPAIR the value, so that returning the caller's original bytes is safe.
+  //
+  // Stated precisely, because the next reader will rely on it: what this
+  // enforces is no padding, no control characters, no userinfo, and
+  // scheme-first. It is NOT full byte-faithfulness. A raw space, a backslash,
+  // a percent-encoded or non-ASCII host still parse to something that differs
+  // from the stored bytes. None of those can change the HOST to anything that
+  // is not already leading the string -- which is what would matter -- because
+  // userinfo is refused outright. Same reasoning as lib/ics.ts (PR #231).
 
-  // Padding: the parser strips leading/trailing whitespace before validating,
+  // Padding: the parser strips leading/trailing C0-or-space before validating,
   // so "  https://x.com" parses fine and would be stored WITH the spaces.
+  //
+  // trim() is deliberately WIDER than the parser's strip set (it also removes
+  // NBSP, U+FEFF and the Unicode spaces, which the parser keeps and
+  // percent-encodes). Wider is the safe direction here: it refuses a padded
+  // URL rather than storing bytes that render differently everywhere. Note the
+  // narrow direction is covered by CONTROL_CHARS, not by this line -- C0 that
+  // trim() ignores is caught below, so the two checks are load-bearing
+  // together.
   if (raw !== raw.trim()) return null;
 
   // CR/LF/TAB and friends: deleted by the parser, not rejected.
