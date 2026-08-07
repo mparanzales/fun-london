@@ -82,9 +82,25 @@ const supabase: SupabaseClient = createClient(URL_, SERVICE, {
   auth: { persistSession: false },
 });
 
-// The generic hero line the old fallback wrote. Rows still carrying it have
-// never been hand-written, so replacing it destroys nothing.
+// Hero lines the OLD machinery wrote, never a human: the ingest fallback
+// ("London favourite") and the bulk loader's bare lowercase type_guess
+// ("culture", "pub"). Rows still wearing one have never been hand-written, so
+// replacing it destroys nothing -- and some are now actively wrong, e.g.
+// supperclub.tube read "culture" while being a restaurant.
 const FALLBACK_VIBE = "London favourite";
+const MACHINE_VIBES = new Set([
+  FALLBACK_VIBE,
+  "culture",
+  "cafe",
+  "pub",
+  "market",
+  "bar",
+  "outdoors",
+  "wine bar",
+  "restaurant",
+]);
+const isMachineVibe = (v: string | null): boolean =>
+  !v || MACHINE_VIBES.has(v.trim());
 
 type Row = {
   id: string;
@@ -152,7 +168,10 @@ async function main() {
     .order("created_at", { ascending: false })
     .limit(LIMIT);
   if (SLUGS.length > 0) q = q.in("slug", SLUGS);
-  else q = q.or(`vibe.eq.${FALLBACK_VIBE},created_at.gte.2026-08-04`);
+  else
+    q = q.or(
+      `vibe.in.(${[...MACHINE_VIBES].map((v) => `"${v}"`).join(",")}),created_at.gte.2026-08-04`,
+    );
 
   const { data, error } = await q;
   if (error) throw new Error(`venues read failed: ${error.message}`);
@@ -205,8 +224,10 @@ async function main() {
       // hand-written venue is never overwritten by a restated Google category.
       const hasTags = (v.vibe_tags?.length ?? 0) > 0;
       if (!hasTags && tags.length > 0) patch.vibe_tags = tags;
-      if (!v.vibe || v.vibe === FALLBACK_VIBE) {
-        patch.vibe = humanTypeLabel(cls.matchedGoogleType);
+      if (isMachineVibe(v.vibe)) {
+        // Prefer the Google-derived chip ("Gastropub", "Fine dining") over the
+        // bare category label; fall back to the humanised type.
+        patch.vibe = tags[0] ?? humanTypeLabel(cls.matchedGoogleType);
       }
 
       // Canonical tags follow whatever the tags/type/moods ended up as.
