@@ -18,8 +18,12 @@
 // worth stating because the overlap invites exactly that conclusion. First,
 // coverage: storedUrlOrNull is applied to `events.source_url` in
 // ingest-events.ts and nowhere else — venues.img_url, venues.website_url,
-// editorial_sources[].url and creator_coverage[].url all still arrive
-// unvalidated, from crons and from bulk CSV import. Second, and permanent even
+// editorial_sources[].url and creator_coverage[].url are all stored without
+// it. (Precisely, since the loose version of this invites a wrong fix:
+// img_url and website_url are written by the ingestion crons today, while the
+// unvalidated editorial_sources / creator_coverage rows came from the deleted
+// Gemini pipeline. Either way they are in the table now, and this is what
+// fetches them.) Second, and permanent even
 // if that coverage were complete: a write-side check can only judge the string
 // it was handed. It cannot know that a perfectly ordinary public URL answers
 // 302 Location: http://169.254.169.254/, or that a hostname resolves to a
@@ -190,9 +194,14 @@ function isPublicIPv6(b: readonly number[]): boolean {
   // other reserved block a refusal without having to name them one by one.
   if ((b[0] & 0xe0) !== 0x20) return false;
 
-  // Carve-outs INSIDE global unicast.
+  // Carve-outs INSIDE global unicast. 2001::/23 is the IETF protocol
+  // assignments block — the v6 counterpart of 192.0.0/24 and 198.18/15, which
+  // the v4 table above already refuses. Leaving only Teredo and the doc range
+  // out was the same asymmetry, so the whole /23 goes: it covers Teredo
+  // (2001::/32), benchmarking (2001:2::/48), ORCHIDv2 (2001:20::/28) and the
+  // PCP anycast address, none of which is a place a catalogue URL may send us.
   if (b[0] === 0x20 && b[1] === 0x01) {
-    if (b[2] === 0x00 && b[3] === 0x00) return false; // 2001::/32 Teredo
+    if ((b[2] & 0xfe) === 0x00) return false; // 2001::/23 protocol assignments
     if (b[2] === 0x0d && b[3] === 0xb8) return false; // 2001:db8::/32 documentation
   }
   return true;
@@ -232,7 +241,13 @@ function isLocalName(host: string): boolean {
 // them.
 function hostLabel(u: URL): string {
   const h = u.hostname;
-  return h.startsWith("[") && h.endsWith("]") ? h.slice(1, -1) : h;
+  if (h.startsWith("[") && h.endsWith("]")) return h.slice(1, -1);
+  // A fully-qualified name keeps its root dot through the parser, so
+  // "localhost." and "box.internal." are the same destinations as their
+  // undotted forms while sliding past a suffix test. The DNS step would catch
+  // them, but the SYNC-only screening paths (the backfill-photos dry run, the
+  // migrate-photos URL filter) never reach it, and would report them fine.
+  return h.endsWith(".") ? h.slice(0, -1) : h;
 }
 
 // ── The guard ───────────────────────────────────────────────────────────

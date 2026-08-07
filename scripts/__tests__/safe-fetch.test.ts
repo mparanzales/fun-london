@@ -90,6 +90,16 @@ const METADATA_AND_LOOPBACK = [
   "http://[2001::1]/", // 2001::/32 Teredo
   "http://[64:ff9b:1::7f00:1]/", // local-use NAT64
   "http://[100::1]/", // 100::/64 discard-only
+  // Second review pass: the v4 table refuses 192.0.0/24 and 198.18/15, so
+  // leaving their v6 counterparts public was the same asymmetry. 2001::/23 now
+  // goes as a block.
+  "http://[2001:1::1]/", // PCP anycast, inside 2001::/23
+  "http://[2001:2::1]/", // benchmarking
+  "http://[2001:20::1]/", // ORCHIDv2
+  // A trailing root dot is the same destination, and used to slide past the
+  // suffix test on the sync-only screening paths.
+  "http://localhost./",
+  "http://box.internal./",
   // Other reserved space that reaches something inside the perimeter.
   "http://10.0.0.1/",
   "http://172.16.0.1/",
@@ -343,11 +353,18 @@ describe("safeFetch", () => {
   // Doing our own redirects means inheriting the responsibilities the runtime
   // was carrying. No caller passes a credential today; ingest-events already
   // fetches with a Bearer and is the obvious next migration.
-  it("strips credentials when a redirect crosses origins", async () => {
-    const sent: Headers[] = [];
+  // 🧨 Both of these assert on EVERY value the guard clears, not just the
+  // first one. The earlier versions captured only `init.method` and only the
+  // `authorization` header, which meant deleting `body: undefined` or the
+  // `headers.delete("cookie")` line left the suite fully green while the body
+  // was replayed to a redirect target and the cookie followed it across
+  // origins. Review caught that; it is the same vacuous-pass shape this file
+  // exists to refuse, so the mock now records the whole init.
+  it("strips ALL credentials when a redirect crosses origins", async () => {
+    const sent: RequestInit[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL, init: RequestInit) => {
-      sent.push(new Headers(init?.headers));
+      sent.push({ ...init, headers: new Headers(init?.headers) });
       return String(input).includes("start")
         ? new Response(null, {
             status: 302,
@@ -357,21 +374,30 @@ describe("safeFetch", () => {
     }) as typeof fetch;
     try {
       await safeFetch("https://example.com/start", {
-        headers: { authorization: "Bearer SECRET", "user-agent": "FL" },
+        headers: {
+          authorization: "Bearer SECRET",
+          cookie: "session=abc",
+          "user-agent": "FL",
+        },
       });
-      expect(sent[0].get("authorization")).toBe("Bearer SECRET");
-      expect(sent[1].get("authorization")).toBeNull();
-      expect(sent[1].get("user-agent")).toBe("FL"); // only credentials go
+      const first = sent[0].headers as Headers;
+      const second = sent[1].headers as Headers;
+      expect(first.get("authorization")).toBe("Bearer SECRET");
+      expect(first.get("cookie")).toBe("session=abc");
+      // Every credential goes, and only credentials go.
+      expect(second.get("authorization")).toBeNull();
+      expect(second.get("cookie")).toBeNull();
+      expect(second.get("user-agent")).toBe("FL");
     } finally {
       globalThis.fetch = realFetch;
     }
   });
 
   it("does not replay a POST body to the redirect target", async () => {
-    const methods: string[] = [];
+    const sent: RequestInit[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL, init: RequestInit) => {
-      methods.push(String(init?.method ?? "GET"));
+      sent.push({ ...init });
       return String(input).includes("start")
         ? new Response(null, {
             status: 302,
@@ -384,7 +410,50 @@ describe("safeFetch", () => {
         method: "POST",
         body: "secret=1",
       });
-      expect(methods).toEqual(["POST", "GET"]);
+      expect(sent.map((s) => String(s.method ?? "GET"))).toEqual([
+        "POST",
+        "GET",
+      ]);
+      // The method downgrade is only half of it — the BODY must not travel.
+      expect(sent[0].body).toBe("secret=1");
+      expect(sent[1].body).toBeUndefined();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  // The drain was added by review and nothing pinned it, so deleting it was
+  // invisible. A 3xx body left unread holds the socket until GC, inside loops
+  // over thousands of catalogue rows.
+  it("drains the body of each redirect response", async () => {
+    let cancelled = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL) => {
+      if (String(input).includes("start")) {
+        const body = new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode("x"));
+            c.close();
+          },
+        });
+        const res = new Response(body, {
+          status: 302,
+          headers: { location: "https://example.com/next" },
+        });
+        const realCancel = res.body!.cancel.bind(res.body);
+        Object.defineProperty(res.body, "cancel", {
+          value: (r?: unknown) => {
+            cancelled += 1;
+            return realCancel(r);
+          },
+        });
+        return res;
+      }
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await safeFetch("https://example.com/start");
+      expect(cancelled).toBe(1);
     } finally {
       globalThis.fetch = realFetch;
     }
@@ -591,7 +660,7 @@ describe("every script that fetches a catalogue URL goes through the guard", () 
   );
 });
 
-// Every bare fetch() left in scripts/, reviewed 2026-08-06. Each one's ORIGIN
+// Every bare fetch() left in scripts/, reviewed 2026-08-07. Each one's ORIGIN
 // is hardcoded — a literal https:// host, or a constant/builder that resolves
 // to one (PLACES_BASE, API_HOST, SUPABASE_URL, googleMediaUrl, r2PublicUrl) —
 // so no catalogue value can steer where the request goes.
@@ -665,11 +734,26 @@ describe("no NEW unguarded fetch appears in scripts/", () => {
     // stub, and timeout.ts's own TODO reads "1. fetch() the RSS XML … wire
     // this first". The single directory where the next unguarded fetch is
     // already scheduled was the one directory the tripwire was blind to.
-    // __tests__ is excluded on purpose: ssrf-runtime-probe.ts makes a bare
-    // fetch deliberately, as the counterfactual demonstration.
+    //
+    // 🧨 The exemption is an ALLOWLIST OF EXACT FILENAMES, not a directory.
+    // It used to skip anything matching "__tests__", justified by the single
+    // file that needs it — and review mutation-proved the hole that opened: a
+    // bare fetch() planted at scripts/__tests__/zz-sink-probe.ts left the
+    // suite fully GREEN, while the same file at scripts/ or at
+    // scripts/candidate-sources/ turned it red. scripts/__tests__/ already
+    // holds 15 files, and THIS PR set the precedent of putting a runnable
+    // script (not a vitest file) in there. A blanket skip pre-clears every
+    // future one — the same shape as the flat scan this recursion replaced.
     for (const f of readdirSync(SCRIPTS_DIR, { recursive: true }) as string[]) {
       if (!/\.(ts|mts|cts|js|mjs)$/.test(f)) continue;
-      if (f === "safe-fetch.ts" || f.includes("__tests__")) continue;
+      const base = f.replace(/\\/g, "/");
+      // safe-fetch.ts IS the guard, and the probe's bare fetch is the
+      // deliberate counterfactual. Nothing else is exempt, anywhere.
+      if (base === "safe-fetch.ts") continue;
+      if (base === "__tests__/ssrf-runtime-probe.ts") continue;
+      // Vitest files themselves: they mock globalThis.fetch rather than call
+      // out, and they are not a deployment surface.
+      if (/\.test\.ts$/.test(base)) continue;
       // Comment LINES are dropped first. timeout.ts's TODO contains the literal
       // text "1. fetch() the RSS XML", and counting prose would both add a
       // phantom row here and — far worse — let the real call slip in later
