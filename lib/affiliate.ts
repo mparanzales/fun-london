@@ -14,14 +14,21 @@
 //   NEXT_PUBLIC_AFFILIATE_THEFORK                           → ?partner=
 //   NEXT_PUBLIC_AFFILIATE_TICKETMASTER  (Awin/Impact id)    → ?awc= / partner param
 //
-// ⚠️ BEFORE SETTING NEXT_PUBLIC_AFFILIATE_TICKETMASTER: the event page calls
-// applyAffiliate("ticketmaster", …) for EVERY non-popup event, whatever
-// provider the link actually points at, so that id would be stamped onto
-// Eventbrite / DICE / Skiddle outbounds too. Harmless today because an unset
-// id makes the affiliate half a no-op, which is why it has not been fixed
-// separately. The provider→platform map (event-detail.tsx already derives the
-// provider for its label) has to land in the SAME change as the id, not after
-// it.
+// ⚠️ BEFORE SETTING NEXT_PUBLIC_AFFILIATE_TICKETMASTER: applyAffiliate
+// ("ticketmaster", …) is called for EVERY non-popup event, whatever provider
+// the link actually points at, so that id would be stamped onto Eventbrite /
+// DICE / Skiddle outbounds too. Harmless today because an unset id makes the
+// affiliate half a no-op. The provider→platform map (event-detail.tsx already
+// derives the provider for its label) has to land in the SAME change as the
+// id, not after it.
+//
+// 🧨 THERE ARE NOW TWO CALL SITES, and they are not equally recoverable:
+//   app/event/[id]/event-detail.tsx   the on-page CTA
+//   lib/ics-ticket-url.ts             the .ics calendar entry
+// A wrongly-stamped id in the CTA is fixed by the next deploy. The same id
+// inside .ics files people have already downloaded is permanent, sitting on
+// their devices until they open the link, and is a false attribution claim to
+// a partner. Fix the platform map BEFORE the id, not after.
 
 import type { BookingLink } from "@/lib/types";
 
@@ -59,7 +66,17 @@ function affiliateId(env: string): string | undefined {
 
 // Rewrite an outbound URL with attribution + (if configured) an affiliate id.
 // Always safe: on a malformed URL it returns the original untouched.
-export function applyAffiliate(platform: Platform, rawUrl: string): string {
+//
+// `surface` marks WHERE the click came from (utm_content). Without it every
+// outbound carries the same utm_medium/utm_campaign, so a calendar open days
+// later is indistinguishable from an on-page tap in the partner's report --
+// attribution that cannot answer the one question it exists for. Optional, so
+// existing callers keep their exact current output.
+export function applyAffiliate(
+  platform: Platform,
+  rawUrl: string,
+  surface?: string,
+): string {
   let u: URL;
   try {
     u = new URL(rawUrl);
@@ -72,6 +89,13 @@ export function applyAffiliate(platform: Platform, rawUrl: string): string {
     u.searchParams.set("utm_source", "funlondon");
     u.searchParams.set("utm_medium", "app");
     u.searchParams.set("utm_campaign", "reserve");
+  }
+
+  // Which surface produced the click. Set even when the provider already
+  // supplied its own utm_source (the trio above is skipped in that case), so
+  // our own reporting never loses the surface.
+  if (surface && !u.searchParams.has("utm_content")) {
+    u.searchParams.set("utm_content", surface);
   }
 
   // (b) Affiliate id — only when the env var is set.

@@ -6,7 +6,8 @@
 
 import { useState } from "react";
 import { CalendarPlus, Share2, Check } from "lucide-react";
-import { icsDataUrl, icsUri } from "@/lib/ics";
+import { icsDataUrl } from "@/lib/ics";
+import { ticketUrlForIcs, icsTicketDescription } from "@/lib/ics-ticket-url";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
 import type { Event } from "@/lib/types";
@@ -14,22 +15,16 @@ import type { Event } from "@/lib/types";
 export function EventActions({ event }: { event: Event }) {
   const [copied, setCopied] = useState(false);
 
-  // The .ics itself is a data: URL we build, so this is not a browser sink --
-  // but calendar clients linkify the URL and DESCRIPTION fields, so the last
-  // unguarded read of source_url goes through the same allowlist as the hrefs.
-  //
-  // 🧨 icsUri, NOT safeExternalHref. They differ in the one way that matters:
-  // safeExternalHref parses first, and the WHATWG parser DELETES a carriage
-  // return rather than rejecting it, so a corrupt source_url would arrive here
-  // already "repaired" into a valid link to a host we were never given. icsUri
-  // inspects the raw value before parsing and refuses it outright.
-  const ticketUrl = icsUri(event.sourceUrl);
+  // Validated, then attributed. Both steps and the order they must happen in
+  // live in lib/ics-ticket-url.ts, where they can be tested by calling them
+  // rather than by scanning this file for a regex.
+  const ticketUrl = ticketUrlForIcs(event);
   const ics = icsDataUrl({
     uid: event.id,
     title: event.name,
     startsAt: event.startsAt,
     location: `${event.venueName}, ${event.area}, London`,
-    description: ticketUrl ? `Tickets: ${ticketUrl}` : undefined,
+    description: ticketUrl ? icsTicketDescription(ticketUrl) : undefined,
     url: ticketUrl ?? undefined,
   });
 
