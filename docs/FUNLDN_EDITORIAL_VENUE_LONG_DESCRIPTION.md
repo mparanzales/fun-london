@@ -2,8 +2,15 @@
 
 **Owner:** editorial-ux-director (voice standard, formats, within-screen hierarchy).
 **Enforcement:** curation-voice, per string, at PR time.
-**Approval:** ⏳ DRAFT. Not live until red-team-design-critic and agency-creative-director have signed it. The author explicitly declined to approve their own standard.
+**Approval:** ⏳ v2, back for re-review. v1 was REJECTED by agency-creative-director on 2026-08-07 for stating unverified facts about our own product in the section that opens "read this before writing a word". Every claim in §0 is now re-derived from `origin/main` with a file:line, and each is marked ✅ verified.
 **Written:** 2026-08-07, against 64 live venues with `long_description = ''`.
+
+**What changed in v2** (the rejection list, and nothing else — the spine was explicitly preserved by both gates):
+- §0 `description_curated_at`: the v1 claim was FALSE. Corrected against the migration.
+- §0/§8(c) the empty band: v1 asserted it does not render; at the time it DID. Fixed in PR #237 and now true. Cited.
+- §2 first-sentence spec: v1 was wrong in both directions. Re-derived from the actual regex.
+- §2 the banned 161-299 band: DELETED. A renderer defect is not a writer's tax (agency-creative-director overrule).
+- §4.4: the bucket split of the 64 is now published, as required.
 
 ---
 
@@ -11,8 +18,10 @@
 
 Three surfaces, one string. Every rule below comes from here.
 
-1. **Signed in, venue page** · `app/venue/[slug]/venue-detail.tsx` renders it as a single `<p>`, collapsed to `line-clamp-3`. A "Read more" button appears only when the string is longer than 160 characters. One `<p>` means **newlines collapse**: multi-paragraph writing renders as one run-on block.
-2. **Signed out, venue page** · `lib/anon-teaser.ts` cuts the **first complete sentence that ends between 60 and 159 characters**, adds an ellipsis, and shows "Continue reading · free". If the whole string is 160 characters or less it is shown **complete**, with no link.
+1. **Signed in, venue page** · `app/venue/[slug]/venue-detail.tsx:546` renders it as a single `<p>`, collapsed to `line-clamp-3`. A "Read more" button appears only when the string is longer than 160 characters. One `<p>` means **newlines collapse**: multi-paragraph writing renders as one run-on block. ✅ Verified: the band is gated on `signedIn && venue.longDescription.trim() !== ""`, so an empty description renders **nothing at all** — no stray `<p>`, no dead margin. That gate did not exist when v1 was written (it shipped in PR #237); v1 asserted this behaviour before it was true, which is why v1 was rejected.
+2. **Signed out, venue page** · `lib/anon-teaser.ts` derives the teaser, and the mechanics are NOT what v1 described. ✅ Verified at `lib/anon-teaser.ts:51` and `:56`:
+   - **Any string of 160 characters or fewer is returned WHOLE, before the sentence regex ever runs** (`if (text.length <= SENTENCE_MAX) return { text, truncated: false }`). A Short form is therefore shown complete, with no "Continue reading" link, and the first-sentence rules below simply do not apply to it.
+   - Above 160 characters the regex is `^[\s\S]{60,159}?[.!?](?=\s|$)` — **lazy**. It does not cut mid-phrase on a short opener; it takes the shortest run of COMPLETE sentences that lands in 61-160 characters. So a punchy 40-character opener silently welds sentence 2 into the snippet.
 3. **Google and social** · `app/venue/[slug]/venue-page-shared.tsx` uses that same teaser as the `<meta name="description">`, the Open Graph description and the Twitter card.
 
 So: **the first sentence is not an opener, it is a product surface.** It is the search snippet, the shared link preview and the only prose a stranger reads. Write it as if it were the only sentence, because for most readers it is.
@@ -20,7 +29,10 @@ So: **the first sentence is not an opener, it is a product surface.** It is the 
 Two mechanical consequences:
 
 - **Dashes do not fail the build here.** `scripts/check-no-dashes.ts` scans `app`, `components` and `lib` only. Catalogue prose lives in the database and is never scanned. What happens instead is silent: `tidyText` (via `lib/queries.ts`) rewrites any em dash, en dash or spaced double hyphen to `", "` at render time. Your rhythm is quietly changed and you never find out. Write commas, colons, full stops and middots yourself.
-- **`description_curated_at` is the publish gate.** It is set only when a human has written the string to this standard. An empty or unapproved description leaves it `NULL` and no stranger ever sees prose for that venue. That column is the memory of the Gemini template rows. Do not set it to clear a queue.
+- 🧨 **`description_curated_at` does NOT currently mean "a human wrote this", and v1 of this document said it did.** ✅ Verified against `supabase/schema.sql:792-799`: a run-once migration mass-set it with
+  `update public.venues set description_curated_at = now() where long_description is not null and btrim(long_description) <> '' and btrim(long_description) !~* '^An independent [\s\S]*Opening hours can vary'`.
+  So today it means **"non-empty, and does not match one specific template regex"**. ✅ Verified in production 2026-08-07: **1,865 live venues carry the marker**, and none of them were written to this standard.
+  **What that means for you:** the column is NOT evidence that a description is curated, and must not be read as provenance until it is re-derived. **Going forward it is set by the writer, in the same change as the string, and never backfilled in bulk.** Correcting the 1,865 historic rows is a separate, tracked job and is not this document's to authorise.
 
 ---
 
@@ -52,21 +64,22 @@ And the line we do not cross: a guidebook describes the place, we place the plac
 
 **One paragraph. Always.** No line breaks, no lists, no headings. The renderer is a single `<p>`.
 
-**Two legal forms, and a banned gap between them.**
+**Two legal forms.**
 
 | Form | Size | When | Renders as |
 |---|---|---|---|
 | **Full** | 55 to 90 words, 3 to 5 sentences, 300 to 650 characters | Two or more concrete facts | Clamped to 3 lines, "Read more" reveals two real sentences |
 | **Short** | 1 to 2 sentences, **160 characters or fewer** | Exactly one concrete fact | Renders whole. No expander. Nothing is hidden and nothing is claimed to be |
-| **Banned** | 161 to 299 characters | never | "Read more" appears and pays out one line. The tap is a small lie |
 
 Hard ceiling 110 words. Past that we are writing an article and the clamp is hiding most of it.
 
+**v1 banned a 161-299 character band, on the grounds that "Read more" would appear and pay out only one line. That rule is DELETED** (agency-creative-director overrule, 2026-08-07). The reasoning was sound but the fix was aimed at the writer instead of the defect: the button's visibility is measured in **characters** (`> 160`) while the reveal is measured in **lines** (`line-clamp-3`), and those decouple by viewport, so no character threshold can be correct at both breakpoints. Editorial rule is binary: **short enough to render whole, or long enough to pay out a real reveal.** The character/line mismatch is routed to the venue-page owner in §10.
+
 **Never lengthen a description to trigger the "Continue reading · free" link.** Padding prose to manufacture a sign-up pull is the same crime as the Cross-checked badge, in a nicer jumper. The short form giving a stranger the complete text is the correct behaviour, not a leak to be patched with adjectives.
 
-**First sentence spec** (it is the SERP snippet):
+**First sentence spec** — applies to the **Full form only**. A Short form is shown whole (see §0.2), so it has no separate snippet to spec.
 
-- A complete sentence that ends between 60 and 159 characters. Shorter and the deriver falls back to a mid-phrase word cut. Longer and it never matches.
+- The snippet is the shortest run of **complete sentences** that lands between 61 and 160 characters. Aim for a first sentence that lands in that window on its own; if it is shorter, **sentence 2 will be pulled in with it**, so the two together must still read as a coherent snippet. (v1 claimed a short opener triggers a mid-phrase word cut. It does not — the regex is lazy. Correcting this matters because a writer following v1 would have padded sentence 1 for no reason.)
 - Carries the strongest decision-changing fact.
 - Does not begin with the venue name, the neighbourhood, the price tier or the type. All four already render as metadata directly above the paragraph, and in the page title.
 - Does not begin with "This restaurant", "This bar", "The place".
@@ -136,13 +149,19 @@ status: EMPTY (0 facts)
 
 The instruction must be specific enough to action in five minutes. "Needs more info" is not a marker. "Check the stored reviews for what sells out and when" is.
 
-### 4.4 The three buckets for the 64
+### 4.4 The three buckets for the 64 — MEASURED, not estimated
 
-Sorting the empty rows by this floor gives three different jobs, not one:
+v1 described these buckets without counting them, and was rejected for it: without a count, "sixty-four honest silences" is an alibi rather than a floor. ✅ Measured against production on 2026-08-07, over the 64 live venues with `long_description = ''`:
 
-- **Writable now.** One or more facts already sit in the stored reviews. Write short or full form.
-- **Cheap to unlock.** Category plus hours plus a clear shape, so the missing fact is findable and named. These get a specific `[NEEDS DETAIL]` and go to a research pass.
-- **No evidence at all.** No reviews, nothing but structured fields. These are not a writing problem, they are a catalogue problem: they need first-party evidence, and until they have it they are a candidate for de-prioritising rather than describing.
+| Bucket | Test | Count |
+|---|---|---|
+| **Writable now** | 3 or more stored reviews AND 600+ characters of review text | **63** |
+| **Cheap to unlock** | 1-2 reviews, or 3+ reviews but under 600 characters | **0** |
+| **No evidence at all** | zero stored reviews | **1** |
+
+**The floor does not block this work.** 63 of 64 carry enough stored evidence to attempt a description; only one is a catalogue problem rather than a writing one. The floor's job here is not to excuse silence, it is to decide *per venue* between the Full and Short forms, and to catch the small number of rows where the reviews turn out to be content-free on inspection.
+
+The buckets stay in the standard because the ratio will invert on the next injection: a venue published the week it opens has no reviews yet, and the honest state for it is empty.
 
 ---
 
@@ -216,16 +235,21 @@ Three checks that operationalise it:
 
 **Ships:**
 
-> Entry is free, so this is a museum you can walk into for one room and leave without feeling you have wasted a ticket. The paintings are half the reason to go, not a supporting act to the armour. It stays quieter than the headline collections, which makes it the low-commitment stop rather than the one you build a night around.
+> Entry is free, so a single room is a fair visit and nobody has wasted a ticket by leaving early. Paintings by world-renowned artists hang in the same house as the armour. It stays quieter than the headline collections, which makes it a low-commitment stop rather than the anchor of a night, and an easy one to fold into an afternoon.
 
-61 words, 3 sentences, one paragraph. First sentence is 117 characters, so the anon deriver takes it whole and the SERP snippet is a complete, useful thought. Total length is over 160, so "Read more" appears and pays out two further sentences.
+60 words, 3 sentences, one paragraph. First sentence is 96 characters, inside the 61-160 window, so it is the whole snippet on its own. Total length is over 160, so "Read more" appears and pays out two further sentences.
+
+**v1's version of this example was rejected**, and the reasons are the two traps this example now exists to demonstrate. It read *"a museum you can walk into"*, *"without feeling you have wasted a ticket"*, *"the one you build a night around"* — three second-person constructions, in the example 64 venues would be pattern-matched against, in a document whose §6 bans second-person voice. **The worked example is the standard that actually gets copied.** It also asserted *"The paintings are half the reason to go, not a supporting act to the armour"*, a comparative ranking that neither cited review supports. Hence the sufficiency rule below.
 
 **Ledger** (this ships in the PR body; a sentence without a ledger row does not ship):
 
 ```
 sentence 1 · free entry, low commitment  · reviews: "completely free to visit" (x2 stored)
-sentence 2 · paintings carry equal weight · reviews: "masterpieces by world-renowned artists",
+sentence 2 · paintings and armour coexist · reviews: "masterpieces by world-renowned artists",
                                              "Fascinating collection of arms and armour"
+             SUFFICIENCY: the reviews establish that BOTH exist. They do NOT rank them, so
+             no comparative ("half the reason", "as much as") may be written from them.
+             A ledger row must support the CLAIM, not merely mention the subject.
 sentence 3 · quieter than headline museums · reviews: "Not overcrowded compared to many
                                              London attractions" (aggregate, 3 stored)
 unwritten · café: opening hours, and whether it seats without booking
@@ -271,7 +295,9 @@ long_description        = ''      (unchanged)
 description_curated_at  = NULL    (unchanged)
 ```
 
-**What the user sees.** Signed in: photos, the eyebrow, the name, rating, tags, hours, reviews, map, booking route, and **no description band at all**. Signed out: `deriveAnonTeaser('')` returns `null`, so no teaser block and no "Continue reading" link. There is no placeholder, no "Description coming soon" and no apology.
+**What the user sees.** Signed in: photos, the eyebrow, the name, rating, tags, hours, reviews, map, booking route, and **no description band at all** — ✅ verified at `app/venue/[slug]/venue-detail.tsx:546`, gated on `signedIn && venue.longDescription.trim() !== ""`. ⚠️ v1 asserted this before it was true: until PR #237 the guard checked `signedIn` alone and every one of these 64 rows rendered an empty `<p>` plus a dead `mt-5` margin. The rule was right; the fact was not checked. Do not restate a rendering claim in this document without opening the file. Signed out: `deriveAnonTeaser('')` returns `null`, so no teaser block and no "Continue reading" link. There is no placeholder, no "Description coming soon" and no apology.
+
+⚠️ **The silence is not total, and this is worth knowing.** `app/venue/[slug]/venue-page-shared.tsx` still emits a generic `<meta name="description">` for a venue with no teaser — it is the one surface where an empty row is not silent. It previously promised *"book a table"* for every venue type including museums and parks, which was a capability claim the product cannot make; that was corrected in PR #237 to a line true of every venue page. It remains a shared, generic string, and is the SEO owner's to bless.
 
 That is a deliberate copy call. Every state ships with words, but a state is a **surface**, not a field. An empty screen owes the reader an explanation. An empty band inside a page that is otherwise full of true, useful content owes them silence. "We have not written this one yet" promises a delivery date we cannot keep, on 64 pages, and draws a ring around the one thing we lack.
 
