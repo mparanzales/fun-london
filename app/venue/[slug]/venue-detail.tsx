@@ -537,7 +537,13 @@ export function VenueDetail({
             blanked by mapVenuePreview, so rendering this unconditionally emitted
             an empty <p> + dead margin — the "empty band" on the mobile anon
             reveal. The anon teaser block above is the anon description. */}
-        {signedIn && (
+        {/* 2026-08-07: this guard checked ONLY `signedIn`, so the 64 venues
+            with an empty long_description rendered to signed-in users exactly
+            the empty <p> + dead margin the comment above describes fixing for
+            anon. An empty description is a legitimate, shippable state (see
+            docs/FUNLDN_EDITORIAL_VENUE_LONG_DESCRIPTION.md: an honest silence
+            beats prose we cannot stand behind), so the band must not render. */}
+        {signedIn && venue.longDescription.trim() !== "" && (
           <div className="mt-5">
             <p
               className={
