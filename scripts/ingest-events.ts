@@ -38,6 +38,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { EVENT_SUBSCRIPTIONS, type EventSubscription } from "./events-seed";
 import { tmCategory } from "./event-category";
 import { repairMojibake, hasControlChars } from "@/lib/text";
+import { storedUrlOrNull } from "@/lib/safe-url";
 
 // Provider text is not trustworthy. Ticketmaster's Discovery API served an
 // event title containing the unprintable characters U+0080 and U+0093 where an
@@ -265,7 +266,7 @@ function selectBalanced(
 
 type FetchedEvent = {
   source_id: string; // provider's unique id
-  source_url: string; // ticket page
+  source_url: string | null; // ticket page, or null when the provider has none
   name: string;
   starts_at: string; // ISO timestamptz
   // ISO timestamptz of the run's end, or null when the provider doesn't say.
@@ -435,7 +436,7 @@ function ebToFetched(
 
   return {
     source_id: e.id,
-    source_url: e.url ?? "",
+    source_url: storedUrlOrNull(e.url),
     name,
     starts_at: startUtc,
     // Eventbrite always carries the run's end; without it a multi-day
@@ -679,7 +680,7 @@ function tmToFetched(e: TicketmasterEvent): FetchedEvent | null {
 
   return {
     source_id: e.id,
-    source_url: e.url ?? "",
+    source_url: storedUrlOrNull(e.url),
     name: clean(e.name, "ticketmaster", e.id, "name"),
     starts_at: startsAt,
     ends_at: endsAt,
@@ -859,7 +860,7 @@ async function processSubscription(sub: EventSubscription): Promise<{
       img_url: img,
       source: sub.source,
       source_id: e.source_id,
-      source_url: e.source_url,
+      source_url: storedUrlOrNull(e.source_url),
       description: e.description,
       last_synced_at: nowIso,
       sold_out: e.sold_out,
@@ -1022,7 +1023,7 @@ async function processLondonDiscovery(excludeSourceIds: Set<string>): Promise<{
     img_url: e.img_url,
     source: "ticketmaster",
     source_id: e.source_id,
-    source_url: e.source_url,
+    source_url: storedUrlOrNull(e.source_url),
     description: e.description,
     last_synced_at: nowIso,
     sold_out: e.sold_out,

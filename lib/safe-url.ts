@@ -47,6 +47,102 @@ export function parseExternalUrl(raw: string | null | undefined): URL | null {
   return u;
 }
 
+// WRITE-side guard: the value to STORE in a url column, or null.
+//
+// The sink guards below decide what may reach an href. This decides what may
+// reach the database in the first place, and it exists because six live rows
+// carry a non-URL in `events.source_url`: five "N/A" and one "Not available",
+// all written 4-5 June by the Gemini-era pop-up generator (removed 2026-07-11),
+// which emitted a model's idea of "no value" as a string. `scripts/ingest-
+// events.ts` had its own version of the same bug, storing `e.url ?? ""`.
+//
+// Nothing downstream was broken by this: parseExternalUrl refuses all three, so
+// no bad href ever rendered and the .ics correctly omits its URL property. The
+// hazard is that the column is NULLABLE and these are truthy, so the ordinary
+// way to read it -- `event.sourceUrl ? ... : ...` -- treats "N/A" as a real
+// ticket link. A sentinel in a nullable column is a trap set for the next
+// person, not a bug in the current code.
+//
+// 🧨 An ALLOWLIST, not a list of known sentinels. Matching "N/A"/"Not
+// available"/"" is one model, one provider or one intern away from being wrong
+// ("none", "TBC", "-", "unknown"), and the repo has already paid for a denylist
+// twice. Anything that is not a parseable http(s) URL is not a URL, whatever it
+// spells.
+//
+// Returns the caller's ORIGINAL string, deliberately not the parsed
+// serialisation: this runs on every sync, and emitting `u.toString()` would
+// silently rewrite thousands of stored URLs (trailing slashes, percent-encoding,
+// host case) on the next cron run. Validate without normalising.
+// 🧨 Control characters are checked on the RAW string, BEFORE parsing, for the
+// same reason lib/ics.ts does it (PR #231): the WHATWG parser does not reject
+// CR, LF or TAB, it DELETES them. So "https://exa<CR>mple.com" parses happily,
+// and returning the original would store a value that no consumer resolves to,
+// while returning the parsed form would store a host the provider never sent.
+// Neither is acceptable, so it is refused. Verified against production: 0 of
+// the 67 rows with a source_url carry a control character, so this closes the
+// door rather than changing any live value.
+// C0, DEL and C1 -- exactly what Postgres's [[:cntrl:]] matches, so the
+// migration's predicate cannot null a row this helper would have kept.
+//
+// MEASURED, not assumed, against the production database (datctype
+// en_US.UTF-8): [[:cntrl:]] matched TAB, U+001F, DEL, U+0080 and U+009F, and
+// did NOT match NBSP, U+2028, U+2029, U+200B, U+FEFF, U+202E or U+3000. The
+// class is therefore identical to the range below. Re-measure if the database
+// collation ever changes. Ticketmaster has already served this repo raw
+// U+0080/U+0093 (see lib/text.ts), so C1 in a provider field is not academic.
+const CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/;
+
+// A scheme-and-authority shape. The SQL predicate in migration 0007 is the same
+// shape test, so the two definitions agree on the floor and this helper is
+// strictly stricter above it.
+const HTTP_PREFIX = /^https?:\/\//i;
+
+// userinfo, which parseExternalUrl deliberately STRIPS.
+const HAS_USERINFO = /^https?:\/\/[^/?#]*@/i;
+
+export function storedUrlOrNull(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+
+  // 🧨 The checks below refuse the inputs where the parser would silently
+  // REPAIR the value, so that returning the caller's original bytes is safe.
+  //
+  // Stated precisely, because the next reader will rely on it: what this
+  // enforces is no padding, no control characters, no userinfo, and
+  // scheme-first. It is NOT full byte-faithfulness. A raw space, a backslash,
+  // a percent-encoded or non-ASCII host still parse to something that differs
+  // from the stored bytes. None of those can change the HOST to anything that
+  // is not already leading the string -- which is what would matter -- because
+  // userinfo is refused outright. Same reasoning as lib/ics.ts (PR #231).
+
+  // Padding: the parser strips leading/trailing C0-or-space before validating,
+  // so "  https://x.com" parses fine and would be stored WITH the spaces.
+  //
+  // trim() is deliberately WIDER than the parser's strip set (it also removes
+  // NBSP, U+FEFF and the Unicode spaces, which the parser keeps and
+  // percent-encodes). Wider is the safe direction here: it refuses a padded
+  // URL rather than storing bytes that render differently everywhere. Note the
+  // narrow direction is covered by CONTROL_CHARS, not by this line -- C0 that
+  // trim() ignores is caught below, so the two checks are load-bearing
+  // together.
+  if (raw !== raw.trim()) return null;
+
+  // CR/LF/TAB and friends: deleted by the parser, not rejected.
+  if (CONTROL_CHARS.test(raw)) return null;
+
+  // Anything not literally scheme-first. Keeps the stored bytes inside the
+  // shape the migration's predicate tests for, so "stored implies starts with
+  // http(s)://" is a real invariant rather than an assumption.
+  if (!HTTP_PREFIX.test(raw)) return null;
+
+  // userinfo is the phishing disguise: "https://ticketmaster.co.uk@evil.com/x"
+  // reads as ticketmaster to a person and resolves to evil.com. parseExternalUrl
+  // strips it, so returning the original would store the disguise intact and
+  // hand it to applyAffiliate, which stamps our UTM parameters onto it.
+  if (HAS_USERINFO.test(raw)) return null;
+
+  return parseExternalUrl(raw) === null ? null : raw;
+}
+
 // Sink guard: the value to put in an href, or null to render no link at all.
 // Callers must treat null as "drop the anchor" rather than falling back to the
 // raw string, which is the whole point. No link beats a live sink.
