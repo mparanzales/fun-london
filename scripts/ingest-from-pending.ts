@@ -60,6 +60,11 @@ import {
   hasMajorBookingPlatform,
 } from "./booking-platform";
 import { areaFromPostcode } from "@/lib/postcode-areas";
+import {
+  classifyFromGoogle,
+  refineTimeOfDay,
+  type Classification,
+} from "@/lib/google-place-types";
 import { embedAndUpsertVenue } from "./venue-embedding";
 import { mapGoogleReviews, fetchPlaceReviews } from "./google-reviews";
 
@@ -182,6 +187,9 @@ type PlaceDetails = {
   reservable?: boolean;
   businessStatus?: string;
   regularOpeningHours?: GoogleOpeningHours;
+  // Google's single best category for the business ("book_store", "wine_bar").
+  // This is what decides `type` now — see lib/google-place-types.ts.
+  primaryType?: string;
 };
 
 // ── Google Places ────────────────────────────────────────────────────────────
@@ -222,6 +230,10 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
     "internationalPhoneNumber",
     "priceLevel",
     "types",
+    // Pro-tier field, but this call already requests Enterprise fields
+    // (rating/website/hours), and a request bills at its HIGHEST tier — so
+    // adding primaryType costs nothing extra here.
+    "primaryType",
     "reservable",
     "businessStatus",
     "regularOpeningHours",
@@ -440,18 +452,16 @@ function deriveVibeTags(candidate: Candidate): string[] {
 // Canonical tags for a venue: derived from its raw tags, with a type/mood
 // baseline fallback so a tag-less venue is never invisible to the recommender
 // (mirrors the floor in scripts/backfill-canonical-tags.ts).
-function canonicalForCandidate(candidate: Candidate, details: PlaceDetails) {
+function canonicalForCandidate(candidate: Candidate, cls: Classification) {
   const fromTags = rawTagsToCanonical(deriveVibeTags(candidate));
   if (fromTags.length > 0) return fromTags;
-  return fallbackCanonicalTags(
-    mapVenueType(candidate, details.types),
-    deriveMoodTags(candidate),
-  );
+  return fallbackCanonicalTags(cls.type, cls.moods);
 }
 
 function buildVenueRow(
   candidate: Candidate,
   details: PlaceDetails,
+  cls: Classification,
   imgUrl: string,
   slug: string,
   photoUrls: string[],
@@ -465,7 +475,7 @@ function buildVenueRow(
   return {
     slug,
     name: details.displayName.text,
-    type: mapVenueType(candidate, details.types),
+    type: cls.type,
     // Publish the drafts the reviewer actually approved (discover-venues
     // writes claim-free templated vibe_draft / long_description_draft /
     // real_talk_drafts). Legacy candidates without drafts keep the old
@@ -493,7 +503,14 @@ function buildVenueRow(
     // gallery/park is "Day"); bulk-loaded candidates carry a locally-
     // classified one (2026-08-02); only legacy candidates fall back to
     // "Evening".
-    time_of_day: discover?.time_of_day ?? source?.time_of_day ?? "Evening",
+    // Google's category decides the daypart, then the venue's REAL hours
+    // refine it (a salt-beef counter trading 07:00-16:00 is a Day spot even
+    // though its type says Restaurant). The old chain defaulted to "Evening"
+    // for anything unrecognised, which is how a bookshop became a dinner stop.
+    time_of_day: refineTimeOfDay(
+      cls.timeOfDay,
+      details.regularOpeningHours?.periods,
+    ),
     rating: details.rating ?? 4.0,
     review_count: details.userRatingCount ?? 0,
     walking_mins: 12,
@@ -502,12 +519,12 @@ function buildVenueRow(
     img_url: imgUrl,
     photo_urls: photoUrls,
     curation_tier: "discovered",
-    mood_tags: deriveMoodTags(candidate),
+    mood_tags: cls.moods,
     vibe_tags: deriveVibeTags(candidate),
     // Canonical, shared-vocabulary version of the tags (for recommender +
     // search). Stamped with TAG_VERSION so backfill-canonical-tags.ts can
     // re-sync rows when the vocabulary changes.
-    canonical_tags: canonicalForCandidate(candidate, details),
+    canonical_tags: canonicalForCandidate(candidate, cls),
     canonical_tags_version: TAG_VERSION,
     google_place_id: details.id,
     booking_links: bookingLinks,
@@ -532,7 +549,11 @@ function sourceLabel(candidate: Candidate): string {
   return src ? `${src} import` : "unknown source";
 }
 
-function buildProspectRow(candidate: Candidate, details: PlaceDetails) {
+function buildProspectRow(
+  candidate: Candidate,
+  details: PlaceDetails,
+  cls: Classification,
+) {
   const bookingLinks = detectBookingLinks(details.websiteUri);
   const bookingMethod =
     bookingLinks.length === 0
@@ -544,7 +565,7 @@ function buildProspectRow(candidate: Candidate, details: PlaceDetails) {
   return {
     name: details.displayName.text,
     google_place_id: details.id,
-    type: mapVenueType(candidate, details.types),
+    type: cls.type,
     // Neighbourhood comes from the venue's real Google postcode (validated),
     // not the unreliable import — falls back to the import only when there's
     // no usable postcode. See lib/postcode-areas.ts.
@@ -713,6 +734,45 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
     `  rating: ${details.rating ?? "n/a"} · reviews: ${details.userRatingCount ?? 0} · status: ${details.businessStatus ?? "?"}`,
   );
 
+  // ── Classification gate ────────────────────────────────────────────────────
+  // Google's own category decides what this place IS. If it is not on the
+  // publishable allowlist (a shop, a takeaway, a place of worship, an unknown
+  // category), we do NOT guess — the candidate goes to human review. This is
+  // the gate that makes published types trustworthy: before it existed, an
+  // unrecognised place silently became a Restaurant / Evening / dinner and
+  // entered the night planner's dinner pool (Osterley Bookshop, Burlington
+  // Arcade, The London Dungeon — all live, all wrong, 2026-08-05/06).
+  const classified = classifyFromGoogle(details.primaryType, details.types);
+  if (!classified.ok) {
+    console.log(
+      `  ⏸ needs review — not a publishable category: ${classified.reason}`,
+    );
+    if (!DRY_RUN && supabase) {
+      await drainCandidate(candidate.id, {
+        status: "needs_review",
+        reviewed_at: new Date().toISOString(),
+        reviewed_notes: `Category gate: ${classified.reason}`,
+        filter_results: {
+          gate: "category",
+          reason: classified.reason,
+          matched_name: details.displayName.text,
+          matched_address: details.formattedAddress,
+          google_primary_type: details.primaryType ?? null,
+          google_types: details.types ?? [],
+          rating: details.rating ?? null,
+          reviews: details.userRatingCount ?? 0,
+          business_status: details.businessStatus ?? null,
+          website: details.websiteUri ?? null,
+        },
+      });
+    }
+    return { status: "needs_review" as const };
+  }
+  const cls: Classification = classified.classification;
+  console.log(
+    `  ▸ ${cls.type} · ${cls.timeOfDay} (Google: ${cls.matchedGoogleType})`,
+  );
+
   // ── Quality gate: auto-publish only confident matches; quarantine the rest ──
   const gate = qualityCheck(details);
   if (!gate.ok) {
@@ -787,7 +847,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
       : null;
 
   const venueRow = {
-    ...buildVenueRow(candidate, details, imgUrl, slug, photoUrls),
+    ...buildVenueRow(candidate, details, cls, imgUrl, slug, photoUrls),
     map_url: mapUrl,
   };
   const { data: published, error: venueErr } = await supabase
@@ -839,7 +899,7 @@ async function processCandidate(candidate: Candidate, usedSlugs: Set<string>) {
   }
 
   if (!hasMajor) {
-    const prospectRow = buildProspectRow(candidate, details);
+    const prospectRow = buildProspectRow(candidate, details, cls);
     const { error: prospectErr } = await supabase
       .from("partner_prospects")
       .upsert(prospectRow, { onConflict: "google_place_id" });

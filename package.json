@@ -23,6 +23,8 @@
     "ingest-events": "tsx scripts/ingest-events.ts",
     "ingest:from-pending:dry": "tsx scripts/ingest-from-pending.ts --dry-run",
     "ingest:from-pending": "tsx scripts/ingest-from-pending.ts",
+    "reclassify:dry": "tsx scripts/reclassify-venues.ts --dry-run",
+    "reclassify": "tsx scripts/reclassify-venues.ts",
     "load-candidates:dry": "tsx scripts/load-bulk-candidates.ts --dry-run",
     "load-candidates": "tsx scripts/load-bulk-candidates.ts",
     "backfill:tags:dry": "tsx scripts/backfill-canonical-tags.ts --dry-run",
