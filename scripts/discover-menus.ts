@@ -17,6 +17,7 @@ dotenv.config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
 import { findMenuUrl } from "@/lib/menu-extract";
+import { isBlockedUrlError, safeFetch } from "./safe-fetch";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const MAX = Number(process.env.MENU_MAX ?? "0") || Infinity;
@@ -61,14 +62,16 @@ function isSocialOnlySite(url: string | null | undefined): boolean {
   return SOCIAL_ONLY_HOSTS.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
+// url is venues.website_url — catalogue data, so it is attacker-influenced and
+// this scraper is the thing that goes and gets it. safeFetch keeps it on a
+// public http(s) address and re-checks every redirect hop.
 async function fetchPage(
   url: string,
 ): Promise<{ html: string; finalUrl: string } | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         headers: { "user-agent": UA, accept: "text/html,*/*" },
-        redirect: "follow",
         signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) return null;
@@ -76,7 +79,13 @@ async function fetchPage(
       if (!ct.includes("text/html") && !ct.includes("xml")) return null;
       const html = (await res.text()).slice(0, 600000);
       return { html, finalUrl: res.url || url };
-    } catch {
+    } catch (err) {
+      // A guard refusal is a property of the stored URL, not a hiccup —
+      // retrying it just makes the same refusal twice.
+      if (isBlockedUrlError(err)) {
+        console.error(`  ⚠ refusing to scrape ${url}: ${err.message}`);
+        return null;
+      }
       if (attempt === 0) await sleep(500); // one retry on a transient error
     }
   }
