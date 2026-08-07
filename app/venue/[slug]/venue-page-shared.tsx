@@ -28,9 +28,16 @@ export async function buildVenueMetadata(slug: string): Promise<Metadata> {
   // The SAME capped teaser string the anon page renders — one string, one
   // exposure decision (SERP snippet always matches the page).
   const { teaser } = await fetchAnonVenueTeaser(slug);
+  // 🧨 The fallback used to promise "book a table" for EVERY venue with no
+  // teaser, museums, galleries and parks included, and this string is the meta
+  // description Google indexes plus the preview on every shared link. That is
+  // a capability claim the product cannot make for those types, published to
+  // search: the same class of error as the Cross-checked badge. It now
+  // describes only what every venue page actually has. (All 64 venues with an
+  // empty long_description hit this branch, so it was not a rare edge case.)
   const description =
     teaser?.text ||
-    `${venue.name} in ${venue.neighbourhood}, London. Plan your night and book a table on Fun London.`;
+    `${venue.name} in ${venue.neighbourhood}, London. Hours, photos and where it fits in your night, on Fun London.`;
   const url = `${SITE_URL}/venue/${venue.slug}`;
   // Explicit OG image: the opengraph-image.tsx file convention only wires
   // itself on THIS folder's route; the /anon twin needs the image named
