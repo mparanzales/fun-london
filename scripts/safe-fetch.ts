@@ -1,13 +1,30 @@
 // Keep catalogue-sourced URLs from reaching a SERVER-SIDE fetch as anything
 // but a public web address.
 //
-// lib/safe-url.ts (PR #228) is the browser-side half of this rule: it keeps
-// catalogue URLs out of hrefs, where the danger is the user's own tap in the
-// funldn.com origin. This is the server-side half, where the danger is
-// different in kind: our process sits inside the machine, so a stored URL
-// pointed at 127.0.0.1 or 169.254.169.254 makes US the attacker's HTTP client
-// against our own loopback and our own cloud metadata service — with whatever
-// the runtime already trusts us to reach.
+// There are now THREE guards on a catalogue URL, at three different moments,
+// and they are not substitutes for one another:
+//
+//   storedUrlOrNull   (lib/safe-url.ts, #232)  WRITE — what may enter a column
+//   safeExternalHref  (lib/safe-url.ts, #228)  RENDER — what may reach an href
+//   safeFetch         (this file)              FETCH — where WE may connect
+//
+// This is the third. The danger here is different in kind from the other two:
+// our process sits inside the machine, so a stored URL pointed at 127.0.0.1 or
+// 169.254.169.254 makes US the attacker's HTTP client against our own loopback
+// and our own cloud metadata service — with whatever the runtime already
+// trusts us to reach.
+//
+// 🧨 The write-side guard does NOT make this one redundant, for two reasons
+// worth stating because the overlap invites exactly that conclusion. First,
+// coverage: storedUrlOrNull is applied to `events.source_url` in
+// ingest-events.ts and nowhere else — venues.img_url, venues.website_url,
+// editorial_sources[].url and creator_coverage[].url all still arrive
+// unvalidated, from crons and from bulk CSV import. Second, and permanent even
+// if that coverage were complete: a write-side check can only judge the string
+// it was handed. It cannot know that a perfectly ordinary public URL answers
+// 302 Location: http://169.254.169.254/, or that a hostname resolves to a
+// private address. Only the thing making the request can check that, which is
+// why the redirect and DNS checks below live here and not there.
 //
 // The scheme rule is NOT re-decided here. parseExternalUrl is imported so
 // there is exactly one definition of "a real web URL" in the codebase, and so

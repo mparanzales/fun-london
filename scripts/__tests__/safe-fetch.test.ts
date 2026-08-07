@@ -643,6 +643,15 @@ const REVIEWED_FIXED_ORIGIN_FETCHES: [string, string][] = [
     "posthog-revoked-check.ts",
     "`${API_HOST}/api/users/@me/`, { headers: { Aut",
   ],
+  // Added 2026-08-07: #235 landed reclassify-venues.ts on main, and this
+  // tripwire duly went red on the rebase — which is the whole reason it
+  // exists. Classified by READING it, not by regenerating the list: the origin
+  // is the literal "https://places.googleapis.com", and google_place_id is
+  // interpolated after a "/" that has already terminated the authority, so it
+  // can only steer the path. Regenerating a list without reading what changed
+  // is exactly how a real sink gets laundered into something that then looks
+  // reviewed.
+  ["reclassify-venues.ts", "`https://places.googleapis.com/v1/places/${pla"],
   ["refresh-venues.ts", '`${PLACES_BASE}/${placeId}`, { method: "GET", '],
   ["revalidate-venues.ts", '`${PLACES_BASE}/${placeId}`, { headers: { "X-G'],
   ["send-weekly-digest.ts", '"https://api.resend.com/emails", { method: "PO'],
