@@ -261,6 +261,20 @@ unwritten · closing time
 
 Note what did **not** get written despite rich evidence: the café's usefulness (we know it exists and is covered, we do not know if you can sit at six), and anything about timing (we have not checked the hours field). "Excellent" is the reviewer's adjective and never ours. The strongest available sentence stayed unwritten because the check was not done. That is the standard working, not the standard failing.
 
+### (a2) The shipped reference set · five more shapes
+
+§8(a) warns in its own words that **"the worked example is the standard that actually gets copied"**, and on the first real batch that happened inside a single sitting: five of six drafts arrived carrying (a)'s cadence, all built on `[fact] + so/which + [planning implication]` with a "rather than" contrast close. The gate rewrote them apart. One example is not enough to write 64 rows against, so the first approved batch is now part of the standard, chosen because their engines differ:
+
+| Venue | Opening move | Why it is a different shape |
+|---|---|---|
+| **Cittie of Yorke** | names the thing in the glass first | no causal connective at all; the role emerges from a party size |
+| **Dirty Dicks** | splits the building in two | spatial, not causal; the close reframes the blurb's fact as a *slot* rather than a dish |
+| **The London Dungeon** | leads on the deal-breaker | the age warning sits inside the snippet, per §3 |
+| **The Mayflower** | leads on the physical thing you came for | friction ("usually busy") folded into the first sentence, not appended |
+| **The Sherlock Holmes Museum** | leads on the process, not the exhibit | two queues as the fact; the role arrives as a consequence of duration |
+
+Read all six before writing. If a draft's closing clause could be swapped with (a)'s and nobody would notice, it has caught the cadence and needs restructuring, not rewording.
+
 ### (b) Thin evidence · category plus hours only
 
 **Evidence held:** Google category `cafe`. Opening hours 07:00 to 16:00. Nothing else. No stored reviews with content, no verified note.
@@ -323,7 +337,8 @@ status: EMPTY (no evidence of any kind)
 ## 9. Enforcement
 
 - **Every description ships with a ledger**, sentence to evidence, in the PR body. A sentence with no ledger row does not ship. This is the mechanism that stops the next Gemini, because it makes the absence of evidence visible instead of invisible.
-- **curation-voice is the per-string gate.** It checks the banned lists, the two forms and the 161-to-299-character gap, the first-sentence spec, and that no two venues share a structure. It does not have to invent the spec any more, which was its stated objection.
+- **curation-voice is the per-string gate.** It checks the banned lists, the two forms, the first-sentence spec, the ledger's sufficiency, and that no two venues share a structure. It does not have to invent the spec any more, which was its stated objection.
+  (⚠️ v2.0 of this file left "the 161-to-299-character gap" in this line after §2 had deleted that rule, so the gate was being told to enforce something the standard no longer contained. Caught by the gate itself on the first real batch. Removed in v2.1.)
 - **CI does not cover this field.** `pnpm check` scans `app`, `components` and `lib` only. Catalogue prose is database content. Until a database lint exists, the human gate is the only gate. Say that out loud rather than trusting a green tick.
 - **`description_curated_at` is set by the writer, in the same change as the string.** Never backfilled in bulk, never set to clear a queue.
 
