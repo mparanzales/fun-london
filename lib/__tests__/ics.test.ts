@@ -10,7 +10,7 @@
 // break, so "Rooftop\rBEGIN:VEVENT..." in an event name wrote a second event
 // into the calendar of whoever tapped "Add to calendar".
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -18,7 +18,9 @@ import { buildIcs, icsDataUrl, icsUri } from "@/lib/ics";
 import { applyAffiliate } from "@/lib/affiliate";
 import {
   ticketUrlForIcs,
+  ticketLinkForIcs,
   icsTicketDescription,
+  icsInputForEvent,
   ICS_SURFACE,
 } from "@/lib/ics-ticket-url";
 
@@ -644,7 +646,11 @@ describe("ticketUrlForIcs: validate, then attribute", () => {
   // attribution cannot answer the question it was added to answer.
   it("marks the surface, so a calendar click is distinguishable", () => {
     const out = ticketUrlForIcs({ sourceUrl: REAL, isPopup: false })!;
-    expect(out).toContain(`utm_content=${ICS_SURFACE}`);
+    // The LITERAL, not the imported constant: asserting against ICS_SURFACE
+    // moves with it, so renaming it to "reserve" (which collides with
+    // utm_campaign=reserve and re-muddles the report) would stay green.
+    expect(out).toContain("utm_content=calendar");
+    expect(ICS_SURFACE).toBe("calendar");
     // And the CTA's own output deliberately does NOT carry it.
     expect(applyAffiliate("ticketmaster", REAL)).not.toContain("utm_content");
   });
@@ -750,7 +756,39 @@ describe("the .ics built from an attributed link", () => {
 
 // The component must be WIRED to the helper. A test that calls the helper
 // proves the helper; only this proves the caller uses it.
-describe("structure: event-actions.tsx delegates to ticketUrlForIcs", () => {
+describe("icsInputForEvent: the whole calendar entry, by calling it", () => {
+  const EV = {
+    id: "3f1c2b8e-0f6a-4a2b-9a1e-7c5d2f0b1a33",
+    name: "Childish Gambino",
+    venueName: "Jazz Cafe",
+    area: "Camden",
+    startsAt: "2026-09-12T19:30:00.000Z",
+    sourceUrl: "https://www.ticketmaster.co.uk/event/X",
+    isPopup: false,
+  } as unknown as Parameters<typeof icsInputForEvent>[0];
+
+  it("puts the attributed link in BOTH url and description", () => {
+    const input = icsInputForEvent(EV);
+    expect(input.url).toContain("utm_content=calendar");
+    expect(input.description).toContain("utm_content=calendar");
+    expect(input.description).toContain("Saved from Fun London.");
+  });
+
+  it("omits both when there is no usable link, and invents nothing", () => {
+    const input = icsInputForEvent({ ...EV, sourceUrl: null } as typeof EV);
+    expect(input.url).toBeUndefined();
+    expect(input.description).toBeUndefined();
+  });
+
+  it("still carries the fields that do not depend on the link", () => {
+    const input = icsInputForEvent(EV);
+    expect(input.title).toBe("Childish Gambino");
+    expect(input.location).toBe("Jazz Cafe, Camden, London");
+    expect(input.startsAt).toBe("2026-09-12T19:30:00.000Z");
+  });
+});
+
+describe("structure: event-actions.tsx delegates the whole entry", () => {
   const SRC = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -761,36 +799,24 @@ describe("structure: event-actions.tsx delegates to ticketUrlForIcs", () => {
     ),
     "utf8",
   )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n")
     .map((l) => l.replace(/\s*\/\/.*$/, ""))
     .join("\n");
 
-  it("builds its ticket url through the helper", () => {
-    expect(SRC).toMatch(/ticketUrlForIcs\(\s*event\s*\)/);
+  it("builds the entry through icsInputForEvent", () => {
+    expect(SRC).toMatch(/icsDataUrl\(\s*icsInputForEvent\(\s*event\s*\)\s*\)/);
   });
 
-  it("does not read event.sourceUrl itself", () => {
-    // Any direct read here is a second, unguarded pipeline.
-    expect(SRC).not.toMatch(/event\.sourceUrl/);
-  });
-
-  it("does not call applyAffiliate or icsUri directly", () => {
-    expect(SRC).not.toContain("applyAffiliate");
-    expect(SRC).not.toContain("icsUri");
-  });
-
-  // 🧨 DESCRIPTION is half the point of this PR: calendar clients linkify it,
-  // and a great many people click the text rather than the URL property. With
-  // only behavioural tests that build their own buildIcs call, dropping the
-  // description here ships a tagged URL beside an untagged (or absent) body,
-  // and everything stays green.
-  it("feeds the attributed url into BOTH url and description", () => {
-    expect(SRC).toMatch(/url:\s*ticketUrl\s*\?\?\s*undefined/);
-    // Not [^:]* -- the template literal contains "Tickets:" and the colon
-    // would stop the match, which is how this pin failed on its first draft.
-    expect(SRC).toMatch(
-      /description:\s*ticketUrl\s*\?[\s\S]*?icsTicketDescription\(\s*ticketUrl/,
-    );
+  it("holds no pipeline of its own", () => {
+    for (const forbidden of [
+      "event.sourceUrl",
+      "applyAffiliate",
+      "icsUri",
+      "Tickets:",
+    ]) {
+      expect(SRC).not.toContain(forbidden);
+    }
   });
 });
 
@@ -802,34 +828,81 @@ describe("structure: event-actions.tsx delegates to ticketUrlForIcs", () => {
 // what makes that impossible to get wrong.
 describe("icsTicketDescription", () => {
   const URL_ = "https://www.ticketmaster.co.uk/event/X?utm_source=funlondon";
+  const attributed = {
+    url: URL_,
+    attributed: true,
+    label: "Tickets" as const,
+  };
+  const unattributed = {
+    url: URL_,
+    attributed: false,
+    label: "Official page" as const,
+  };
 
   it("names the sender, which the URL alone never does", () => {
-    expect(icsTicketDescription(URL_)).toContain("Saved from Fun London.");
+    expect(icsTicketDescription(attributed)!).toContain(
+      "Saved from Fun London.",
+    );
   });
 
   it("keeps the link on its own line", () => {
-    const out = icsTicketDescription(URL_);
+    const out = icsTicketDescription(attributed)!;
     expect(out.split("\n")[0]).toBe(`Tickets: ${URL_}`);
+  });
+
+  // 🧨 In afterEach, not inline: a FAILING assertion would otherwise leak
+  // NEXT_PUBLIC_AFFILIATE_TICKETMASTER into every later test in this worker,
+  // where it silently starts appending awc= to the byte-identity assertions.
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("claims NO commission while no affiliate id is configured", () => {
     vi.stubEnv("NEXT_PUBLIC_AFFILIATE_TICKETMASTER", "");
-    expect(icsTicketDescription(URL_)).not.toContain("commission");
-    vi.unstubAllEnvs();
+    expect(icsTicketDescription(attributed)!).not.toContain("commission");
   });
 
   it("discloses the commission as soon as an id IS configured", () => {
     vi.stubEnv("NEXT_PUBLIC_AFFILIATE_TICKETMASTER", "some-awin-id");
-    expect(icsTicketDescription(URL_)).toContain(
+    expect(icsTicketDescription(attributed)!).toContain(
       "We may earn a commission from this link.",
     );
-    vi.unstubAllEnvs();
+  });
+
+  // 🧨 THE BLOCKER. A pop-up is deliberately exempt from attribution, so its
+  // link carries no id and no utm parameters. Gating the sentence on the env
+  // var ALONE would have shipped "We may earn a commission from this link."
+  // onto an organiser's own page -- a false claim, frozen on the device of
+  // everyone who had already saved it.
+  it("never claims a commission on a link it did not attribute", () => {
+    vi.stubEnv("NEXT_PUBLIC_AFFILIATE_TICKETMASTER", "some-awin-id");
+    expect(icsTicketDescription(unattributed)!).not.toContain("commission");
+    expect(icsTicketDescription(unattributed)!).toContain(
+      "Saved from Fun London.",
+    );
+  });
+
+  // End to end through the real pipeline, so the exemption cannot be lost
+  // between ticketLinkForIcs and the sentence.
+  it("a pop-up event's .ics discloses nothing, even with an id set", () => {
+    vi.stubEnv("NEXT_PUBLIC_AFFILIATE_TICKETMASTER", "some-awin-id");
+    const popup = {
+      sourceUrl: "https://organiser.example.com/our-popup",
+      isPopup: true,
+    };
+    const desc = icsTicketDescription(ticketLinkForIcs(popup))!;
+    expect(desc).not.toContain("commission");
+    expect(desc).not.toContain("utm_");
+  });
+
+  it("returns undefined when there is no ticket link at all", () => {
+    expect(icsTicketDescription(null)).toBeUndefined();
   });
 
   it("promises nothing that can go stale", () => {
     // No price, no line-up, no availability: the app can correct those, a file
     // on someone's phone cannot.
-    const out = icsTicketDescription(URL_).toLowerCase();
+    const out = icsTicketDescription(attributed)!.toLowerCase();
     for (const stale of [
       "£",
       "sold out",
@@ -846,11 +919,81 @@ describe("icsTicketDescription", () => {
       uid: BASE.uid,
       title: BASE.title,
       startsAt: BASE.startsAt,
-      description: icsTicketDescription(URL_),
+      description: icsTicketDescription(attributed)!,
     })!;
     const desc = valueOf(ics, "DESCRIPTION")!;
     // The real newline became the RFC 5545 escaped form, on ONE content line.
     expect(desc).toContain("\\nSaved from Fun London.");
     assertNoInjection(ics, "description with provenance");
+  });
+});
+
+// The surface marker must not leak into a provider's own utm namespace.
+describe("applyAffiliate surface scoping", () => {
+  it("adds the surface alongside our own attribution", () => {
+    const out = applyAffiliate(
+      "ticketmaster",
+      "https://x.example/e",
+      "calendar",
+    );
+    expect(out).toContain("utm_source=funlondon");
+    expect(out).toContain("utm_content=calendar");
+  });
+
+  // 🧨 When the provider owns the utm namespace we add NOTHING. Dropping our
+  // utm_content into their campaign's creative dimension is a value neither
+  // side can read correctly.
+  it("adds nothing when the provider already set utm_source", () => {
+    const provider =
+      "https://x.example/e?utm_source=partnerX&utm_content=theirs";
+    const out = applyAffiliate("ticketmaster", provider, "calendar");
+    expect(out).toContain("utm_source=partnerX");
+    expect(out).toContain("utm_content=theirs");
+    expect(out).not.toContain("funlondon");
+    expect(out).not.toContain("calendar");
+  });
+
+  it("omits utm_content entirely when no surface is given (the CTA)", () => {
+    expect(applyAffiliate("ticketmaster", "https://x.example/e")).not.toContain(
+      "utm_content",
+    );
+  });
+});
+
+// A pop-up's CTA reads "Visit official page", not "Get tickets" -- many are
+// free. Promising "Tickets:" for a page that sells nothing is a small invented
+// fact, and in an .ics it is frozen on the device.
+describe("the description labels what is actually on the other end", () => {
+  it('says "Tickets" for a ticketed event', () => {
+    const link = ticketLinkForIcs({
+      sourceUrl: "https://www.ticketmaster.co.uk/event/X",
+      isPopup: false,
+    })!;
+    expect(link.label).toBe("Tickets");
+    expect(icsTicketDescription(link)!.startsWith("Tickets: ")).toBe(true);
+  });
+
+  it('says "Official page" for a pop-up, and never promises tickets', () => {
+    const link = ticketLinkForIcs({
+      sourceUrl: "https://organiser.example.com/our-popup",
+      isPopup: true,
+    })!;
+    expect(link.label).toBe("Official page");
+    const desc = icsTicketDescription(link)!;
+    expect(desc.startsWith("Official page: ")).toBe(true);
+    expect(desc).not.toContain("Tickets");
+  });
+
+  // 🧨 The label is plumbed, NOT derived from `attributed`. They coincide today
+  // and answer different questions; deriving one from the other is the kind of
+  // accidental coupling that let earlier inversions in this file stay green.
+  it("keeps label and attribution as independent facts", () => {
+    expect(
+      icsTicketDescription({
+        url: "https://x.example/e",
+        attributed: true,
+        label: "Official page",
+      })!.startsWith("Official page: "),
+    ).toBe(true);
   });
 });

@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { CalendarPlus, Share2, Check } from "lucide-react";
 import { icsDataUrl } from "@/lib/ics";
-import { ticketUrlForIcs, icsTicketDescription } from "@/lib/ics-ticket-url";
+import { icsInputForEvent } from "@/lib/ics-ticket-url";
 import { shareOrCopy } from "@/lib/share";
 import { track } from "@/lib/analytics";
 import type { Event } from "@/lib/types";
@@ -15,18 +15,10 @@ import type { Event } from "@/lib/types";
 export function EventActions({ event }: { event: Event }) {
   const [copied, setCopied] = useState(false);
 
-  // Validated, then attributed. Both steps and the order they must happen in
-  // live in lib/ics-ticket-url.ts, where they can be tested by calling them
-  // rather than by scanning this file for a regex.
-  const ticketUrl = ticketUrlForIcs(event);
-  const ics = icsDataUrl({
-    uid: event.id,
-    title: event.name,
-    startsAt: event.startsAt,
-    location: `${event.venueName}, ${event.area}, London`,
-    description: ticketUrl ? icsTicketDescription(ticketUrl) : undefined,
-    url: ticketUrl ?? undefined,
-  });
+  // Every field of the calendar entry, including whether the ticket link was
+  // attributed and therefore whether the commission sentence is true, is
+  // decided in lib/ics-ticket-url.ts -- where it can be tested by calling it.
+  const ics = icsDataUrl(icsInputForEvent(event));
 
   // 🧨 The unrenderable-date path is now SILENT, and silence is how broken data
   // survives: before this change a bad starts_at threw, which at least made

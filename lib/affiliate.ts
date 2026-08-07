@@ -22,13 +22,26 @@
 // derives the provider for its label) has to land in the SAME change as the
 // id, not after it.
 //
-// 🧨 THERE ARE NOW TWO CALL SITES, and they are not equally recoverable:
+// 🧨 THERE ARE NOW TWO TICKETMASTER CALL SITES, and they are not equally
+// recoverable (lib/booking-link.ts is a third caller, on the reserve path):
 //   app/event/[id]/event-detail.tsx   the on-page CTA
 //   lib/ics-ticket-url.ts             the .ics calendar entry
 // A wrongly-stamped id in the CTA is fixed by the next deploy. The same id
 // inside .ics files people have already downloaded is permanent, sitting on
 // their devices until they open the link, and is a false attribution claim to
 // a partner. Fix the platform map BEFORE the id, not after.
+//
+// PRE-FLIGHT, before setting the id:
+//   1. Land the provider→platform map, so the id only goes on that provider's
+//      links. Without it, an Eventbrite/DICE .ics carries both the id and the
+//      commission sentence while earning nothing.
+//   2. REDEPLOY after setting the variable, do not just set it in the
+//      dashboard. NEXT_PUBLIC_* is inlined at build time, so an un-redeployed
+//      app serves a server render and a client bundle that disagree about
+//      both the id and the disclosure.
+//   3. Decide what to do about a source_url that ALREADY carries the
+//      platform's param: line ~110 overwrites it, which in a permanent .ics
+//      is silent click-hijacking of whoever set it.
 
 import type { BookingLink } from "@/lib/types";
 
@@ -89,13 +102,11 @@ export function applyAffiliate(
     u.searchParams.set("utm_source", "funlondon");
     u.searchParams.set("utm_medium", "app");
     u.searchParams.set("utm_campaign", "reserve");
-  }
-
-  // Which surface produced the click. Set even when the provider already
-  // supplied its own utm_source (the trio above is skipped in that case), so
-  // our own reporting never loses the surface.
-  if (surface && !u.searchParams.has("utm_content")) {
-    u.searchParams.set("utm_content", surface);
+    // The surface belongs INSIDE this branch. When the provider already owns
+    // the utm namespace we add nothing at all, rather than dropping our
+    // utm_content into THEIR campaign's creative dimension, where neither side
+    // can read it correctly.
+    if (surface) u.searchParams.set("utm_content", surface);
   }
 
   // (b) Affiliate id — only when the env var is set.
