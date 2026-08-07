@@ -328,6 +328,54 @@ describe("computePlan · time-window orienteering (Stage 4.2)", () => {
     expect(plan.steps.map((s) => s.venue.id)).not.toContain("early-bar");
   });
 
+  // 🧨 Regression, 2026-08-07: the SEED (first stop) was the one stop placed
+  // with no hours check at all — buildSoloCluster only guards roles.slice(1).
+  // On production this served a neon-sign warehouse as an 8pm dinner stop.
+  // The shut seed here scores HIGHEST (rating 4.9), so it wins on merit and
+  // can only be excluded by an actual open-check.
+  it("never seeds the night with a venue that is shut at the plan start", () => {
+    const shutStar = makeVenue({
+      id: "shut-star",
+      neighbourhood: "Soho",
+      type: "Restaurant",
+      rating: 4.9,
+      openingHours: hours({ o: 9, c: 17 }), // closed by 20:30
+    });
+    const openLater = makeVenue({
+      id: "open-diner",
+      neighbourhood: "Soho",
+      type: "Restaurant",
+      rating: 4.1,
+      openingHours: hours({ o: 17, c: 23 }),
+    });
+    const plan = computePlan([shutStar, openLater, ...venues], opts);
+    expect(plan.steps.length).toBeGreaterThan(0);
+    expect(stepFor(plan, "Start")).not.toBe("shut-star");
+    expect(plan.steps.map((s) => s.venue.id)).not.toContain("shut-star");
+  });
+
+  // The fail-open ladder must survive: when NOTHING is open, a plan is still
+  // produced (the UI then renders the "Closed by the time you'd get here"
+  // warning) rather than the night emptying out.
+  it("still returns a plan when every candidate is shut (last-resort rung)", () => {
+    const allShut = [
+      makeVenue({
+        id: "shut-a",
+        neighbourhood: "Soho",
+        type: "Restaurant",
+        openingHours: hours({ o: 9, c: 17 }),
+      }),
+      makeVenue({
+        id: "shut-b",
+        neighbourhood: "Soho",
+        type: "Bar",
+        openingHours: hours({ o: 9, c: 17 }),
+      }),
+    ];
+    const plan = computePlan(allShut, opts);
+    expect(plan.steps.length).toBeGreaterThan(0);
+  });
+
   it("keeps a venue shut at the start but open by its arrival time (late club)", () => {
     const plan = computePlan(venues, opts);
     expect(stepFor(plan, "Finish")).toBe("late-club");

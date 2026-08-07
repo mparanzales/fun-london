@@ -15,7 +15,7 @@
 
 import type { Plan } from "@/lib/plan-engine";
 import { planRationale } from "@/lib/plan-engine";
-import { isOpenNow } from "@/lib/opening-hours";
+import { isOpenNow, getOpenState } from "@/lib/opening-hours";
 
 // "11:01 pm" — same formatter as the signed-in result (plan-flow fmtTime).
 function fmtArrive(d: Date): string {
@@ -45,6 +45,12 @@ export type AnonPlanStop = {
   dwellMins: number;
   walkToNextMins: number | null;
   isOpenNow: boolean;
+  // Tri-state, because `isOpenNow` collapses "closed" and "we have no hours"
+  // into the same `false` — rendering "Closed" off that boolean would be a
+  // false claim about a real business. Optional so a payload stored by an
+  // older build (≤1h, see ANON_RESULT_TTL_MS) still reads: undefined simply
+  // renders neither badge.
+  openState?: "open" | "closed" | "unknown";
   // "7:45 pm" — estimated arrival, formatted SERVER-side. Moat judgement
   // (ux gate, 2026-07-28): derived ONLY from the user's own chosen start +
   // cumulative dwell + walk minutes — all data the anon client already
@@ -86,6 +92,8 @@ export function toAnonPlanPayload(
       dwellMins: step.dwellMins,
       walkToNextMins: step.walkToNextMins,
       isOpenNow: isOpenNow(step.venue.openingHours, step.arriveAt ?? now),
+      openState: getOpenState(step.venue.openingHours, step.arriveAt ?? now)
+        .status,
       arriveAtLabel: step.arriveAt ? fmtArrive(step.arriveAt) : null,
     });
   }

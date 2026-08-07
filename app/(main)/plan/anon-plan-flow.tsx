@@ -824,6 +824,15 @@ export function AnonPlanFlow({
                           Open at arrival
                         </span>
                       )}
+                      {/* Only the explicit "closed" state earns this line —
+                          never the unknown-hours case, which would be a false
+                          claim. Anon used to render the positive badge only,
+                          so a shut stop looked identical to a fine one. */}
+                      {s.openState === "closed" && (
+                        <span className="text-[hsl(0_70%_55%)] font-semibold">
+                          Closed when you&apos;d arrive
+                        </span>
+                      )}
                     </span>
                   </span>
                 </Link>

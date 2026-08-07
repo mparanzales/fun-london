@@ -12,6 +12,7 @@ import type { Venue, VenueType, Event } from "./types";
 import { haversineKm as geoHaversineKm } from "@/lib/geo";
 import { VIBE_KEYWORDS } from "@/lib/ranking";
 import { venueInArea, regionOf, type PlanArea } from "./regions";
+import { londonWallClock } from "@/lib/opening-hours";
 
 export type PlanVibe = "Chill" | "Lively" | "Fancy" | "Unique";
 export type PlanBudget = "£" | "££" | "Any";
@@ -88,7 +89,13 @@ function minuteOfWeek(day: number, hour: number, minute: number): number {
 export function isOpenAt(v: Venue, when: Date): boolean {
   const oh = v.openingHours;
   if (!oh || !oh.periods || oh.periods.length === 0) return true;
-  const now = minuteOfWeek(when.getDay(), when.getHours(), when.getMinutes());
+  // Google's periods are London WALL-CLOCK, so the comparison must be too.
+  // This used to read when.getDay()/getHours() — the HOST's clock — so the
+  // anon plan (computed server-side on a UTC runtime) checked hours an hour
+  // off during BST, and disagreed with the "Open at arrival" badge rendered
+  // beside it from lib/opening-hours.ts, which has always used London time.
+  const lw = londonWallClock(when);
+  const now = minuteOfWeek(lw.day, lw.hour, lw.minute);
   for (const p of oh.periods) {
     if (p.close == null) return true; // open 24h
     const open = minuteOfWeek(p.open.day, p.open.hour, p.open.minute);
@@ -459,13 +466,20 @@ export function computePlan(
     // dinner-last (real shipped symptom, 2026-07-27). The fallback is now a
     // WIDENING RUNG: seed from true eat types when any exist, fall back only
     // when none do. Day plans keep their own template untouched.
-    const allStart = pool.filter((v) => matchRole(v, "Start"));
+    // 🧨 The SEED is the first stop, and until 2026-08-07 it was the ONE stop
+    // placed without an opening-hours check: `openOK` in buildSoloCluster only
+    // guards roles.slice(1). So a night could open at a shut door — proven on
+    // production data (a neon-sign warehouse served as an 8pm dinner stop).
+    // The seed now honours the same `enforceOpen` rung as every other stop,
+    // which keeps the last-resort fail-open ladder below intact.
+    const seedOpen = (v: Venue) => !when || !enforceOpen || isOpenAt(v, when);
+    const allStart = pool.filter((v) => matchRole(v, "Start") && seedOpen(v));
     const primaryStart =
       daypart === "evening"
         ? allStart.filter((v) => EAT_TYPES.includes(v.type))
         : allStart;
     const seedMatches = primaryStart.length > 0 ? primaryStart : allStart;
-    const seeds = (seedMatches.length > 0 ? seedMatches : pool)
+    const seeds = (seedMatches.length > 0 ? seedMatches : pool.filter(seedOpen))
       .slice()
       .sort((a, b) => scoreOf(b) - scoreOf(a))
       .slice(0, 10);
