@@ -40,7 +40,19 @@ function poisonedRow(id: string, slug: string): VenuePlanRow {
     review_count: 100,
     lat: 51.51,
     lng: -0.13,
-    opening_hours: { weekdayDescriptions: [SECRET.hours] },
+    // Real periods (Tue 09:00-17:00) so hours-DERIVED fields are exercised on
+    // the open/closed paths. With a periods-less fixture, getOpenState always
+    // returned "unknown" and no derived field could ever emit a boundary time
+    // for this suite to catch (guardian finding, 2026-08-07).
+    opening_hours: {
+      periods: [
+        {
+          open: { day: 2, hour: 9, minute: 0 },
+          close: { day: 2, hour: 17, minute: 0 },
+        },
+      ],
+      weekdayDescriptions: [SECRET.hours],
+    },
     plan_note: SECRET.note,
     img_url: "https://img.funldn.com/x.jpg",
     curation_tier: null,
@@ -56,7 +68,15 @@ function poisonedEngineVenue(id: string, slug: string) {
     type: "Restaurant",
     vibe: "A fine spot.",
     vibeTags: [SECRET.tag],
-    openingHours: { weekdayDescriptions: [SECRET.hours] },
+    openingHours: {
+      periods: [
+        {
+          open: { day: 2, hour: 9, minute: 0 },
+          close: { day: 2, hour: 17, minute: 0 },
+        },
+      ],
+      weekdayDescriptions: [SECRET.hours],
+    },
     planNote: SECRET.note,
     longDescription: SECRET.desc,
     phone: SECRET.phone,
@@ -142,6 +162,45 @@ describe("anon plan payload holds the moat", () => {
     for (const s of payload!.stops) expect(typeof s.isOpenNow).toBe("boolean");
   });
 
+  // 🧨 The key check above is a DENYLIST, and this file's own import guard was
+  // converted away from that shape precisely because "forgetting to forbid one
+  // is not a deliberate act". Same reasoning here: an ALLOWLIST makes adding
+  // ANY field to the anon payload a deliberate two-file change. Without it,
+  // widening openState from `.status` to the whole OpenState union would ship
+  // `opensAt: {day,hour,minute}` — a literal opening_hours boundary point —
+  // with every denylist test still green.
+  it("stop shape is an ALLOWLIST: no field reaches anon without being declared", () => {
+    const ALLOWED = new Set([
+      "slug",
+      "name",
+      "type",
+      "neighbourhood",
+      "price",
+      "rating",
+      "reviewCount",
+      "imgUrl",
+      "vibe",
+      "role",
+      "dwellMins",
+      "walkToNextMins",
+      "isOpenNow",
+      "openState",
+      "arriveAtLabel",
+    ]);
+    for (const stop of payload!.stops) {
+      for (const key of Object.keys(stop)) {
+        expect(ALLOWED.has(key), `undeclared anon field "${key}"`).toBe(true);
+      }
+    }
+  });
+
+  it("openState is one of the three literal strings, never a nested object", () => {
+    for (const s of payload!.stops) {
+      expect(["open", "closed", "unknown"]).toContain(s.openState);
+      expect(typeof s.openState).toBe("string");
+    }
+  });
+
   it("drops a step whose raw row is missing, never falls back to the engine venue", () => {
     const partial = new Map([["id-1", poisonedRow("id-1", "stop-1")]]);
     const p = toAnonPlanPayload(poisonedPlan(), partial, new Date());
@@ -217,6 +276,11 @@ describe("anon plan client stays outside the moat", () => {
       "../night-plan.ts",
       "../active-plan.ts",
       "../regions.ts",
+      // Added 2026-08-07: plan-engine is a VALUE import of the anon client, so
+      // its whole graph reaches the anon bundle. It was the one module the
+      // recursion missed, and this branch is the first to add an import to it.
+      "../plan-engine.ts",
+      "../opening-hours.ts",
     ]) {
       const mod = readFileSync(
         fileURLToPath(new URL(rel, import.meta.url)),

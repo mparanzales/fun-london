@@ -64,18 +64,26 @@ function pointToMinutes(p: OpeningPoint): number {
 // Current Europe/London wall-clock as {day,hour,minute}, day 0=Sun…6=Sat
 // (matching OpeningPoint.day / JS Date.getDay()). Derived from the absolute
 // instant via Intl, so it tracks BST/GMT automatically.
+// Hoisted to module scope: Intl.DateTimeFormat construction is microseconds
+// and allocates, and this is now called PER VENUE inside the plan engine's
+// candidate loops (order 1e4-1e5 times per plan build, on a public
+// unauthenticated action and in the browser on the signed-in path). Instances
+// are stateless, so one shared formatter is safe and turns the cost into a
+// single construction per process.
+const LONDON_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/London",
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 export function londonWallClock(now: Date): {
   day: number;
   hour: number;
   minute: number;
 } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Europe/London",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
+  const parts = LONDON_PARTS.formatToParts(now);
   const val = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   const day = DAY_INDEX[val("weekday")] ?? 0;
   // Some engines render midnight as "24" under hour12:false — normalize to 0.
