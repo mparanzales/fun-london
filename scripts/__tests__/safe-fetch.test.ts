@@ -186,6 +186,20 @@ describe("allowInitialHosts pins the destination by parsed authority", () => {
   it("refuses a sibling host that a startsWith prefix check would accept", () => {
     const base = "https://img.funldn.com";
     const hostile = "https://img.funldn.com.evil.test/venue.webp";
+    // 🧨 CodeQL raises "incomplete URL substring sanitization" (high) on the
+    // next line, and it is RIGHT about the shape — that is the entire point of
+    // the line. This is the exact check migrate-photos-to-r2 used to make,
+    // reproduced so the assertion below proves the replacement refuses what it
+    // accepted. Deleting it would make the fixture's non-vacuity unprovable.
+    //
+    // It is left in and NOT rewritten to slip past the analyser, which would
+    // hide the very thing this test documents. An inline
+    // `// codeql[js/incomplete-url-substring-sanitization]` was tried and does
+    // NOT work here — GitHub code scanning ignored it, the alert simply moved
+    // down a line — so do not re-add one and assume it is handled. The alert
+    // is dismissed in the Security tab ("used in tests"), or it stands as a
+    // known, accepted advisory finding. CodeQL is not a required check on
+    // this repo; it does not gate the merge.
     expect(hostile.startsWith(base)).toBe(true); // the old migrate-photos check
     expect(
       parseFetchTarget(hostile, { allowInitialHosts: ["img.funldn.com"] }),

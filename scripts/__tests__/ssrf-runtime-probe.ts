@@ -42,6 +42,14 @@ async function main() {
   console.log("\n── 1. The SQL filter the script used to trust ──────────────");
   for (const u of HOSTILE) {
     console.log(
+      // 🧨 CodeQL raises "incomplete URL substring sanitization" (high) here.
+      // It is correct about the shape, and that is precisely what is being
+      // shown: this line REPRODUCES the `.ilike("%places.googleapis.com%")`
+      // filter the backfill used to trust, so the run can print that both
+      // hostile URLs satisfy it. The value of the line is that it IS the bad
+      // check. An inline `// codeql[...]` suppression was tried and does not
+      // take effect in GitHub code scanning — do not re-add one and assume the
+      // alert is handled. CodeQL does not gate the merge on this repo.
       `  ${u.includes("places.googleapis.com") ? "MATCHES" : "misses "} ilike %places.googleapis.com%  ${u.slice(0, 62)}…`,
     );
   }
