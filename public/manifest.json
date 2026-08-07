@@ -1,7 +1,7 @@
 {
   "name": "Fun London",
   "short_name": "Fun London",
-  "description": "Your curated guide to London's best hidden gems.",
+  "description": "A whole night out in London, from the first place to the last.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

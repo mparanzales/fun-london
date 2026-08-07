@@ -5,7 +5,7 @@
 // Explore feed, and "What's on" (/events) is the second tab.
 
 import type { Metadata } from "next";
-import { CITY, TAGLINE, SITE_URL } from "@/lib/config";
+import { CITY, TAGLINE, SITE_URL, NIGHT_LINE } from "@/lib/config";
 import { SplashClient } from "./splash-client";
 import { jsonLdHtml } from "@/lib/json-ld";
 
@@ -14,8 +14,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: `Fun ${CITY}: plan the night, not the place`,
-  description:
-    "fun london builds you a night out: two or three independent spots, a short walk apart, in the order you'd do them, with the table ready to book in a couple of taps.",
+  description: NIGHT_LINE,
   alternates: { canonical: "/" },
 };
 

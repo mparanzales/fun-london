@@ -5,11 +5,30 @@
 
 export const CITY = "London";
 
-// One source of truth for the taglines so the masthead, landing and share (OG)
-// images never drift apart.
-//   LEAD_TAGLINE — a short positioning line.
-//   TAGLINE — the deeper mission line; used as a quieter secondary / OG line.
-export const LEAD_TAGLINE = "a curated guide to going out in london.";
+// The night line: METADATA AND SHARED-LINK DESCRIPTION ONLY (Maria's approved
+// copy, 2026-08-06). Shared by every metadata and OG surface so the line
+// cannot drift into four diverging copies -- it was already two casings and
+// two phrasings when this constant was created.
+//
+// 🧨 Do NOT extend this into a booking explanation or a second slogan. An
+// earlier draft carried "with the table ready to book in a couple of taps",
+// which is an availability claim the product refuses to make anywhere else:
+// there is no live-availability feed (see the note in venue-detail.tsx about
+// never surfacing "tables free"), only one of the four booking states is
+// taps-to-book, and booking links are moat fields an anonymous visitor never
+// sees -- yet OG/Twitter is exactly where anonymous visitors meet us first.
+// The slogan is TAGLINE below; this constant is not a second one.
+//
+// Sentence case here is deliberate and is NOT a bug to "fix": display copy is
+// lowercase, metadata is sentence case, because a lowercase opening in a
+// Google snippet reads as an error to a partnerships reader.
+export const NIGHT_LINE = `A whole night out in ${CITY}, from the first place to the last.`;
+
+// TAGLINE — the mission line; used as the masthead and OG secondary line.
+// (A second constant, LEAD_TAGLINE, was deleted here: it had zero consumers
+// repo-wide, its comment described a landing page that no longer exists, and
+// it asserted "a curated guide" over a catalogue that is ~2,145 auto-discovered
+// against ~46 curated. Dead copy carrying a claim we cannot back.)
 export const TAGLINE = "plan the night, not the place.";
 
 // Absolute base URL of the production site. Used for canonical/OG URLs,

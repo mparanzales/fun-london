@@ -803,22 +803,56 @@ export async function fetchVenuesByTag(
   return (data as VenueCardRow[]).map(mapVenuePreview);
 }
 
-// Total catalogue size — for the hero trust strip ("N independent venues"),
-// so the anonymous teaser can show the real count without fetching the rows.
-export async function fetchVenueCount(): Promise<number> {
-  const supabase = await createClient();
-  const { count, error } = await supabase
-    .from("venues")
-    .select("id", { count: "exact", head: true })
-    .not("google_place_id", "is", null)
-    .is("hidden_at", null)
-    // Never surface a venue on a stock (Unsplash) fallback or with no real
-    // photo. Show a real Google Places photo (mirrored to our storage), or
-    // nothing.
-    .not("img_url", "ilike", "%unsplash%")
-    .neq("img_url", "");
-  if (error) throw new Error(`fetchVenueCount: ${error.message}`);
-  return count ?? 0;
+// Total catalogue size — for the /about trust strip, so the number stays true
+// while the publish wave grows the catalogue daily (a hardcoded count was 42
+// venues stale within a week of being written). Cookie-free on purpose: /about
+// is a static page, and the anon role can count ids (id is in the card grant,
+// and the filters google_place_id / hidden_at are granted for exactly this).
+// Returns null rather than throwing when the count is unavailable, because
+// check.yml's next-build job is DELIBERATELY secret-free (its own comment:
+// verified 2026-07-25 that the build completes with no env) and /about
+// prerenders at build time. Vercel always has the public env, so every build
+// a user actually sees renders the real number; the numberless sentence is
+// the CI-prerender state and the graceful-degradation state, never the norm.
+export async function fetchVenueCount(): Promise<number | null> {
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    return null;
+  }
+  try {
+    const supabase = createStaticAnonClient();
+    const { count, error } = await supabase
+      .from("venues")
+      .select("id", { count: "exact", head: true })
+      .not("google_place_id", "is", null)
+      .is("hidden_at", null)
+      // Never surface a venue on a stock (Unsplash) fallback or with no real
+      // photo. Show a real Google Places photo (mirrored to our storage), or
+      // nothing. Same predicate as the sentence it feeds: "every one
+      // photographed" stays true by construction.
+      .not("img_url", "ilike", "%unsplash%")
+      .neq("img_url", "");
+    if (error) {
+      // Loud, because the fallback is silent BY DESIGN: /about renders "the
+      // live catalogue" instead of a number, and `revalidate = 86400` bakes
+      // that in for a day. Without a log, a permanently broken count is
+      // indistinguishable from a page that simply chose the prose branch.
+      console.error("fetchVenueCount:", error.message);
+      return null;
+    }
+    // `||` not `??`, deliberately: a zero count must degrade to the prose
+    // fallback, not render "Chosen from 0 venues across London". A build
+    // against an empty or filtered-out catalogue is not hypothetical -- Vercel
+    // PR previews point at the stale dev Supabase, and /about is ISR-cached,
+    // so a zero would be baked into the page a partner opens from a preview
+    // link. Zero venues is "unavailable", not a fact worth printing.
+    return count || null;
+  } catch (e) {
+    console.error("fetchVenueCount:", e instanceof Error ? e.message : e);
+    return null;
+  }
 }
 
 export async function fetchVenueBySlug(slug: string): Promise<Venue | null> {
