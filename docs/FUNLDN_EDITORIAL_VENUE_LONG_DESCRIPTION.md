@@ -235,9 +235,11 @@ Three checks that operationalise it:
 
 **Ships:**
 
-> Entry is free, so a single room is a fair visit and nobody has wasted a ticket by leaving early. Paintings by world-renowned artists hang in the same house as the armour. It stays quieter than the headline collections, which makes it a low-commitment stop rather than the anchor of a night, and an easy one to fold into an afternoon.
+> Entry is free, so a single room is a fair visit and nobody has wasted a ticket by leaving early. Paintings, porcelain and furniture fill the same house as the armour. It stays quieter than the headline collections, which makes it a low-commitment stop rather than the anchor of a night, and an easy one to fold into an afternoon.
 
 60 words, 3 sentences, one paragraph. First sentence is 96 characters, inside the 61-160 window, so it is the whole snippet on its own. Total length is over 160, so "Read more" appears and pays out two further sentences.
+
+⚠️ **This example has now been corrected TWICE, which is the point of the warning below.** In v2.1 its sentence 2 read "Paintings by world-renowned artists hang in the same house as the armour." That phrase is lifted from a reviewer and is exactly what §4.1 (falsifiable) and §6 (unverifiable superlatives) forbid: "world-renowned" cannot be checked and was never our judgement to make. It survived two review rounds because it sat inside the approved example rather than inside a draft, and the shipped Wallace Collection copy had already been corrected away from it. **An example is held to the standard more strictly than a draft is, not less** — a draft is read once, an example is copied sixty-four times.
 
 **v1's version of this example was rejected**, and the reasons are the two traps this example now exists to demonstrate. It read *"a museum you can walk into"*, *"without feeling you have wasted a ticket"*, *"the one you build a night around"* — three second-person constructions, in the example 64 venues would be pattern-matched against, in a document whose §6 bans second-person voice. **The worked example is the standard that actually gets copied.** It also asserted *"The paintings are half the reason to go, not a supporting act to the armour"*, a comparative ranking that neither cited review supports. Hence the sufficiency rule below.
 
@@ -245,11 +247,17 @@ Three checks that operationalise it:
 
 ```
 sentence 1 · free entry, low commitment  · reviews: "completely free to visit" (x2 stored)
-sentence 2 · paintings and armour coexist · reviews: "masterpieces by world-renowned artists",
+sentence 2 · what else is in the house · reviews: "an outstanding collection of art, furniture,
+                                             armour, porcelain and decorative arts",
                                              "Fascinating collection of arms and armour"
-             SUFFICIENCY: the reviews establish that BOTH exist. They do NOT rank them, so
-             no comparative ("half the reason", "as much as") may be written from them.
-             A ledger row must support the CLAIM, not merely mention the subject.
+             SUFFICIENCY: the reviews establish that these things COEXIST. They do NOT rank
+             them, so no comparative ("half the reason", "as much as") may be written from
+             them. A ledger row must support the CLAIM, not merely mention the subject.
+             REJECTED from this sentence: "masterpieces by world-renowned artists". It is in
+             the evidence, but it is the REVIEWER'S unfalsifiable praise. Quoting a fact and
+             adopting an opinion are different acts; only the first is sourcing. Naming a
+             painting or a painter would be stronger than either.
+             [NEEDS DETAIL: a specific work or artist named in the stored reviews]
 sentence 3 · quieter than headline museums · reviews: "Not overcrowded compared to many
                                              London attractions" (aggregate, 3 stored)
 unwritten · café: opening hours, and whether it seats without booking
