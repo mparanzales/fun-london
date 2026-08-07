@@ -439,6 +439,20 @@ export function AnonPlanFlow({
         window.localStorage.removeItem(ANON_RESULT_KEY);
         return;
       }
+      // 🧨 A "Closed when you'd arrive" badge is a claim about a REAL business,
+      // and openState was frozen when the plan was built — up to an hour ago
+      // (ANON_RESULT_TTL_MS). For a clock-anchored brief ("tonight", "now")
+      // the arrival time slides with the clock, so a venue that was shut at
+      // 19:00 because it opens at 19:30 would still be labelled Closed when
+      // the visitor returns at 19:55 and it is open. A stale NEGATIVE claim
+      // diverts custom away from a business that is serving, which is worse
+      // than the missing-warning bug this whole change exists to fix. Drop the
+      // state rather than assert it: the renderer treats absent as "say
+      // nothing". A fixed date/time brief does not slide, so it keeps its badge.
+      const CLOSED_BADGE_MAX_AGE_MS = 5 * 60 * 1000;
+      if (brief?.tracksClock !== false && age > CLOSED_BADGE_MAX_AGE_MS) {
+        for (const s of payload.stops) delete s.openState;
+      }
       resultStamp.current = { src: payload, at: savedAt };
       // Restore the brief BEFORE the night, so a reshuffle straight off the
       // restored screen generates against what the visitor actually asked
@@ -822,6 +836,15 @@ export function AnonPlanFlow({
                       {s.isOpenNow && (
                         <span className="text-accent font-semibold">
                           Open at arrival
+                        </span>
+                      )}
+                      {/* Only the explicit "closed" state earns this line —
+                          never the unknown-hours case, which would be a false
+                          claim. Anon used to render the positive badge only,
+                          so a shut stop looked identical to a fine one. */}
+                      {s.openState === "closed" && (
+                        <span className="text-[hsl(0_70%_55%)] font-semibold">
+                          Closed when you&apos;d arrive
                         </span>
                       )}
                     </span>
