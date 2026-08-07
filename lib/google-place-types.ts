@@ -302,6 +302,119 @@ export function classifyFromGoogle(
   };
 }
 
+// ── Display copy derived from Google's categories ───────────────────────────
+// Everything here is a RESTATEMENT of a Google category, never a claim about
+// the place. "wine_bar" becomes "Wine bar". Nothing is invented, so none of it
+// needs the curation-voice gate — but none of it is a substitute for a real
+// written description either.
+
+// Google type → the chip a human would recognise. Only entries that say
+// something a visitor cares about; the generic ones deliberately have no chip.
+const TAG_LABELS: Record<string, string> = {
+  wine_bar: "Wine",
+  cocktail_bar: "Cocktails",
+  sports_bar: "Sports",
+  beer_garden: "Beer garden",
+  brewery: "Brewery",
+  brewpub: "Brewpub",
+  gastropub: "Gastropub",
+  irish_pub: "Irish pub",
+  night_club: "Club",
+  live_music_venue: "Live music",
+  concert_hall: "Live music",
+  comedy_club: "Comedy",
+  karaoke: "Karaoke",
+  opera_house: "Opera",
+  performing_arts_theater: "Theatre",
+  movie_theater: "Cinema",
+  art_gallery: "Gallery",
+  art_museum: "Art",
+  history_museum: "History",
+  museum: "Museum",
+  historical_landmark: "Historic",
+  cultural_landmark: "Historic",
+  historical_place: "Historic",
+  monument: "Landmark",
+  castle: "Castle",
+  observation_deck: "Views",
+  planetarium: "Planetarium",
+  aquarium: "Aquarium",
+  zoo: "Zoo",
+  botanical_garden: "Botanical",
+  garden: "Garden",
+  park: "Park",
+  city_park: "Park",
+  hiking_area: "Walks",
+  beach: "Riverside",
+  farmers_market: "Farmers market",
+  flea_market: "Flea market",
+  market: "Market",
+  bakery: "Bakery",
+  cake_shop: "Cakes",
+  pastry_shop: "Pastries",
+  ice_cream_shop: "Ice cream",
+  coffee_shop: "Coffee",
+  coffee_roastery: "Coffee",
+  tea_house: "Tea",
+  deli: "Deli",
+  sandwich_shop: "Sandwiches",
+  salad_shop: "Salads",
+  juice_shop: "Juice",
+  vegan_restaurant: "Vegan",
+  vegetarian_restaurant: "Vegetarian",
+  seafood_restaurant: "Seafood",
+  steak_house: "Steak",
+  sushi_restaurant: "Sushi",
+  ramen_restaurant: "Ramen",
+  pizza_restaurant: "Pizza",
+  tapas_restaurant: "Tapas",
+  dim_sum_restaurant: "Dim sum",
+  fine_dining_restaurant: "Fine dining",
+  breakfast_restaurant: "Breakfast",
+  brunch_restaurant: "Brunch",
+  fish_and_chips_restaurant: "Fish and chips",
+  barbecue_restaurant: "Barbecue",
+  hamburger_restaurant: "Burgers",
+  bistro: "Bistro",
+  diner: "Diner",
+};
+
+// Cuisine chips: "italian_restaurant" → "Italian". Derived from the identifier
+// itself so the long tail is covered without listing ~150 cuisines by hand.
+function cuisineLabel(g: string): string | null {
+  if (!g.endsWith("_restaurant")) return null;
+  const stem = g.slice(0, -"_restaurant".length);
+  if (!stem || stem.includes("_")) return null; // multi-word → not a clean cuisine
+  const generic = new Set(["fine", "family", "fusion", "western", "buffet"]);
+  if (generic.has(stem)) return null;
+  return stem.charAt(0).toUpperCase() + stem.slice(1);
+}
+
+/** Human-readable chips (max 4) restated from Google's categories. */
+export function displayTagsFor(
+  primaryType: string | null | undefined,
+  types: readonly string[] | null | undefined,
+): string[] {
+  const all = [primaryType, ...(types ?? [])].filter(
+    (t): t is string => typeof t === "string" && t.length > 0,
+  );
+  const out: string[] = [];
+  for (const g of all) {
+    const label = TAG_LABELS[g] ?? cuisineLabel(g);
+    if (label && !out.includes(label)) out.push(label);
+    if (out.length === 4) break;
+  }
+  return out;
+}
+
+/** A short factual hero line: "Wine bar", "Art museum". Never a claim. */
+export function humanTypeLabel(googleType: string): string {
+  const words = googleType.split("_").filter(Boolean);
+  if (words.length === 0) return "";
+  const s = words.join(" ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 // ── Opening-hours override ──────────────────────────────────────────────────
 
 // Matches Google's own shape EXACTLY (lib/opening-hours.ts GooglePeriod):
