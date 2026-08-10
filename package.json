@@ -92,7 +92,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "leaflet": "^1.9.4",
-    "lucide-react": "^1.28.0",
+    "lucide-react": "^1.30.0",
     "next": "15.5.22",
     "posthog-js": "^1.409.5",
     "react": "^18.3.1",
