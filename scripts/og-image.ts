@@ -2,10 +2,24 @@
 // pop-up radar this pulls the REAL promo image from a pop-up's official page
 // instead of a generic stock photo. Returns an absolute https URL or null.
 
+import { safeFetch } from "./safe-fetch";
+
+// pageUrl is events.source_url — catalogue data, so the destination is
+// attacker-influenced, and whatever comes back is parsed and handed to
+// mirrorImageUrlToStorage, which puts it in a PUBLIC bucket. safeFetch keeps
+// this on public http(s) and re-checks each redirect hop.
+//
+// On provenance, precisely: the pop-up discovery cron that originally wrote
+// these rows was deleted in #125 (the Gemini purge), and since #232
+// ingest-events.ts is the only writer of source_url, going through
+// storedUrlOrNull. What this guard still protects is the legacy
+// source='popup' rows — exactly the ones backfill-popup-images.ts selects —
+// which predate that write-side check, plus the second hop, which no
+// write-side check could ever cover: the og:image URL comes from the FETCHED
+// PAGE, not from our database.
 export async function fetchOgImage(pageUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(pageUrl, {
-      redirect: "follow",
+    const res = await safeFetch(pageUrl, {
       headers: {
         // A normal UA so sites that vary markup for bots still serve og tags.
         "user-agent":

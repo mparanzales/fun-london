@@ -33,6 +33,11 @@ import {
   R2_PUBLIC_BASE,
   stemOf,
 } from "./r2-storage";
+import { parseFetchTarget, safeFetch } from "./safe-fetch";
+
+// The one host an R2 public URL can name. Derived from the configured base so
+// the two can never drift apart.
+const R2_HOST = new URL(R2_PUBLIC_BASE).hostname;
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const DB_ONLY = process.argv.includes("--db-only");
@@ -313,8 +318,14 @@ async function verifyPhase(): Promise<void> {
       photo_urls: string[] | null;
       map_url: string | null;
     }[]) {
+      // Host EQUALITY on the parsed URL, not a prefix on the raw string:
+      // "https://img.funldn.com".startsWith() also accepts
+      // "https://img.funldn.com.evil.test/x", which is a different site
+      // entirely — and we then fetch it. Same root cause as the "%…%" LIKE in
+      // backfill-photos: the guard read the string, the client read the URL.
       for (const u of [v.img_url, v.map_url, ...(v.photo_urls ?? [])])
-        if (u && u.startsWith(R2_PUBLIC_BASE)) urls.add(u);
+        if (u && parseFetchTarget(u, { allowInitialHosts: [R2_HOST] }))
+          urls.add(u);
     }
     if (data.length < 1000) break;
   }
@@ -323,7 +334,11 @@ async function verifyPhase(): Promise<void> {
     n = 0;
   for (const u of urls) {
     try {
-      const res = await fetch(u, { method: "HEAD" });
+      const res = await safeFetch(
+        u,
+        { method: "HEAD" },
+        { allowInitialHosts: [R2_HOST] },
+      );
       if (!res.ok) {
         miss += 1;
         console.error(`  ✗ ${res.status} ${u}`);
