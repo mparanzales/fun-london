@@ -8,6 +8,7 @@ import {
   isDaytimeHour,
   computeWalkablePlan,
 } from "@/lib/plan-engine";
+import type { PlanBudget } from "@/lib/plan-engine";
 import type { Venue, OpeningHours } from "@/lib/types";
 import { londonWallClock } from "@/lib/opening-hours";
 import { makeVenue } from "./_fixtures";
@@ -26,6 +27,66 @@ describe("withinBudget", () => {
   it("'££' allows up to ££ but not £££", () => {
     expect(withinBudget("££", "££")).toBe(true);
     expect(withinBudget("£££", "££")).toBe(false);
+  });
+
+  // REGRESSION (2026-08-12). `price` defaulted to "££" whenever Google returned
+  // no priceLevel — the normal case for museums, parks and churches — so 1,829
+  // of 2,178 live venues carried one value. A "£" night therefore excluded the
+  // Natural History Museum, Novelty Automation, St Bride's and the Mithraeum,
+  // all of which are FREE. The column is now nullable, and unknown must fail
+  // OPEN here exactly as isOpenAt does for missing hours. Ranking null as 2
+  // would rebuild the same bug with a different value.
+  it("treats an unknown price as eligible for every budget", () => {
+    expect(withinBudget(null, "£")).toBe(true);
+    expect(withinBudget(undefined, "£")).toBe(true);
+    expect(withinBudget(null, "££")).toBe(true);
+    expect(withinBudget(null, "Any")).toBe(true);
+  });
+
+  it("treats an unrecognised price string as unknown, not as ££", () => {
+    // The old `?? 2` fallback silently ranked anything unparseable as ££,
+    // which is how a missing value became an assertion in the first place.
+    expect(withinBudget("", "£")).toBe(true);
+    expect(withinBudget("$$", "£")).toBe(true);
+  });
+
+  it("still excludes a KNOWN price above the cap", () => {
+    // Guards the fail-open above from becoming fail-always: a real ££ or £££
+    // reading must still be filtered out of a "£" night.
+    expect(withinBudget("££", "£")).toBe(false);
+    expect(withinBudget("£££", "£")).toBe(false);
+    expect(withinBudget("Free", "£")).toBe(true);
+  });
+
+  // MUTATION CHECK, run in-process against a pinned copy of the OLD body
+  // rather than by editing lib/plan-engine.ts. A guard nobody has watched go
+  // red is not a guard; this proves the expectations above are actually
+  // sensitive to the regression instead of passing for some other reason.
+  it("the pre-fix implementation FAILS the expectations above", () => {
+    const RANK: Record<string, number> = { Free: 0, "£": 1, "££": 2, "£££": 3 };
+    // verbatim pre-fix body: unknown silently ranked as ££
+    const old = (price: string | null | undefined, budget: PlanBudget) => {
+      if (budget === "Any") return true;
+      const cap = budget === "£" ? 1 : 2;
+      return (RANK[price as string] ?? 2) <= cap;
+    };
+
+    // the exact bug: a free museum with no priceLevel dropped from a "£" night
+    expect(old(null, "£")).toBe(false);
+    expect(withinBudget(null, "£")).toBe(true);
+
+    expect(old(undefined, "£")).toBe(false);
+    expect(withinBudget(undefined, "£")).toBe(true);
+
+    expect(old("", "£")).toBe(false);
+    expect(withinBudget("", "£")).toBe(true);
+
+    // and where the two MUST still agree, so the fix is not just "return true"
+    for (const b of ["£", "££", "Any"] as PlanBudget[]) {
+      for (const p of ["Free", "£", "££", "£££"]) {
+        expect(withinBudget(p, b)).toBe(old(p, b));
+      }
+    }
   });
 });
 
@@ -205,6 +266,60 @@ describe("computePlan", () => {
     const ids = plan.steps.map((s) => s.venue.id);
     expect(ids).not.toContain("closed-bar");
     expect(plan.steps.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// CONSUMER-LEVEL guard for the price-tier fix. withinBudget() is unit-tested
+// above, but a unit test cannot see the pipeline re-applying the default
+// upstream: if a future `?? "££"` lands in mapVenuePlan (lib/queries.ts) the
+// production bug returns with the whole suite green. This exercises a
+// null-priced venue all the way through computePlan, which is the surface a
+// user's cheap night is actually built from.
+describe("computePlan · unpriced venues survive a cheap night", () => {
+  const unpriced = [
+    makeVenue({
+      id: "eat",
+      type: "Restaurant",
+      neighbourhood: "Soho",
+      price: null,
+    }),
+    makeVenue({ id: "drink", type: "Bar", neighbourhood: "Soho", price: null }),
+    makeVenue({
+      id: "late",
+      type: "Live Music",
+      neighbourhood: "Soho",
+      price: null,
+    }),
+  ];
+
+  it("builds a '£' night entirely from venues with no known price", () => {
+    // The real catalogue shape: the Natural History Museum, Novelty Automation,
+    // St Bride's and the Mithraeum are all FREE and all carried "££" before
+    // migration 0008, so a "£" night excluded exactly the right venues.
+    const plan = computePlan(unpriced, {
+      area: { kind: "neighbourhood" as const, name: "Soho" },
+      vibe: "Chill" as const,
+      budget: "£" as const,
+    });
+    expect(plan.steps.length).toBe(3);
+    expect(plan.steps.map((s) => s.venue.id).sort()).toEqual([
+      "drink",
+      "eat",
+      "late",
+    ]);
+    // and it honoured the area rather than falling back through the pool rungs
+    expect(plan.poolStage).toBe("area");
+  });
+
+  it("a KNOWN over-budget price is still excluded from a '£' night", () => {
+    // Guards the above from degrading into "budget does nothing".
+    const priced = unpriced.map((v) => ({ ...v, price: "£££" as const }));
+    const plan = computePlan(priced, {
+      area: { kind: "neighbourhood" as const, name: "Soho" },
+      vibe: "Chill" as const,
+      budget: "£" as const,
+    });
+    expect(plan.poolStage).toBe("all"); // had to abandon the budget to fill it
   });
 });
 

@@ -2635,8 +2635,12 @@ export function PlanFlow({
                       />{" "}
                       {s.venue.rating}
                     </span>
-                    <span>·</span>
-                    <span>{s.venue.price}</span>
+                    {s.venue.price ? (
+                      <>
+                        <span>·</span>
+                        <span>{s.venue.price}</span>
+                      </>
+                    ) : null}
                     <span>·</span>
                     <span>
                       <Clock

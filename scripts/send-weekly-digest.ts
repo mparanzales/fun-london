@@ -249,7 +249,7 @@ function rowToVenue(r: PlanRow): Venue {
     address: "",
     lat: r.lat,
     lng: r.lng,
-    price: r.price as PriceTier,
+    price: (r.price as PriceTier | null) ?? null,
     timeOfDay: r.time_of_day as TimeOfDay,
     rating: Number(r.rating),
     reviewCount: r.review_count,
@@ -402,7 +402,7 @@ function nightStop(
     <td valign="top" style="padding:2px 0 22px 4px;">
       <div style="${FONT}font-size:10px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:${VIOLET_PALE};">${ROLE_LABEL[step.role] ?? step.role}${arrive}</div>
       <a href="${SITE_URL}/venue/${escAttr(v.slug)}" style="${FONT}color:#ffffff;font-weight:800;font-size:17px;line-height:1.3;text-decoration:none;">${esc(v.name)}</a>
-      <div style="${FONT}color:${NIGHT_MUTED};font-size:12px;margin-top:2px;">${esc(v.neighbourhood)} &middot; ${esc(v.type)} &middot; ${esc(v.price)}</div>
+      <div style="${FONT}color:${NIGHT_MUTED};font-size:12px;margin-top:2px;">${esc(v.neighbourhood)} &middot; ${esc(v.type)}${v.price ? ` &middot; ${esc(v.price)}` : ""}</div>
       <div style="${FONT}color:${NIGHT_FG};font-size:13px;font-style:italic;margin-top:4px;">${esc(v.vibe)}</div>${
         step.walkToNextMins != null && !last
           ? `<div style="${FONT}color:${NIGHT_MUTED};font-size:12px;margin-top:10px;">&darr; ${step.walkToNextMins} min walk</div>`

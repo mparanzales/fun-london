@@ -62,6 +62,11 @@ export type Plan = {
 
 // ── Budget ───────────────────────────────────────────────────────────────
 
+// NOTE: a null price is read two ways ON PURPOSE. withinBudget() treats it as
+// eligible (fail-open, so an unpriced venue is never silently dropped);
+// vibeScore() scores it 2, which is exactly what these rows scored as the old
+// "££" default, so nulling the column does not shift Fancy ranking. Do not
+// "fix" the inconsistency — both readings are deliberate.
 const PRICE_RANK: Record<string, number> = {
   Free: 0,
   "£": 1,
@@ -69,10 +74,25 @@ const PRICE_RANK: Record<string, number> = {
   "£££": 3,
 };
 
-export function withinBudget(price: string, budget: PlanBudget): boolean {
+// Fail-OPEN when the price is unknown (null), for the same reason isOpenAt
+// does with missing hours: an absent field must not silently delete a venue
+// from the plan. This matters more than it looks — `price` used to default to
+// "££" whenever Google returned no priceLevel, which is the normal case for
+// museums, parks and churches. The Natural History Museum, Novelty Automation,
+// St Bride's and the Mithraeum are all FREE and all read "££", so a "£" night
+// (cap 1) excluded exactly the venues it should have been built from. Nulling
+// the default is only half the fix; ranking null as 2 here would reproduce the
+// bug with a different value.
+export function withinBudget(
+  price: string | null | undefined,
+  budget: PlanBudget,
+): boolean {
   if (budget === "Any") return true;
+  if (price == null) return true; // unknown → eligible, never silently dropped
   const cap = budget === "£" ? 1 : 2; // "£" → Free/£ · "££" → up to ££
-  return (PRICE_RANK[price] ?? 2) <= cap;
+  const rank = PRICE_RANK[price];
+  if (rank === undefined) return true; // unrecognised value → treat as unknown
+  return rank <= cap;
 }
 
 // ── Opening hours ──────────────────────────────────────────────────────────
@@ -221,7 +241,9 @@ function vibeScore(v: Venue, vibe: PlanVibe): number {
       break;
     case "Fancy":
       if (["Restaurant", "Wine Bar"].includes(v.type)) s += 1;
-      s += PRICE_RANK[v.price] ?? 2; // pricier reads fancier
+      // Unknown scores 2, exactly what these rows scored as the "££"
+      // default, so nulling the column does not shift Fancy ranking.
+      s += (v.price == null ? undefined : PRICE_RANK[v.price]) ?? 2;
       s += 2 * tagHit(v, VIBE_KEYWORDS.fancy);
       break;
     case "Unique":

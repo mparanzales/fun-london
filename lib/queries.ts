@@ -59,7 +59,7 @@ type VenueRow = {
   address: string;
   lat: number | null;
   lng: number | null;
-  price: string;
+  price: string | null;
   time_of_day: string;
   rating: number;
   review_count: number;
@@ -163,7 +163,7 @@ function mapVenue(r: VenueRow): Venue {
     address: tidyName(r.address),
     lat: r.lat,
     lng: r.lng,
-    price: r.price as PriceTier,
+    price: (r.price as PriceTier | null) ?? null,
     timeOfDay: r.time_of_day as TimeOfDay,
     rating: Number(r.rating),
     reviewCount: r.review_count,
@@ -280,7 +280,7 @@ export function mapVenuePlan(r: VenuePlanRow): Venue {
     address: "",
     lat: r.lat,
     lng: r.lng,
-    price: r.price as PriceTier,
+    price: (r.price as PriceTier | null) ?? null,
     timeOfDay: r.time_of_day as TimeOfDay,
     rating: Number(r.rating),
     reviewCount: r.review_count,
@@ -388,7 +388,7 @@ export function mapVenuePreview(r: VenueCardRow): Venue {
     address: "",
     lat: r.lat,
     lng: r.lng,
-    price: r.price as PriceTier,
+    price: (r.price as PriceTier | null) ?? null,
     timeOfDay: r.time_of_day as TimeOfDay,
     rating: Number(r.rating),
     reviewCount: r.review_count,
@@ -548,7 +548,7 @@ function scoreFeedRow(r: FeedRankRow, prefs: UserPreferences): number {
       moodTags: (r.mood_tags ?? []) as Mood[],
       vibe: r.vibe,
       vibeTags: r.vibe_tags ?? [],
-      price: r.price as PriceTier,
+      price: (r.price as PriceTier | null) ?? null,
       rating: Number(r.rating),
       curationTier: r.curation_tier === "curated" ? "curated" : "discovered",
     } as Venue,
@@ -638,7 +638,11 @@ export async function feedPage(args: {
   // Price: keep rows whose tier is in the chosen set (empty/absent = all).
   if (args.price && args.price.length > 0) {
     const want = new Set(args.price);
-    rows = rows.filter((r) => want.has(r.price as PriceTier));
+    // A null price is UNKNOWN, not a tier — it matches no chip, because we
+    // cannot claim an unpriced venue is "£".
+    rows = rows.filter(
+      (r) => r.price != null && want.has(r.price as PriceTier),
+    );
   }
 
   // Region: map each row's neighbourhood to its region and keep the chosen set.

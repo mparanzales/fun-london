@@ -222,7 +222,9 @@ export function SearchOverlay({
                     href={`/venue/${r.data.slug}`}
                     imgUrl={r.data.imgUrl}
                     title={r.data.name}
-                    subtitle={`${r.data.type} · ${r.data.neighbourhood} · ${r.data.price}`}
+                    subtitle={[r.data.type, r.data.neighbourhood, r.data.price]
+                      .filter(Boolean)
+                      .join(" · ")}
                     onNavigate={onClose}
                   />
                 ) : (

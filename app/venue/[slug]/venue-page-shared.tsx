@@ -91,7 +91,7 @@ export async function VenuePageBody({
     },
     image: venue.imgUrl,
     url: `${SITE_URL}/venue/${venue.slug}`,
-    priceRange: venue.price,
+    ...(venue.price ? { priceRange: venue.price } : {}),
     ...(venue.lat && venue.lng
       ? {
           geo: {

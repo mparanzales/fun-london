@@ -28,8 +28,17 @@ export const EMPTY_FILTERS: ExploreFilters = {
   sort: "for-you",
 };
 
-// Only the three common tiers are offered (Free venues are rare and opt-out of
-// the price filter by simply not matching any selected tier).
+// Only the three common tiers are offered. A venue with an UNKNOWN price
+// (null) matches no chip, because we cannot claim an unpriced venue is "£".
+// 🧨 After migration 0008 that is the majority state: measured on prod
+// 2026-08-12, price was "££" on 1,829 of 2,178 live venues purely because
+// Google returned no priceLevel and the writer defaulted. Nulling those leaves
+// roughly Free 94 / £ 75 / ££ 16 / £££ 182 priced, so these chips now filter a
+// real but SMALL slice of the catalogue. That is honest rather than broken —
+// the old behaviour "worked" only by asserting a price we never measured — but
+// the sheet still presents the chips as though they partition the catalogue.
+// Open design question for Maria: drop the chips, add an "unknown" affordance,
+// or write copy for the thin result set.
 const PRICE_TIERS: PriceTier[] = ["£", "££", "£££"];
 
 // Which lock the anon wall is gating when a signed-in-only control is tapped.

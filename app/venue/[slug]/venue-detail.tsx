@@ -447,7 +447,8 @@ export function VenueDetail({
       <section className="px-5 lg:px-0">
         {/* lg:pt-0 keeps the column top level with the hero's top edge. */}
         <div className="text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted-fg pt-5 lg:pt-0 lg:text-xs lg:tracking-[0.16em]">
-          {venue.neighbourhood.toUpperCase()} · {venue.price} · {venue.type}
+          {venue.neighbourhood.toUpperCase()}
+          {venue.price ? ` · ${venue.price}` : ""} · {venue.type}
         </div>
 
         <h1 className="text-3xl lg:text-5xl lg:tracking-tight font-extrabold text-fg leading-tight mt-1">

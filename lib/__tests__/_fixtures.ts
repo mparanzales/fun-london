@@ -17,7 +17,10 @@ export function makeVenue(partial: Partial<Venue> = {}): Venue {
     address: "",
     lat: null,
     lng: null,
-    price: "££" as Venue["price"],
+    // null = unknown, which is what ~84% of the live catalogue holds after
+    // migration 0008. The fixture models the real catalogue so a test cannot
+    // pass by only ever seeing a priced venue.
+    price: null as Venue["price"],
     timeOfDay: "Evening" as Venue["timeOfDay"],
     rating: 4.5,
     reviewCount: 0,

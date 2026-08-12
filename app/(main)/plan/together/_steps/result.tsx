@@ -340,8 +340,12 @@ export function Result({
                       </span>
                       <span>·</span>
                       <span>{s.venue.neighbourhood}</span>
-                      <span>·</span>
-                      <span>{s.venue.price}</span>
+                      {s.venue.price ? (
+                        <>
+                          <span>·</span>
+                          <span>{s.venue.price}</span>
+                        </>
+                      ) : null}
                     </div>
                     <div className="text-[10.5px] text-muted-fg italic mt-1">
                       {attribution}
