@@ -415,7 +415,11 @@ export function ExploreFeed({
     if (price.length > 0) {
       const wantP = new Set(price);
       refined = refined.filter(
-        (it) => it.kind !== "venue" || wantP.has(it.data.price),
+        // A null price is UNKNOWN, not a tier: it must not match any chip,
+        // because we cannot claim an unpriced venue is "£".
+        (it) =>
+          it.kind !== "venue" ||
+          (it.data.price != null && wantP.has(it.data.price)),
       );
     }
     if (regions.length > 0) {

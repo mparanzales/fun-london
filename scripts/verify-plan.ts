@@ -32,7 +32,7 @@ async function main() {
   // Minimal Venue shape — the engine only reads these fields.
   const venues = rows.map((r) => ({
     id: r.id, name: r.name, type: r.type, vibe: r.vibe ?? "", vibeTags: r.vibe_tags ?? [],
-    neighbourhood: r.neighbourhood ?? "", price: r.price ?? "££", timeOfDay: r.time_of_day ?? "Evening",
+    neighbourhood: r.neighbourhood ?? "", price: r.price ?? null, timeOfDay: r.time_of_day ?? "Evening",
     rating: r.rating ?? 0, lat: r.lat, lng: r.lng, openingHours: r.opening_hours ?? null,
   })) as unknown as Venue[];
 

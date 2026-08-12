@@ -183,8 +183,12 @@ export function VenueCard({
           </div>
           <div className="text-[10.5px] text-muted-fg mt-0.5 flex items-center gap-1.5">
             <span>{venue.neighbourhood}</span>
-            <span>·</span>
-            <span>{venue.price}</span>
+            {venue.price && (
+              <>
+                <span>·</span>
+                <span>{venue.price}</span>
+              </>
+            )}
             {distanceLabel && (
               <>
                 <span>·</span>

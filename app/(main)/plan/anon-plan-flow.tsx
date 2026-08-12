@@ -821,7 +821,8 @@ export function AnonPlanFlow({
                       {s.name}
                     </span>
                     <span className="block text-[12px] text-muted-fg truncate">
-                      {s.neighbourhood} · {s.type} · {s.price}
+                      {s.neighbourhood} · {s.type}
+                      {s.price ? ` · ${s.price}` : ""}
                     </span>
                     <span className="flex items-center gap-2 text-[11px] text-muted-fg mt-0.5">
                       <span className="inline-flex items-center gap-0.5">

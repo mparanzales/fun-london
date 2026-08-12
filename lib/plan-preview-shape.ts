@@ -36,7 +36,7 @@ export type AnonPlanStop = {
   name: string;
   type: string;
   neighbourhood: string;
-  price: string;
+  price: string | null;
   rating: number;
   reviewCount: number;
   imgUrl: string;
@@ -83,7 +83,7 @@ export function toAnonPlanPayload(
       name: v.name,
       type: v.type,
       neighbourhood: v.neighbourhood,
-      price: v.price,
+      price: v.price ?? null,
       rating: v.rating,
       reviewCount: v.reviewCount,
       imgUrl: v.imgUrl,

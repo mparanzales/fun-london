@@ -54,6 +54,13 @@ describe("migration sequence", () => {
       // "Not available" x1). Data only, no DDL, no owner-level rights, so it
       // belongs in the runner's chain. Idempotent: re-running matches nothing.
       "0007_event_source_url_hygiene.sql",
+      // 0008: retires the "££" default on venues.price (1,829 of 2,178 live
+      // rows, 84%, because mapPriceLevel returned "££" whenever Google gave no
+      // priceLevel). Drops NOT NULL, widens the check constraint to admit
+      // null, nulls the "££" rows. Table-level DDL on one table plus a data
+      // update — no owner-level rights, so it belongs in the runner's chain.
+      // Idempotent: a second run matches 0 rows.
+      "0008_price_tier_honesty.sql",
     ]);
     for (const f of inChain) {
       const sql = readFileSync(join(DIR, f), "utf8")

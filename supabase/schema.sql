@@ -49,7 +49,7 @@ create table if not exists public.venues (
   address text not null,
   lat double precision,                    -- nullable
   lng double precision,                    -- nullable
-  price text not null,                     -- PriceTier
+  price text,                              -- PriceTier | null (null = unknown, see 0008)
   time_of_day text not null,               -- TimeOfDay
   rating numeric(2,1) not null,
   review_count integer not null default 0,
@@ -677,7 +677,10 @@ begin
   end if;
   if not exists (select 1 from pg_constraint where conname = 'venues_price_check') then
     alter table public.venues add constraint venues_price_check
-      check (price in ('Free','£','££','£££'));
+      -- null = unknown. Google reports no priceLevel for museums, parks and
+      -- most non-food venues; migration 0008 retired the "££" default that
+      -- used to stand in for it. See 0008_price_tier_honesty.sql.
+      check (price is null or price in ('Free','£','££','£££'));
   end if;
   if not exists (select 1 from pg_constraint where conname = 'venues_time_of_day_check') then
     alter table public.venues add constraint venues_time_of_day_check

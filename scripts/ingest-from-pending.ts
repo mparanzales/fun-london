@@ -272,7 +272,13 @@ function slugify(s: string): string {
 // ── Derive venue fields from candidate + Google data ─────────────────────────
 
 // Map Google priceLevel to Fun London PriceTier
-function mapPriceLevel(level?: string): string {
+// 🧨 Returns null, NOT "££", when Google gives us no priceLevel. The old
+// default made "££" mean two different things — "Google said MODERATE" and
+// "Google said nothing" — and since Google reports no priceLevel for museums,
+// parks and churches, 1,829 of 2,178 live venues (84%) ended up on that one
+// value. It then fed withinBudget(), so free museums were filtered out of
+// cheap-night plans. A value we cannot justify must not be asserted.
+function mapPriceLevel(level?: string): string | null {
   switch (level) {
     case "PRICE_LEVEL_FREE":
       return "Free";
@@ -284,7 +290,7 @@ function mapPriceLevel(level?: string): string {
     case "PRICE_LEVEL_VERY_EXPENSIVE":
       return "£££";
     default:
-      return "££";
+      return null;
   }
 }
 

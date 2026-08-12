@@ -173,7 +173,7 @@ export type Venue = {
   address: string;
   lat: number | null;
   lng: number | null;
-  price: PriceTier;
+  price: PriceTier | null;
   timeOfDay: TimeOfDay;
   rating: number;
   reviewCount: number;
