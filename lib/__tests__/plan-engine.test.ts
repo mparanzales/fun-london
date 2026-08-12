@@ -9,6 +9,7 @@ import {
   computeWalkablePlan,
 } from "@/lib/plan-engine";
 import type { Venue, OpeningHours } from "@/lib/types";
+import { londonWallClock } from "@/lib/opening-hours";
 import { makeVenue } from "./_fixtures";
 
 describe("withinBudget", () => {
@@ -57,8 +58,14 @@ describe("isOpenAt", () => {
   it("respects an explicit open/closed window", () => {
     // Build the period for the same weekday as the test date, so the test
     // doesn't depend on which day 2026-06-10 happens to be.
-    const noon = new Date(2026, 5, 10, 12, 0);
-    const day = noon.getDay();
+    // 🧨 LONDON wall-clock, not the runner's. isOpenAt compares Google's
+    // periods against London time, so a LOCAL-time constructor makes this
+    // test's meaning depend on TZ: noon in New York is 17:00 London, which
+    // falls outside the 09-17 window and fails. 2026-06-10 is BST (UTC+1),
+    // so London wall-clock H is (H-1) UTC. Same root cause as the CI-red
+    // dates in plan-alternatives.test.ts.
+    const noon = new Date(Date.UTC(2026, 5, 10, 11, 0)); // 12:00 London
+    const day = londonWallClock(noon).day;
     const oh: OpeningHours = {
       periods: [
         {
@@ -69,7 +76,8 @@ describe("isOpenAt", () => {
     };
     const v = makeVenue({ openingHours: oh });
     expect(isOpenAt(v, noon)).toBe(true); // 12:00 → inside 09–17
-    expect(isOpenAt(v, new Date(2026, 5, 10, 20, 0))).toBe(false); // 20:00 → closed
+    // 20:00 London → closed
+    expect(isOpenAt(v, new Date(Date.UTC(2026, 5, 10, 19, 0)))).toBe(false);
   });
 });
 

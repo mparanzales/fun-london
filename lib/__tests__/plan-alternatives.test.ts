@@ -367,8 +367,16 @@ describe("🧨 a replacement must not close a LATER stop", () => {
   // a long one pushes every later arrival back — and the stop the user KEPT,
   // which was open when it was chosen, can end up shut. Nothing warned,
   // because nothing re-asked.
-  const day = (h: number, m = 0) => new Date(2026, 5, 10, h, m);
-  const START = day(19); // the night begins at 19:00
+  // 🧨 LONDON WALL-CLOCK, NOT THE RUNNER'S CLOCK. The engine reads London time
+  // (lib/opening-hours.ts londonWallClock, used by plan-engine isOpenAt), so a
+  // date built with the LOCAL-time constructor means different things on
+  // different machines: `new Date(2026, 5, 10, 19, 0)` is 19:00 London on a BST
+  // laptop and 20:00 London on a UTC CI runner. That divergence turned CI red
+  // from 2026-08-07 (#234, which moved the engine onto London wall-clock) and
+  // stayed red through five further merges while every local run passed.
+  // 2026-06-10 is BST (UTC+1), so London wall-clock H is (H-1) UTC.
+  const day = (h: number, m = 0) => new Date(Date.UTC(2026, 5, 10, h - 1, m));
+  const START = day(19); // 19:00 LONDON, on any runner
   const weekday = START.getDay();
   const shutsAt = (h: number, m = 0): OpeningHours => ({
     periods: [
@@ -520,7 +528,8 @@ describe("closedOnArrival", () => {
 });
 
 describe("shiftReducesClosed · the start-earlier lever only shows when it helps", () => {
-  const at19 = new Date(2026, 5, 10, 19, 0);
+  // 19:00 LONDON on any runner — see the note on `day` above.
+  const at19 = new Date(Date.UTC(2026, 5, 10, 18, 0));
   const d = at19.getDay();
   const window = (openH: number, closeH: number): OpeningHours => ({
     periods: [
